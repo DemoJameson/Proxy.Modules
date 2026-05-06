@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
+
 import {
     createEpisodeWatchnowIdsEntry,
     createHttpStatusMock,
@@ -411,7 +413,7 @@ test("/shows/:id/seasons 会应用缓存剧集翻译并更新 link id 缓存", a
 test("direct redirect 请求在启用时会返回 shortcuts 跳转", async () => {
     const deeplink = "infuse://movie/123";
     const { result } = await runRequestCase({
-        url: `https://proxy-modules.demojameson.de5.net/api/redirect?deeplink=${encodeURIComponent(deeplink)}`,
+        url: `${WATCHNOW_REDIRECT_URL}?deeplink=${encodeURIComponent(deeplink)}`,
         argument: {
             useShortcutsJumpEnabled: true,
         },

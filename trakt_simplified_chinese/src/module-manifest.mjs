@@ -101,7 +101,7 @@ const scriptRules = [
         title: "Direct Redirect",
         comment: "处理播放器 DeepLink 跳转",
         phase: "http-request",
-        pattern: String.raw`^https:\/\/proxy-modules\.demojameson\.de5\.net\/api\/redirect\?.*$`,
+        pattern: String.raw`^https:\/\/loon-plugins\.demojameson\.de5\.net\/api\/redirect\?.*$`,
         scriptFile: TRAKT_SCRIPT_FILE,
         timeout: 10,
         argumentKeys: ALL_ARGUMENT_KEYS,
@@ -207,7 +207,7 @@ const scriptRules = [
     },
 ];
 
-const mitmHosts = ["apiz.trakt.tv", "api.trakt.tv", "api.themoviedb.org", "image.tmdb.org", "streaming-availability.p.rapidapi.com", "proxy-modules.demojameson.de5.net"];
+const mitmHosts = ["apiz.trakt.tv", "api.trakt.tv", "api.themoviedb.org", "image.tmdb.org", "streaming-availability.p.rapidapi.com", "loon-plugins.demojameson.de5.net"];
 
 const boxjs = {
     id: "demojameson.app.sub",

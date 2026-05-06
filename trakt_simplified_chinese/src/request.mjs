@@ -4,12 +4,13 @@ import * as playerInjectionTraktHandler from "./features/player-injection-trakt.
 import * as routeUtils from "./shared/route.mjs";
 
 const { createRoute, dispatchRoutes } = routeUtils;
+const WATCHNOW_REDIRECT_HOST_PATTERN = new RegExp(`^${new URL(playerInjectionTraktHandler.WATCHNOW_REDIRECT_URL).hostname.replaceAll(".", "\\.")}$`, "i");
 
 function createRequestPhaseRoutes() {
     return [
         createRoute({
             id: "redirect.direct",
-            host: /^proxy-modules\.demojameson\.de5\.net$/i,
+            host: WATCHNOW_REDIRECT_HOST_PATTERN,
             pattern: /^api\/redirect$/,
             handler: playerInjectionTraktHandler.handleDirectRedirectRequest,
         }),

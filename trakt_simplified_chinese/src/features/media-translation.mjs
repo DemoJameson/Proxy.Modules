@@ -55,7 +55,7 @@ async function handleMediaDetail() {
     }
 
     const cache = cacheUtils.loadCache(context.env);
-    traktTranslationHelper.applyTranslation(context.userAgent, data, traktTranslationHelper.getCachedTranslation(cache, mediaType, ref));
+    traktTranslationHelper.applyTranslation(context.userAgent, data, traktTranslationHelper.getCachedTranslation(cache, mediaType, ref), mediaType);
 
     try {
         traktTranslationHelper.applyOverrideToTarget(data, await traktTranslationHelper.getOverrideForTarget(context.env, ref));
@@ -195,7 +195,12 @@ async function handleSeasonEpisodesList() {
                 seasonNumber: episode?.season ?? null,
                 episodeNumber: episode?.number ?? null,
             };
-            traktTranslationHelper.applyTranslation(context.userAgent, episode, traktTranslationHelper.getCachedTranslation(cache, mediaTypes.MEDIA_TYPE.EPISODE, ref));
+            traktTranslationHelper.applyTranslation(
+                context.userAgent,
+                episode,
+                traktTranslationHelper.getCachedTranslation(cache, mediaTypes.MEDIA_TYPE.EPISODE, ref),
+                mediaTypes.MEDIA_TYPE.EPISODE,
+            );
             traktTranslationHelper.applyOverrideToTarget(episode, traktTranslationHelper.getOverrideFromTable(overridesTable, ref));
         });
     });

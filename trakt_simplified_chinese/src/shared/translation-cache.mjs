@@ -3,11 +3,8 @@ import * as commonUtils from "../utils/common.mjs";
 import * as chineseScriptConverter from "./chinese-script-converter.mjs";
 
 const TRANSLATION_FIELDS = ["title", "overview", "tagline"];
-const REQUIRED_TRANSLATION_FIELDS = ["title", "overview"];
 const TRANSLATION_FALLBACK_REGIONS = ["sg", "tw", "hk"];
-const EPISODE_MEDIA_TYPE = "episode";
 const EPISODE_PLACEHOLDER_TITLE_RE = /^\s*episode\s+0*(\d+)\s*$/i;
-const CHINESE_CHARACTER_RE = /[\u3400-\u9fff]/;
 
 const CACHE_STATUS = {
     FOUND: 1,
@@ -26,10 +23,6 @@ function extractEpisodePlaceholderNumber(value) {
     }
     const episodeNumber = Number(match[1]);
     return Number.isFinite(episodeNumber) ? episodeNumber : null;
-}
-
-function containsChineseCharacters(value) {
-    return CHINESE_CHARACTER_RE.test(String(value ?? ""));
 }
 
 function sortTranslations(arr, preferredLanguage) {
@@ -113,25 +106,10 @@ function normalizeTranslations(items, options = {}) {
         items = [];
     }
 
-    const isEpisode = options?.mediaType === EPISODE_MEDIA_TYPE;
     let cnTranslation = findTranslationByRegion(items, "cn");
-    const originalCnTitle = cnTranslation?.title ?? null;
-    const originalCnHasRealTitle = !!(
-        cnTranslation &&
-        !isEmptyTranslationValue(originalCnTitle) &&
-        (!isEpisode || commonUtils.isNullish(extractEpisodePlaceholderNumber(originalCnTitle)))
-    );
-    const originalCnComplete = !!(
-        cnTranslation &&
-        REQUIRED_TRANSLATION_FIELDS.every((field) => {
-            if (isEpisode && field === "title") {
-                return originalCnHasRealTitle;
-            }
-            return !isEmptyTranslationValue(cnTranslation[field]);
-        })
-    );
-    const hasAnyChineseTitle = items.some((item) => {
-        return isChineseTranslation(item) && !isEmptyTranslationValue(item.title) && (!isEpisode || commonUtils.isNullish(extractEpisodePlaceholderNumber(item.title)));
+    const originalCnHasTitle = !!(cnTranslation && !isEmptyTranslationValue(cnTranslation.title));
+    const hasAnyChineseField = items.some((item) => {
+        return isChineseTranslation(item) && TRANSLATION_FIELDS.some((field) => !isEmptyTranslationValue(item[field]));
     });
 
     if (!cnTranslation) {
@@ -146,20 +124,7 @@ function normalizeTranslations(items, options = {}) {
         copyFallbackFieldToCnTranslation(cnTranslation, items, field);
     });
 
-    const normalizedTitleNumber = extractEpisodePlaceholderNumber(cnTranslation.title);
-    const sourceTitleNumber = extractEpisodePlaceholderNumber(options?.sourceTitle);
-    const placeholderEpisodeNumber = commonUtils.isNonNullish(normalizedTitleNumber) ? normalizedTitleNumber : sourceTitleNumber;
-    const hasGeneratedEpisodeTitle = isEpisode && !hasAnyChineseTitle && commonUtils.isNonNullish(placeholderEpisodeNumber);
-    if (hasGeneratedEpisodeTitle) {
-        cnTranslation.title = `第${placeholderEpisodeNumber}集`;
-    }
-
-    const hasChineseEpisodeDescription = isEpisode && (containsChineseCharacters(cnTranslation.overview) || containsChineseCharacters(cnTranslation.tagline));
-    cnTranslation.status = originalCnComplete
-        ? CACHE_STATUS.FOUND
-        : hasAnyChineseTitle || (hasGeneratedEpisodeTitle && hasChineseEpisodeDescription)
-          ? CACHE_STATUS.PARTIAL_FOUND
-          : CACHE_STATUS.NOT_FOUND;
+    cnTranslation.status = originalCnHasTitle ? CACHE_STATUS.FOUND : hasAnyChineseField ? CACHE_STATUS.PARTIAL_FOUND : CACHE_STATUS.NOT_FOUND;
 
     return items;
 }
@@ -201,14 +166,12 @@ function areTranslationsEqual(left, right) {
 
 export {
     CACHE_STATUS,
-    REQUIRED_TRANSLATION_FIELDS,
     TRANSLATION_FALLBACK_REGIONS,
     TRANSLATION_FIELDS,
     areTranslationsEqual,
     extractNormalizedTranslation,
     findTranslationByRegion,
     hasUsefulTranslation,
-    containsChineseCharacters,
     extractEpisodePlaceholderNumber,
     isChineseTranslation,
     isEmptyTranslationValue,

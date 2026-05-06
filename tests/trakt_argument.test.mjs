@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
+
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
 test("historyEpisodesMergedByShow=false 时历史剧集请求不改写 limit", async () => {
@@ -30,7 +32,7 @@ test("historyEpisodesMergedByShow=true 时历史剧集请求会改写到最小 l
 
 test("useShortcutsJumpEnabled=true 时 redirect 请求会返回 shortcuts jump", async () => {
     const { result } = await runRequestCase({
-        url: "https://proxy-modules.demojameson.de5.net/api/redirect?deeplink=infuse%3A%2F%2Fmovie%2F456",
+        url: `${WATCHNOW_REDIRECT_URL}?deeplink=infuse%3A%2F%2Fmovie%2F456`,
         argument: {
             useShortcutsJumpEnabled: true,
         },
@@ -42,7 +44,7 @@ test("useShortcutsJumpEnabled=true 时 redirect 请求会返回 shortcuts jump",
 
 test("useShortcutsJumpEnabled=false 时 redirect 请求直接返回原 deeplink", async () => {
     const { result } = await runRequestCase({
-        url: "https://proxy-modules.demojameson.de5.net/api/redirect?deeplink=infuse%3A%2F%2Fmovie%2F456",
+        url: `${WATCHNOW_REDIRECT_URL}?deeplink=infuse%3A%2F%2Fmovie%2F456`,
         argument: {
             useShortcutsJumpEnabled: false,
         },

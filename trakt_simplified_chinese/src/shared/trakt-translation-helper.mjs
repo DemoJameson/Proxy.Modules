@@ -351,21 +351,44 @@ function fetchDirectTranslation(mediaType, ref) {
         });
 }
 
-function applyTranslation(userAgent, target, entry) {
-    if (!target || !entry?.translation) {
+function applyEpisodePlaceholderTitle(userAgent, target) {
+    if (!target) {
         return;
     }
-    if (entry.translation.title) {
-        target.title = entry.translation.title;
+    const episodeNumber = translationCache.extractEpisodePlaceholderNumber(target.title);
+    if (commonUtils.isNullish(episodeNumber)) {
+        return;
+    }
+
+    const generatedTitle = `第${episodeNumber}集`;
+    target.title = generatedTitle;
+    if (/^Rippple/i.test(userAgent)) {
+        target.original_title = generatedTitle;
+    }
+}
+
+function applyTranslation(userAgent, target, entry, mediaType = null) {
+    if (!target) {
+        return;
+    }
+    if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
+        applyEpisodePlaceholderTitle(userAgent, target);
+    }
+    const translation = entry?.translation;
+    if (!translation) {
+        return;
+    }
+    if (translation.title) {
+        target.title = translation.title;
         if (/^Rippple/i.test(userAgent)) {
-            target.original_title = entry.translation.title;
+            target.original_title = translation.title;
         }
     }
-    if (entry.translation.overview) {
-        target.overview = entry.translation.overview;
+    if (translation.overview) {
+        target.overview = translation.overview;
     }
-    if (entry.translation.tagline) {
-        target.tagline = entry.translation.tagline;
+    if (translation.tagline) {
+        target.tagline = translation.tagline;
     }
 }
 
@@ -661,7 +684,7 @@ async function translateMediaItemsInPlace(items, bodyOverride) {
         context.env.log(`Trakt backend override read failed: ${error}`);
     }
     applyTranslationsToItems(items, cache, MEDIA_CONFIG, (target, entry, ref) => {
-        applyTranslation(context.userAgent, target, entry);
+        applyTranslation(context.userAgent, target, entry, ref.mediaType);
         applyOverrideToTarget(target, getOverrideFromTable(overridesTable, ref));
     });
     return items;

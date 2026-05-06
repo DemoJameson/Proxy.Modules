@@ -333,6 +333,18 @@ function resolveDirectRedirectLocation(url) {
     return "";
 }
 
+function isWatchnowRedirectUrl(url) {
+    try {
+        const redirectUrl = new URL(WATCHNOW_REDIRECT_URL);
+        return (
+            String(url.hostname).toLowerCase() === String(redirectUrl.hostname).toLowerCase() &&
+            commonUtils.normalizePathname(url.pathname) === commonUtils.normalizePathname(redirectUrl.pathname)
+        );
+    } catch {
+        return false;
+    }
+}
+
 async function handleWatchnow() {
     const context = globalThis.$ctx;
     const payload = JSON.parse(context.responseBody);
@@ -373,7 +385,7 @@ async function handleUserSettings() {
 async function handleDirectRedirectRequest() {
     const context = globalThis.$ctx;
     const location = resolveDirectRedirectLocation(context.url);
-    if (location && context.argument.useShortcutsJumpEnabled && /^https:\/\/proxy-modules\.demojameson\.de5\.net\/api\/redirect?/i.test(String(context.url.href))) {
+    if (location && context.argument.useShortcutsJumpEnabled && isWatchnowRedirectUrl(context.url)) {
         return {
             type: "redirect",
             location: buildShortcutsJumpLink(location),
@@ -383,4 +395,4 @@ async function handleDirectRedirectRequest() {
     return location ? { type: "redirect", location } : { type: "passThrough" };
 }
 
-export { handleDirectRedirectRequest, handleUserSettings, handleWatchnow, handleWatchnowSources };
+export { WATCHNOW_REDIRECT_URL, handleDirectRedirectRequest, handleUserSettings, handleWatchnow, handleWatchnowSources };

@@ -4,7 +4,8 @@ import path from "node:path";
 import readline from "node:readline/promises";
 import { fileURLToPath } from "node:url";
 
-const DEFAULT_BACKEND_BASE_URL = "https://proxy-modules.demojameson.de5.net";
+import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const LOCAL_CONFIG_PATH = path.resolve(__dirname, "..", ".trakt-live-test.local.json");
 const TRAKT_DEVICE_CODE_URL = "https://api.trakt.tv/oauth/device/code";

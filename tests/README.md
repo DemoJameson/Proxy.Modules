@@ -79,11 +79,7 @@ npm run test:trakt:live
 
 如果不提供 `TRAKT_CLIENT_SECRET`，则只跑非登录态接口，登录态用例自动跳过。
 
-`TRAKT_BACKEND_BASE_URL` 输入留空时会使用默认值：
-
-```text
-https://proxy-modules.demojameson.de5.net
-```
+`TRAKT_BACKEND_BASE_URL` 输入留空时会使用 `trakt_simplified_chinese/src/module-manifest.mjs` 中的 `DEFAULT_BACKEND_BASE_URL`。
 
 可选环境变量：
 

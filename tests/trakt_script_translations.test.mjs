@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+
 import {
     computeStringHash,
     createCommentTranslationCache,
@@ -286,9 +288,7 @@ test("episode 数字占位标题无中文简介时会生成标题但保持 NOT_F
 
     const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
     assert.equal(cacheEntry.status, 3);
-    assert.deepEqual(cacheEntry.translation, {
-        title: "第12集",
-    });
+    assert.equal(cacheEntry.translation, undefined);
     assert.equal(backendPostQueue.length, 0);
 });
 
@@ -310,7 +310,7 @@ test("episode 数字占位标题有中文简介时会生成标题并标记 PARTI
 
     const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
     assert.equal(cacheEntry.status, 2);
-    assert.equal(cacheEntry.translation.title, "第2集");
+    assert.equal(cacheEntry.translation.title, undefined);
     assert.equal(cacheEntry.translation.overview, "中文简介");
 });
 
@@ -384,7 +384,7 @@ test("movie 的 Episode 数字标题不会生成中文集数标题", async () =>
     assert.equal(payload[0].movie.title, "Episode 1");
 
     const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
-    assert.equal(cacheEntry.status, 2);
+    assert.equal(cacheEntry.status, 1);
     assert.equal(cacheEntry.translation.title, "Episode 1");
 });
 
@@ -439,6 +439,38 @@ test("/movies/:id 会把缓存中的中文翻译应用到详情响应", async ()
     assert.equal(payload.original_title, "中文标题");
     assert.equal(payload.overview, "中文简介");
     assert.equal(payload.tagline, "中文标语");
+});
+
+test("/shows/:id/seasons/:season/episodes/:episode 会直接生成中文集数标题", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/555/seasons/1/episodes/12",
+        body: JSON.stringify({
+            title: "Episode 12",
+            overview: "Original Episode Overview",
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "第12集");
+    assert.equal(payload.overview, "Original Episode Overview");
+});
+
+test("Rippple episode 详情生成中文集数标题时会同步 original_title", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/555/seasons/1/episodes/2",
+        body: JSON.stringify({
+            title: "Episode 02",
+            original_title: "Episode 02",
+            overview: "Original Episode Overview",
+        }),
+        headers: {
+            "user-agent": "Rippple/1.0",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "第2集");
+    assert.equal(payload.original_title, "第2集");
 });
 
 test("媒体列表已有缓存翻译时不会重复写入统一缓存", async () => {
@@ -667,7 +699,7 @@ test("historyEpisodesMergedByShow 启用时历史剧集只缓存合并后剧集�
     assert.equal(translationCache["episode:777:2:1"].translation.title, "港版标题");
     assert.equal(translationCache["episode:555:1:1"], undefined);
     assert.equal(
-        httpLogs.some((entry) => entry.method === "GET" && entry.url === "https://proxy-modules.demojameson.de5.net/api/trakt/translations?shows=555,777&episodes=555:1:2,777:2:1"),
+        httpLogs.some((entry) => entry.method === "GET" && entry.url === `${DEFAULT_BACKEND_BASE_URL}/api/trakt/translations?shows=555,777&episodes=555:1:2,777:2:1`),
         true,
     );
 

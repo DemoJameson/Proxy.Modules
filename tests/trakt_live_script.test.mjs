@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
 import { createRequestPhaseRoutes } from "../trakt_simplified_chinese/src/request.mjs";
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
 
@@ -1801,6 +1802,14 @@ test("live script: response route coverage matrix covers all response phase rout
                 },
                 body: item.body,
                 persistentData: item.persistentData,
+                httpGetMocks: {
+                    [`${config.backendBaseUrl}/api/trakt/translation-overrides`]: JSON.stringify({
+                        shows: {},
+                        movies: {},
+                        episodes: {},
+                    }),
+                    ...(item.httpGetMocks ?? {}),
+                },
             });
 
             const payload = JSON.parse(result.body);
@@ -1813,7 +1822,7 @@ test("live script: request route coverage matrix covers all request phase routes
     const config = getLiveConfig();
     const requestCases = [
         {
-            url: "https://proxy-modules.demojameson.de5.net/api/redirect?deeplink=infuse%3A%2F%2Fmovie%2F123",
+            url: `${WATCHNOW_REDIRECT_URL}?deeplink=infuse%3A%2F%2Fmovie%2F123`,
             argument: {
                 useShortcutsJumpEnabled: true,
             },
