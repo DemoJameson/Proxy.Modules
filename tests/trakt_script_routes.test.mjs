@@ -373,6 +373,26 @@ test("handleDirectMediaList 按 direct summary 路由分组生效", async (t) =>
             },
         },
         {
+            name: "apiz related direct movie summary",
+            url: "https://apiz.trakt.tv/movies/531178/related?extended=cloud9,full",
+            body: createDirectMovieBody(),
+            persistentData: createMoviePersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].title, "中文电影");
+                assert.equal(payload[0].overview, "中文简介");
+            },
+        },
+        {
+            name: "apiz related direct show summary",
+            url: "https://apiz.trakt.tv/shows/531178/related?extended=cloud9,full",
+            body: createDirectShowBody(),
+            persistentData: createShowPersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].title, "中文剧名");
+                assert.equal(payload[0].overview, "中文剧集简介");
+            },
+        },
+        {
             name: "mixed direct media summary",
             url: "https://api.trakt.tv/media/popular",
             body: JSON.stringify([JSON.parse(createDirectMovieBody())[0], JSON.parse(createDirectShowBody())[0]]),
@@ -1347,6 +1367,8 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
     const routes = createResponseRouteStubs();
     const cases = [
         ["directMedia.popular", "https://api.trakt.tv/shows/popular"],
+        ["directMedia.related", "https://apiz.trakt.tv/movies/531178/related?extended=cloud9,full"],
+        ["directMedia.related", "https://apiz.trakt.tv/shows/531178/related?extended=cloud9,full"],
         ["wrapperMedia.popularNext", "https://api.trakt.tv/media/popular/next"],
         ["users.settings", "https://api.trakt.tv/users/settings"],
         ["tmdb.watchProviders", "https://api.themoviedb.org/3/watch/providers/movie"],

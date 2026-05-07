@@ -19,6 +19,7 @@ function createResponsePhaseRoutes() {
 
         createRoute({ pattern: /^recommendations\/(shows|movies)$/i, id: "recommendations.showsOrMovies", handler: mediaTranslationHandler.handleDirectMediaList }),
         createRoute({ pattern: /^(shows|movies|media)\/popular$/i, id: "directMedia.popular", handler: mediaTranslationHandler.handleDirectMediaList }),
+        createRoute({ pattern: /^(shows|movies)\/[^/]+\/related$/i, id: "directMedia.related", handler: mediaTranslationHandler.handleDirectMediaList }),
         createRoute({ pattern: /^movies\/boxoffice$/i, id: "movies.boxoffice", handler: mediaTranslationHandler.handleDirectMediaList }),
 
         createRoute({ pattern: /^(shows|movies|media)\/popular\/next$/i, id: "wrapperMedia.popularNext", handler: mediaTranslationHandler.handleWrapperMediaList }),
