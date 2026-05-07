@@ -122,4 +122,4 @@ function parseArgument(env) {
     return normalizeArgument(argument);
 }
 
-export { ARGUMENT_FIELDS, BOXJS_CONFIG_KEY, applyArgumentObjectConfig, applyArgumentStringConfig, createDefaultArgumentConfig, normalizeArgument, parseArgument, commonUtils };
+export { ARGUMENT_FIELDS, applyArgumentObjectConfig, applyArgumentStringConfig, BOXJS_CONFIG_KEY, commonUtils, createDefaultArgumentConfig, normalizeArgument, parseArgument };

@@ -46,9 +46,9 @@ async function handlePost(req, res, kvConfig) {
     }
 
     const payload = await readJsonBody(req);
-    const shows = payload && payload.shows && typeof payload.shows === "object" ? payload.shows : {};
-    const movies = payload && payload.movies && typeof payload.movies === "object" ? payload.movies : {};
-    const episodes = payload && payload.episodes && typeof payload.episodes === "object" ? payload.episodes : {};
+    const shows = payload?.shows && typeof payload.shows === "object" ? payload.shows : {};
+    const movies = payload?.movies && typeof payload.movies === "object" ? payload.movies : {};
+    const episodes = payload?.episodes && typeof payload.episodes === "object" ? payload.episodes : {};
 
     await writeManyGroupsToKv(kvConfig, { shows, movies, episodes });
 

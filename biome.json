@@ -1,0 +1,42 @@
+{
+    "$schema": "https://biomejs.dev/schemas/2.4.14/schema.json",
+    "vcs": {
+        "enabled": true,
+        "clientKind": "git",
+        "useIgnoreFile": true
+    },
+    "files": {
+        "ignoreUnknown": true,
+        "includes": [
+            "**",
+            "!node_modules",
+            "!.tmp",
+            "!*.min.js",
+            "!trakt_simplified_chinese/trakt_simplified_chinese.js",
+            "!trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js",
+            "!trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js",
+            "!scripts/vendor/Env.js",
+            "!scripts/vendor/Env.module.mjs"
+        ]
+    },
+    "formatter": {
+        "enabled": true,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineEnding": "lf",
+        "lineWidth": 180
+    },
+    "linter": {
+        "enabled": true,
+        "rules": {
+            "recommended": true
+        }
+    },
+    "javascript": {
+        "formatter": {
+            "quoteStyle": "double",
+            "semicolons": "always",
+            "trailingCommas": "all"
+        }
+    }
+}

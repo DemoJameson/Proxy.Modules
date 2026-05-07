@@ -218,7 +218,7 @@ function seedAuto(store, key, translation, status = 1, options = {}) {
         status,
         translation,
     };
-    if (Object.prototype.hasOwnProperty.call(options, "expiresAt")) {
+    if (Object.hasOwn(options, "expiresAt")) {
         value.expiresAt = options.expiresAt;
     }
     store.set(key, jsonValue(value));

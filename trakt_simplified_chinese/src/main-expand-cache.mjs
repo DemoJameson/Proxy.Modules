@@ -72,7 +72,7 @@ function buildStressTestEntry(previousEntry) {
     };
 }
 
-(function () {
+(() => {
     const cache = loadCache();
     const beforeBytes = estimateBytes(cache);
     const translationCache = ensureObject(cache.trakt?.translation);

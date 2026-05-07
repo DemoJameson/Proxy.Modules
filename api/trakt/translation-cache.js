@@ -105,7 +105,7 @@ function normalizeEntry(entry) {
         translation: normalizeTranslation(entry.translation, true),
     };
 
-    if (Object.prototype.hasOwnProperty.call(entry, "expiresAt")) {
+    if (Object.hasOwn(entry, "expiresAt")) {
         if (entry.expiresAt === null || Number.isFinite(entry.expiresAt)) {
             normalized.expiresAt = entry.expiresAt;
         }
@@ -177,8 +177,8 @@ function normalizeTranslationOverridesStore(value) {
 function mergeEntries(autoEntry, override) {
     const auto = autoEntry ? normalizeEntry(autoEntry) : null;
     const normalizedOverride = override ? normalizeTranslationOverrideEntry(override) : null;
-    const autoTranslation = auto && auto.translation ? auto.translation : {};
-    const translationOverrides = normalizedOverride && normalizedOverride.translation ? normalizedOverride.translation : {};
+    const autoTranslation = auto?.translation ? auto.translation : {};
+    const translationOverrides = normalizedOverride?.translation ? normalizedOverride.translation : {};
 
     const translation = OVERRIDE_FIELDS.reduce((result, field) => {
         const overrideValue = translationOverrides[field];
@@ -218,7 +218,7 @@ async function kvRequest(config, path, init) {
         headers: {
             Authorization: `Bearer ${config.token}`,
             "Content-Type": "application/json",
-            ...(init && init.headers ? init.headers : {}),
+            ...(init?.headers ? init.headers : {}),
         },
     });
 
@@ -369,15 +369,6 @@ function parseCachedEntry(value) {
     }
 
     return normalizeEntry(parsed);
-}
-
-function parseCachedTranslationOverrideEntry(value) {
-    const parsed = parseRedisJsonValue(value);
-    if (!parsed) {
-        return null;
-    }
-
-    return normalizeTranslationOverrideEntry(parsed);
 }
 
 function parseCachedTranslationOverridesStore(value) {
@@ -556,7 +547,7 @@ async function readCachePairFromKv(config, mediaType, id, options = {}) {
     const autoKey = buildCacheKey(mediaType, id);
     const [[autoValue], translationOverrides] = await Promise.all([jsonGetPairKv(config, [autoKey]), readAllTranslationOverridesFromKv(config)]);
     let autoEntry = parseCachedEntry(autoValue);
-    if (options.hydrateMissingExpiresAt === true && autoEntry && !Object.prototype.hasOwnProperty.call(autoEntry, "expiresAt")) {
+    if (options.hydrateMissingExpiresAt === true && autoEntry && !Object.hasOwn(autoEntry, "expiresAt")) {
         const [autoTtl] = await pttlManyKv(config, [autoKey]);
         const expiresAt = getExpiresAtFromTtl(autoTtl);
         autoEntry = {
@@ -649,7 +640,7 @@ async function deleteCacheEntriesFromKv(config, mediaType, id, target) {
     }
     if (target === "override" || target === "all") {
         const translationOverrides = await readAllTranslationOverridesFromKv(config);
-        if (translationOverrides[mediaType] && Object.prototype.hasOwnProperty.call(translationOverrides[mediaType], id)) {
+        if (translationOverrides[mediaType] && Object.hasOwn(translationOverrides[mediaType], id)) {
             const nextStore = normalizeTranslationOverridesStore({
                 ...translationOverrides,
                 [mediaType]: Object.fromEntries(Object.entries(translationOverrides[mediaType]).filter(([entryId]) => entryId !== id)),
@@ -667,7 +658,7 @@ async function deleteCacheEntriesFromKv(config, mediaType, id, target) {
 }
 
 function parseScanPayload(payload) {
-    const result = payload && payload.result;
+    const result = payload?.result;
     if (Array.isArray(result)) {
         return {
             cursor: String(result[0] || "0"),

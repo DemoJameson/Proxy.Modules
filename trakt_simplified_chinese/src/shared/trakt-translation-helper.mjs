@@ -342,12 +342,7 @@ function fetchDirectTranslation(mediaType, ref) {
                     translation: null,
                 };
             }
-            return translationCache.extractNormalizedTranslation(
-                translationCache.normalizeTranslations(responseJson, {
-                    mediaType,
-                    sourceTitle: ref?.sourceTitle,
-                }),
-            );
+            return translationCache.extractNormalizedTranslation(translationCache.normalizeTranslations(responseJson));
         });
 }
 
@@ -430,7 +425,7 @@ function applyOverrideToTarget(target, override) {
     return applyOverrideToTranslationObject(target, commonUtils.ensureObject(override?.translation));
 }
 
-function applyOverrideToTranslations(items, override, mediaType) {
+function applyOverrideToTranslations(items, override) {
     if (!override) {
         return items;
     }
@@ -441,7 +436,7 @@ function applyOverrideToTranslations(items, override, mediaType) {
     }
 
     applyOverrideToTarget(cnTranslation, override);
-    return translationCache.normalizeTranslations(items, { mediaType });
+    return translationCache.normalizeTranslations(items);
 }
 
 function fetchMediaDetail(mediaType, traktId) {
@@ -596,7 +591,7 @@ function resolveDirectMediaTypeFromItem(item) {
     return commonUtils.isNonNullish(item.tagline) ? mediaTypes.MEDIA_TYPE.MOVIE : null;
 }
 
-function wrapDirectMediaItems(arr, mediaConfig) {
+function wrapDirectMediaItems(arr, _mediaConfig) {
     const wrapped = [];
     for (const item of arr) {
         const type = resolveDirectMediaTypeFromItem(item);
@@ -701,15 +696,11 @@ async function translateWrapperItems(bodyOverride) {
 }
 
 export {
-    MEDIA_CONFIG,
-    PREFERRED_TRANSLATION_LANGUAGE,
-    SEASON_EPISODE_TRANSLATION_LIMIT,
-    TRAKT_DIRECT_TRANSLATION_MAX_REFS,
-    BACKEND_FETCH_MIN_REFS,
-    BACKEND_WRITE_BATCH_SIZE,
-    applyTranslation,
     applyOverrideToTarget,
     applyOverrideToTranslations,
+    applyTranslation,
+    BACKEND_FETCH_MIN_REFS,
+    BACKEND_WRITE_BATCH_SIZE,
     buildEpisodeCompositeKey,
     buildMediaCacheLookupKey,
     createBackendState,
@@ -718,16 +709,20 @@ export {
     flushBackendWrites,
     getCachedTranslation,
     getMissingRefs,
-    getOverrideFromTable,
     getOverrideForTarget,
+    getOverrideFromTable,
     hydrateFromBackend,
     isScriptInitiatedTranslationRequest,
     loadTranslationOverrides,
+    MEDIA_CONFIG,
+    PREFERRED_TRANSLATION_LANGUAGE,
     queueBackendWrite,
     resolveMediaDetailTarget,
     resolveSeasonListTarget,
     resolveTranslationRequestTarget,
+    SEASON_EPISODE_TRANSLATION_LIMIT,
     storeTranslationEntry,
+    TRAKT_DIRECT_TRANSLATION_MAX_REFS,
     translateMediaItemsInPlace,
     translateWrapperItems,
     unwrapDirectMediaItems,

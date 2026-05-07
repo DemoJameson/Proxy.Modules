@@ -8,7 +8,7 @@ const PLAYER_TYPE = {
     INFUSE: "infuse",
 };
 
-// prettier-ignore
+// biome-ignore format: keep region codes compact for module readability.
 const REGION_CODES = [
     "AD", "AE", "AG", "AL", "AO", "AR", "AT", "AU", "AZ", "BA", "BB", "BE", "BF", "BG", "BH", "BM", "BO", "BR", "BS", "BY",
     "BZ", "CA", "CD", "CH", "CI", "CL", "CM", "CO", "CR", "CU", "CV", "CY", "CZ", "DE", "DK", "DO", "DZ", "EC", "EE", "EG",

@@ -92,4 +92,4 @@ function postJson(url, payload, extraHeaders, useSourceHeaders) {
     });
 }
 
-export { buildRequestHeaders, fetchJson, get, getRequestHeaderValue, getResponseStatusCode, getHttpClient, post, postJson };
+export { buildRequestHeaders, fetchJson, get, getHttpClient, getRequestHeaderValue, getResponseStatusCode, post, postJson };

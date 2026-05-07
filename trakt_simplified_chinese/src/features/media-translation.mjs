@@ -74,9 +74,7 @@ async function handleTranslations() {
     }
 
     const target = traktTranslationHelper.resolveTranslationRequestTarget(context.url);
-    const merged = translationCache.normalizeTranslations(translationCache.sortTranslations(arr, traktTranslationHelper.PREFERRED_TRANSLATION_LANGUAGE), {
-        mediaType: target?.mediaType,
-    });
+    const merged = translationCache.normalizeTranslations(translationCache.sortTranslations(arr, traktTranslationHelper.PREFERRED_TRANSLATION_LANGUAGE));
 
     if (!traktTranslationHelper.isScriptInitiatedTranslationRequest() && target && traktTranslationHelper.buildMediaCacheLookupKey(target.mediaType, target)) {
         const normalized = translationCache.extractNormalizedTranslation(merged);
@@ -99,7 +97,7 @@ async function handleTranslations() {
         }
 
         try {
-            traktTranslationHelper.applyOverrideToTranslations(merged, await traktTranslationHelper.getOverrideForTarget(context.env, target), target.mediaType);
+            traktTranslationHelper.applyOverrideToTranslations(merged, await traktTranslationHelper.getOverrideForTarget(context.env, target));
         } catch (error) {
             context.env.log(`Trakt backend override read failed: ${error}`);
         }

@@ -7,7 +7,6 @@ import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/respo
 
 import {
     createScriptRequestHeaders,
-    fetchJson,
     fetchTraktJson,
     getLiveConfig,
     hasOAuthToken,
@@ -284,7 +283,9 @@ test("live script: /movies/:id/watchnow 响应会注入自定义播放器条目"
     regions.forEach((region) => {
         Object.values(region).forEach((items) => {
             if (Array.isArray(items)) {
-                items.forEach((item) => allSources.push(String(item?.source ?? "")));
+                items.forEach((item) => {
+                    allSources.push(String(item?.source ?? ""));
+                });
             }
         });
     });
@@ -790,7 +791,7 @@ test("live script: response route coverage matrix covers all response phase rout
     }
 
     const wrappedMovieItems = createWrappedMovieItems(movieSample.movie);
-    const wrappedShowItems = createWrappedShowItems(showSample.show);
+    const _wrappedShowItems = createWrappedShowItems(showSample.show);
     const directMovieItems = [directMovieSample.movie];
     const directShowItems = [showSample.show];
     const episodeItems = createMergedHistoryEpisodeItems(episodeSample);

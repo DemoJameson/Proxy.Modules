@@ -45,7 +45,7 @@ function sendBadRequest(res, error) {
     res.status(400).json({ error });
 }
 
-function handleAuth(req, res) {
+function handleAuth(_req, res) {
     res.status(200).json({ ok: true });
 }
 

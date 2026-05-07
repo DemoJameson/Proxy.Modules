@@ -5,7 +5,7 @@ import { UNIFIED_CACHE_KEY } from "./utils/cache.mjs";
 
 const env = new Env(TRAKT_SCRIPT_TITLE);
 
-(function () {
+(() => {
     const cleared = env.setdata(null, UNIFIED_CACHE_KEY);
 
     if (cleared) {

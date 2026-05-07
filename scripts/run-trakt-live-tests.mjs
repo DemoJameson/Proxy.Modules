@@ -28,7 +28,7 @@ function readLocalConfig() {
 }
 
 function writeLocalConfig(config) {
-    fs.writeFileSync(LOCAL_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf8");
+    fs.writeFileSync(LOCAL_CONFIG_PATH, `${JSON.stringify(config, null, 2)}\n`, "utf8");
 }
 
 async function postJson(url, payload) {

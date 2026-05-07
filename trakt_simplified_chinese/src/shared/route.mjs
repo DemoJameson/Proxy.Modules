@@ -32,4 +32,4 @@ async function dispatchRoutes(routesProvider) {
     return { type: "passThrough" };
 }
 
-export { DEFAULT_HOST_PATTERN, createRoute, dispatchRoutes };
+export { createRoute, DEFAULT_HOST_PATTERN, dispatchRoutes };

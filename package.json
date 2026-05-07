@@ -4,18 +4,17 @@
     "scripts": {
         "build:trakt": "node scripts/build-trakt.mjs",
         "sync:env.js": "node scripts/build-trakt.mjs --sync-env",
-        "format": "prettier --write .",
-        "format:check": "prettier --check .",
+        "format": "biome check --write .",
+        "format:check": "biome check .",
         "check:trakt": "npm run format:check && npm run build:trakt && node --check scripts/vendor/Env.js && node --check scripts/vendor/Env.module.mjs && node --check trakt_simplified_chinese/src/main.mjs && node --check trakt_simplified_chinese/src/main-clear-cache.mjs && node --check trakt_simplified_chinese/src/main-expand-cache.mjs && node --check trakt_simplified_chinese/src/utils/common.mjs && node --check trakt_simplified_chinese/trakt_simplified_chinese.js && node --check trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js && node --check trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js",
         "test": "npm run build:trakt && node --test tests/trakt_argument.test.mjs tests/trakt_backend_admin_cache.test.mjs tests/trakt_cache_utils.test.mjs tests/trakt_module_manifest.test.mjs tests/trakt_script_watchnow.test.mjs tests/trakt_script_translations.test.mjs tests/trakt_script_people.test.mjs tests/trakt_script_routes.test.mjs",
         "test:trakt:live": "node scripts/run-trakt-live-tests.mjs",
         "test:trakt:all": "node scripts/run-all-trakt-tests.mjs"
     },
     "devDependencies": {
-        "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+        "@biomejs/biome": "^2.4.14",
         "@nsnanocat/url": "^1.2.5",
         "esbuild": "^0.25.12",
-        "opencc-js": "^1.3.0",
-        "prettier": "^3.8.3"
+        "opencc-js": "^1.3.0"
     }
 }

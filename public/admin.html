@@ -259,14 +259,6 @@
                 white-space: nowrap;
             }
 
-            .list-head .status {
-                max-width: 55%;
-                flex-shrink: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-
             .list-foot button {
                 flex-shrink: 0;
                 width: 96px;
@@ -321,11 +313,6 @@
                 transform: none;
             }
 
-            .row.active .title,
-            .row.active .media-type {
-                color: var(--accent);
-            }
-
             .id {
                 color: var(--muted);
                 font-variant-numeric: tabular-nums;
@@ -341,6 +328,11 @@
             .title {
                 font-weight: 720;
                 overflow-wrap: anywhere;
+            }
+
+            .row.active .title,
+            .row.active .media-type {
+                color: var(--accent);
             }
 
             .badge {
@@ -536,6 +528,14 @@
                 font-size: 12px;
                 font-weight: 800;
                 line-height: 1;
+            }
+
+            .list-head .status {
+                max-width: 55%;
+                flex-shrink: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
 
             .status.error {
@@ -930,11 +930,11 @@
             }
 
             function getTranslation(entry) {
-                return (entry && entry.translation) || {};
+                return (entry?.translation) || {};
             }
 
             function getTranslationOverrides(entry) {
-                return (entry && entry.translation) || {};
+                return (entry?.translation) || {};
             }
 
             function getFieldControls(field) {
@@ -1018,7 +1018,7 @@
             }
 
             function getTraktUrl(item) {
-                if (!item || !item.type || !item.id) {
+                if (!item?.type || !item.id) {
                     return "";
                 }
 
@@ -1079,7 +1079,7 @@
             }
 
             function updateListItem(updatedItem) {
-                if (!updatedItem || !updatedItem.type || !updatedItem.id) {
+                if (!updatedItem?.type || !updatedItem.id) {
                     return;
                 }
                 state.items = state.items.map((item) => (item.type === updatedItem.type && item.id === updatedItem.id ? updatedItem : item));
@@ -1087,10 +1087,10 @@
 
             async function loadEditor(item) {
                 renderEditor(item);
-                if (!item || !item.type || !item.id) {
+                if (!item?.type || !item.id) {
                     return null;
                 }
-                if (!item.autoEntry || Object.prototype.hasOwnProperty.call(item.autoEntry, "expiresAt")) {
+                if (!item.autoEntry || Object.hasOwn(item.autoEntry, "expiresAt")) {
                     return item;
                 }
 
@@ -1142,9 +1142,9 @@
                     overview: originalTranslation.overview || "",
                     tagline: originalTranslation.tagline || "",
                 };
-                controls.titleOverride.checked = Object.prototype.hasOwnProperty.call(translationOverrides, "title");
-                controls.overviewOverride.checked = Object.prototype.hasOwnProperty.call(translationOverrides, "overview");
-                controls.taglineOverride.checked = Object.prototype.hasOwnProperty.call(translationOverrides, "tagline");
+                controls.titleOverride.checked = Object.hasOwn(translationOverrides, "title");
+                controls.overviewOverride.checked = Object.hasOwn(translationOverrides, "overview");
+                controls.taglineOverride.checked = Object.hasOwn(translationOverrides, "tagline");
                 controls.effectiveView.innerHTML = highlightJson(item.effectiveEntry);
             }
 
@@ -1263,10 +1263,10 @@
             }
 
             function getExpiresLabel(item) {
-                if (!item || !item.autoEntry) {
+                if (!item?.autoEntry) {
                     return "到期：无缓存";
                 }
-                if (!Object.prototype.hasOwnProperty.call(item.autoEntry, "expiresAt")) {
+                if (!Object.hasOwn(item.autoEntry, "expiresAt")) {
                     return "到期：未知";
                 }
                 return Number.isFinite(item.autoEntry.expiresAt) ? `到期：${formatDateTime(item.autoEntry.expiresAt)}` : "到期：永久";

@@ -491,21 +491,21 @@
                     id: "loon",
                     name: "Loon",
                     buildImportUrl(resourceUrl) {
-                        return "https://www.nsloon.com/openloon/import?plugin=" + encodeURIComponent(resourceUrl);
+                        return `https://www.nsloon.com/openloon/import?plugin=${encodeURIComponent(resourceUrl)}`;
                     },
                 },
                 surge: {
                     id: "surge",
                     name: "Surge",
                     buildImportUrl(resourceUrl) {
-                        return "surge:///install-module?url=" + encodeURIComponent(resourceUrl);
+                        return `surge:///install-module?url=${encodeURIComponent(resourceUrl)}`;
                     },
                 },
                 egern: {
                     id: "egern",
                     name: "Egern",
                     buildImportUrl(resourceUrl, moduleItem) {
-                        return "egern:/modules/new?name=" + encodeURIComponent(moduleItem.name) + "&url=" + encodeURIComponent(resourceUrl);
+                        return `egern:/modules/new?name=${encodeURIComponent(moduleItem.name)}&url=${encodeURIComponent(resourceUrl)}`;
                     },
                 },
                 qx: {
@@ -513,9 +513,9 @@
                     name: "QX",
                     buildImportUrl(resourceUrl, moduleItem) {
                         const payload = {
-                            rewrite_remote: [resourceUrl + ", tag=" + moduleItem.qxTag + ", enabled=true"],
+                            rewrite_remote: [`${resourceUrl}, tag=${moduleItem.qxTag}, enabled=true`],
                         };
-                        return "https://quantumult.app/x/open-app/add-resource?remote-resource=" + encodeURIComponent(JSON.stringify(payload));
+                        return `https://quantumult.app/x/open-app/add-resource?remote-resource=${encodeURIComponent(JSON.stringify(payload))}`;
                     },
                 },
             };
@@ -552,12 +552,12 @@
                 },
             ];
 
-            function findModule(moduleId) {
+            function _findModule(moduleId) {
                 return modules.find((moduleItem) => moduleItem.id === moduleId) || null;
             }
 
             function findResource(moduleItem, toolId) {
-                return moduleItem && moduleItem.resources ? moduleItem.resources[toolId] : "";
+                return moduleItem?.resources ? moduleItem.resources[toolId] : "";
             }
 
             function buildImportUrl(moduleItem, toolId) {
@@ -570,7 +570,7 @@
             }
 
             function escapeHtml(value) {
-                return String(value).replace(/[&<>"']/g, function (char) {
+                return String(value).replace(/[&<>"']/g, (char) => {
                     const map = {
                         "&": "&amp;",
                         "<": "&lt;",

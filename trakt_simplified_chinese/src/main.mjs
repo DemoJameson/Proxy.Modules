@@ -32,13 +32,13 @@ function applyResult(env, result) {
 
     if (normalized.type === "respond") {
         const payload = {};
-        if (Object.prototype.hasOwnProperty.call(normalized, "body")) {
+        if (Object.hasOwn(normalized, "body")) {
             payload.body = normalized.body;
         }
-        if (Object.prototype.hasOwnProperty.call(normalized, "status")) {
+        if (Object.hasOwn(normalized, "status")) {
             payload.status = normalized.status;
         }
-        if (Object.prototype.hasOwnProperty.call(normalized, "headers")) {
+        if (Object.hasOwn(normalized, "headers")) {
             payload.headers = normalized.headers;
         }
         env.done(payload);
@@ -77,4 +77,4 @@ async function runTraktScript() {
     await runTraktScript();
 })();
 
-export { TRAKT_SCRIPT_TITLE, applyResult, runTraktScript };
+export { applyResult, runTraktScript, TRAKT_SCRIPT_TITLE };

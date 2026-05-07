@@ -11,10 +11,10 @@ if (typeof $argument === "object") {
 }
 
 try {
-    let obj = JSON.parse(body);
+    const obj = JSON.parse(body);
 
     // 确保响应体包含 images 字段
-    if (obj && obj.images) {
+    if (obj?.images) {
         let targetLang = null;
         let targetRegion = null;
 
@@ -65,6 +65,6 @@ try {
     // 返回修改后的 body
     $done({ body });
 } catch (e) {
-    console.log("TMDB 图片自定义排序脚本错误: " + e);
+    console.log(`TMDB 图片自定义排序脚本错误: ${e}`);
     $done({});
 }

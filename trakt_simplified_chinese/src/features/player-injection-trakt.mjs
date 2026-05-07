@@ -395,4 +395,4 @@ async function handleDirectRedirectRequest() {
     return location ? { type: "redirect", location } : { type: "passThrough" };
 }
 
-export { WATCHNOW_REDIRECT_URL, handleDirectRedirectRequest, handleUserSettings, handleWatchnow, handleWatchnowSources };
+export { handleDirectRedirectRequest, handleUserSettings, handleWatchnow, handleWatchnowSources, WATCHNOW_REDIRECT_URL };

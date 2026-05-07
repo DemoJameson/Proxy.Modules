@@ -27,7 +27,7 @@ function createEnv(initialData = {}) {
         data,
         getjson(key, defaultValue = null) {
             getjsonCalls.set(key, (getjsonCalls.get(key) ?? 0) + 1);
-            if (!Object.prototype.hasOwnProperty.call(data, key)) {
+            if (!Object.hasOwn(data, key)) {
                 return defaultValue;
             }
 

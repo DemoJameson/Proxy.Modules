@@ -234,4 +234,4 @@ const boxjs = {
     },
 };
 
-export { argumentFields, boxjs, BOXJS_CONFIG_KEY, DEFAULT_BACKEND_BASE_URL, metadata, mitmHosts, scriptRules, SHORTCUT_URL, TRAKT_SCRIPT_TITLE };
+export { argumentFields, BOXJS_CONFIG_KEY, boxjs, DEFAULT_BACKEND_BASE_URL, metadata, mitmHosts, SHORTCUT_URL, scriptRules, TRAKT_SCRIPT_TITLE };

@@ -27,7 +27,7 @@ function createPersistentStore(initialData = {}) {
     return {
         data,
         read(key) {
-            return Object.prototype.hasOwnProperty.call(data, key) ? data[key] : null;
+            return Object.hasOwn(data, key) ? data[key] : null;
         },
         write(value, key) {
             data[key] = value;
@@ -53,7 +53,7 @@ function createMockHttpResponse(mock) {
 }
 
 function createMockHttpError(mock) {
-    if (!mock || typeof mock !== "object" || !Object.prototype.hasOwnProperty.call(mock, "error")) {
+    if (!mock || typeof mock !== "object" || !Object.hasOwn(mock, "error")) {
         return null;
     }
 
@@ -77,7 +77,7 @@ function resolveHttpMock(mocks, url) {
         return value;
     }
 
-    if (Object.prototype.hasOwnProperty.call(mocks, url)) {
+    if (Object.hasOwn(mocks, url)) {
         return consumeMockValue(mocks[url]);
     }
 
@@ -186,7 +186,7 @@ function runScript({
                         result,
                         persistentData: persistentStore.data,
                         httpLogs,
-                        hasRuntimeCtx: Object.prototype.hasOwnProperty.call(context, "$ctx"),
+                        hasRuntimeCtx: Object.hasOwn(context, "$ctx"),
                     });
                 }, 0);
             },

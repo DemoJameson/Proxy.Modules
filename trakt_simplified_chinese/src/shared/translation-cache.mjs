@@ -101,7 +101,7 @@ function copyFallbackFieldToCnTranslation(cnTranslation, items, field) {
     }
 }
 
-function normalizeTranslations(items, options = {}) {
+function normalizeTranslations(items) {
     if (commonUtils.isNotArray(items)) {
         items = [];
     }
@@ -165,18 +165,18 @@ function areTranslationsEqual(left, right) {
 }
 
 export {
-    CACHE_STATUS,
-    TRANSLATION_FALLBACK_REGIONS,
-    TRANSLATION_FIELDS,
     areTranslationsEqual,
+    CACHE_STATUS,
+    extractEpisodePlaceholderNumber,
     extractNormalizedTranslation,
     findTranslationByRegion,
     hasUsefulTranslation,
-    extractEpisodePlaceholderNumber,
     isChineseTranslation,
     isEmptyTranslationValue,
     normalizeTranslationPayload,
     normalizeTranslations,
     pickCnTranslation,
     sortTranslations,
+    TRANSLATION_FALLBACK_REGIONS,
+    TRANSLATION_FIELDS,
 };

@@ -64,7 +64,7 @@ function buildRipppleHistoryRequestUrl(url, shouldApply) {
 }
 
 function getHistoryShowBucketKey(url) {
-    const searchParams = url && url.searchParams;
+    const searchParams = url?.searchParams;
     const queryEntries = searchParams && typeof searchParams.entries === "function" ? Array.from(searchParams.entries()) : [];
     const query = queryEntries
         .filter(([key]) => key !== "page" && key !== "limit")
