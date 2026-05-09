@@ -12,6 +12,7 @@ const PEOPLE_NAME_SOURCE = {
     GOOGLE: "google",
 };
 const PEOPLE_LIST_ORIGINAL_NAME_KEY = "__traktOriginalName";
+const BIOGRAPHY_CONTEXT_SEPARATOR = "：";
 
 function ensurePeopleMediaIdsCacheEntry(linkCache, mediaType, traktId) {
     return traktLinkIds.ensureMediaIdsCacheEntry(
@@ -189,6 +190,38 @@ function getCachedPersonNameTranslation(entry, sourceText) {
     }
 
     return String(cachedName.sourceTextHash ?? "") === commonUtils.computeStringHash(sourceText) ? String(cachedName.translatedText) : "";
+}
+
+function getCachedTmdbPersonNameTranslation(entry, sourceText) {
+    const cachedName = getValidPersonNameCacheEntry(entry);
+    if (cachedName?.source !== PEOPLE_NAME_SOURCE.TMDB) {
+        return "";
+    }
+
+    return getCachedPersonNameTranslation(entry, sourceText);
+}
+
+function buildBiographyGoogleSourceText(originalBiography, contextName) {
+    const biography = String(originalBiography ?? "").trim();
+    const name = String(contextName ?? "").trim();
+    return biography && name ? `${name}${BIOGRAPHY_CONTEXT_SEPARATOR}${biography}` : biography;
+}
+
+function removeBiographyGoogleContext(translatedBiography, contextName) {
+    const biography = String(translatedBiography ?? "").trim();
+    const name = String(contextName ?? "").trim();
+    if (!biography || !name) {
+        return biography;
+    }
+
+    if (!biography.startsWith(name)) {
+        return biography;
+    }
+
+    return biography
+        .slice(name.length)
+        .replace(/^\s*[：:，,。.]?\s*/, "")
+        .trim();
 }
 
 function buildPersonNameDisplay(sourceText, translatedText) {
@@ -457,7 +490,8 @@ function applyPeopleCollectionCachedTranslations(data, cache) {
                     changed = true;
                 }
             } else if (!commonUtils.containsChineseCharacter(originalBiography) && personKeys.length > 0) {
-                biographyTargets.push({ person, originalBiography, personKeys });
+                const contextName = cacheEntries.map((entry) => getCachedTmdbPersonNameTranslation(entry, originalName)).find(Boolean) ?? "";
+                biographyTargets.push({ person, originalBiography, personKeys, contextName });
             }
         }
     });
@@ -521,31 +555,34 @@ async function applyPeopleCollectionGoogleBiographyTranslations(translationTarge
         commonUtils.ensureArray(translationTargets).map((target) => {
             const person = target?.person;
             const originalBiography = String(target?.originalBiography ?? "").trim();
+            const contextName = String(target?.contextName ?? "").trim();
             return {
                 sourceLanguage: "en",
-                sourceText: originalBiography,
+                sourceText: buildBiographyGoogleSourceText(originalBiography, contextName),
                 shouldAcceptTranslation(translatedBiography) {
-                    return commonUtils.isPlainObject(person) && originalBiography && translatedBiography;
+                    return commonUtils.isPlainObject(person) && originalBiography && removeBiographyGoogleContext(translatedBiography, contextName);
                 },
                 setCachedTranslation(translatedBiography) {
+                    const normalizedBiography = removeBiographyGoogleContext(translatedBiography, contextName);
                     let changed = false;
                     commonUtils.ensureArray(target?.personKeys).forEach((personKey) => {
                         changed =
                             setPeopleTranslationCacheEntry(cache, personKey, {
                                 biography: {
                                     sourceTextHash: commonUtils.computeStringHash(originalBiography),
-                                    translatedText: translatedBiography,
+                                    translatedText: normalizedBiography,
                                 },
                             }) || changed;
                     });
                     return changed;
                 },
                 applyTranslation(translatedBiography) {
-                    if (!commonUtils.isPlainObject(person) || person.biography === translatedBiography) {
+                    const normalizedBiography = removeBiographyGoogleContext(translatedBiography, contextName);
+                    if (!commonUtils.isPlainObject(person) || !normalizedBiography || person.biography === normalizedBiography) {
                         return false;
                     }
 
-                    person.biography = translatedBiography;
+                    person.biography = normalizedBiography;
                     return true;
                 },
             };
@@ -732,6 +769,7 @@ async function handlePeopleDetail() {
     const originalBiography = String(data.biography ?? "").trim();
     const cachedName = originalName ? getCachedPersonNameTranslation(cacheEntry, originalName) : "";
     const cachedNameEntry = getValidPersonNameCacheEntry(cacheEntry);
+    const biographyContextName = originalName ? getCachedTmdbPersonNameTranslation(cacheEntry, originalName) : "";
     const cachedBiography = originalBiography ? getCachedPersonBiographyTranslation(cacheEntry, originalBiography) : "";
 
     if (cachedName) {
@@ -753,8 +791,26 @@ async function handlePeopleDetail() {
 
     const shouldFetchTmdbName = originalName && commonUtils.isNonNullish(data?.ids?.tmdb) && cachedNameEntry?.source !== PEOPLE_NAME_SOURCE.TMDB;
     const namePromise = shouldFetchTmdbName ? fetchTmdbPerson(data.ids.tmdb) : null;
+    const googleTranslationTargets = [];
+    const hasMatchingTmdbName = !!getCachedTmdbPersonNameTranslation(cacheEntry, originalName);
+    const shouldFetchGoogleName = context.argument.googleTranslationEnabled && originalName && !cachedName && !hasMatchingTmdbName;
+    const shouldFetchGoogleBiography = context.argument.googleTranslationEnabled && originalBiography && !cachedBiography;
+    if (shouldFetchGoogleName) {
+        googleTranslationTargets.push({ field: "name", sourceText: originalName });
+    }
+    if (shouldFetchGoogleBiography) {
+        googleTranslationTargets.push({
+            field: "biography",
+            sourceText: buildBiographyGoogleSourceText(originalBiography, biographyContextName),
+        });
+    }
     const googlePromise =
-        context.argument.googleTranslationEnabled && (originalName || originalBiography) ? translateTextsWithGoogle([originalName, originalBiography], "en") : null;
+        googleTranslationTargets.length > 0
+            ? translateTextsWithGoogle(
+                  googleTranslationTargets.map((target) => target.sourceText),
+                  "en",
+              )
+            : null;
 
     const [nameResult, googleResult] = await Promise.allSettled([namePromise ?? Promise.resolve(null), googlePromise ?? Promise.resolve(null)]);
 
@@ -779,24 +835,31 @@ async function handlePeopleDetail() {
     if (googlePromise) {
         if (googleResult.status === "fulfilled") {
             const googleTranslations = commonUtils.ensureArray(googleResult.value);
-            const translatedName = String(googleTranslations[0] ?? "").trim();
-            if (!cachedName && !hasTranslatedName && translatedName && commonUtils.containsChineseCharacter(translatedName)) {
-                data.name = buildPersonNameDisplay(originalName, translatedName);
-                nextCacheEntry.name = {
-                    sourceTextHash: commonUtils.computeStringHash(originalName),
-                    translatedText: translatedName,
-                    source: PEOPLE_NAME_SOURCE.GOOGLE,
-                };
-            }
+            googleTranslationTargets.forEach((target, index) => {
+                if (target.field === "name") {
+                    const translatedName = String(googleTranslations[index] ?? "").trim();
+                    if (!cachedName && !hasTranslatedName && translatedName && commonUtils.containsChineseCharacter(translatedName)) {
+                        data.name = buildPersonNameDisplay(originalName, translatedName);
+                        nextCacheEntry.name = {
+                            sourceTextHash: commonUtils.computeStringHash(originalName),
+                            translatedText: translatedName,
+                            source: PEOPLE_NAME_SOURCE.GOOGLE,
+                        };
+                    }
+                    return;
+                }
 
-            const translatedBiography = String(googleTranslations[1] ?? "").trim();
-            if (!cachedBiography && translatedBiography) {
-                data.biography = translatedBiography;
-                nextCacheEntry.biography = {
-                    sourceTextHash: commonUtils.computeStringHash(originalBiography),
-                    translatedText: translatedBiography,
-                };
-            }
+                if (target.field === "biography") {
+                    const translatedBiography = removeBiographyGoogleContext(googleTranslations[index], biographyContextName);
+                    if (!cachedBiography && translatedBiography) {
+                        data.biography = translatedBiography;
+                        nextCacheEntry.biography = {
+                            sourceTextHash: commonUtils.computeStringHash(originalBiography),
+                            translatedText: translatedBiography,
+                        };
+                    }
+                }
+            });
         } else {
             context.env.log(`Trakt people Google translation failed for ${personId}: ${googleResult.reason}`);
         }

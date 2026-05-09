@@ -151,6 +151,7 @@ function runScript({
                     httpLogs.push({
                         method: "POST",
                         url: postUrl,
+                        body: String(options.body ?? ""),
                     });
                     const mock = resolveHttpMock(httpPostMocks, postUrl);
                     if (mock) {
