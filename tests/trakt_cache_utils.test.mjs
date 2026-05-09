@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
     createEmptyUnifiedCache,
+    GOOGLE_PEOPLE_CACHE_MAX_BYTES,
     getHashedFieldTranslation,
     loadCache,
     loadUnifiedCache,
@@ -66,6 +67,27 @@ function createStoredUnifiedCache(rev = 100) {
     const cache = createEmptyUnifiedCache();
     cache.rev = rev;
     return cache;
+}
+
+function estimateEntryMapBytes(env, entries) {
+    return Object.entries(entries).reduce((total, [key, entry]) => {
+        const serialized = env.toStr({ [key]: entry }, "");
+        return total + Math.max(serialized.length - 2, 0);
+    }, 0);
+}
+
+function createPeopleEntry(size, sourceTextHash = "person-name") {
+    return {
+        name: {
+            sourceTextHash,
+            translatedText: "汤姆·汉克斯",
+            source: "tmdb",
+        },
+        biography: {
+            sourceTextHash: `${sourceTextHash}-biography`,
+            translatedText: "P".repeat(size),
+        },
+    };
 }
 
 test("cache utils: hashed field translation roundtrip works for comments cache shape", () => {
@@ -175,6 +197,65 @@ test("cache utils: pruneUnifiedCacheToLimit removes lower-priority entries first
 
     assert.equal(pruned.google.comments.large, undefined);
     assert.equal(pruned.trakt.translation["movie:1"].translation.title, "保留标题");
+});
+
+test("cache utils: pruneUnifiedCacheToLimit keeps people translations before media translations", () => {
+    const env = createEnv();
+    const cache = createEmptyUnifiedCache(3, 900);
+
+    cache.google.people["person:1"] = {
+        name: {
+            sourceTextHash: "person-name",
+            translatedText: "汤姆·汉克斯",
+            source: "tmdb",
+        },
+        biography: {
+            sourceTextHash: "person-biography",
+            translatedText: "A".repeat(180),
+        },
+    };
+    cache.trakt.translation["movie:1"] = {
+        status: 1,
+        translation: {
+            title: "保留标题",
+            overview: "B".repeat(420),
+        },
+    };
+
+    const pruned = pruneUnifiedCacheToLimit(env, cache, 3, 900);
+
+    assert.equal(pruned.trakt.translation["movie:1"], undefined);
+    assert.equal(pruned.google.people["person:1"].name.translatedText, "汤姆·汉克斯");
+});
+
+test("cache utils: pruneUnifiedCacheToLimit caps oversized people translations even under total limit", () => {
+    const env = createEnv();
+    const cache = createEmptyUnifiedCache(3, GOOGLE_PEOPLE_CACHE_MAX_BYTES * 4);
+    cache.google.people.small = createPeopleEntry(128, "small");
+    cache.google.people.large = createPeopleEntry(GOOGLE_PEOPLE_CACHE_MAX_BYTES + 1024, "large");
+
+    const pruned = pruneUnifiedCacheToLimit(env, cache, 3, GOOGLE_PEOPLE_CACHE_MAX_BYTES * 4);
+
+    assert.equal(pruned.google.people.large, undefined);
+    assert.equal(pruned.google.people.small.name.translatedText, "汤姆·汉克斯");
+    assert.ok(estimateEntryMapBytes(env, pruned.google.people) <= GOOGLE_PEOPLE_CACHE_MAX_BYTES);
+});
+
+test("cache utils: pruneUnifiedCacheToLimit prunes lower priorities before capped people entries", () => {
+    const env = createEnv();
+    const cache = createEmptyUnifiedCache(3, 900);
+    cache.google.people.small = createPeopleEntry(128, "small");
+    cache.google.comments.large = {
+        comment: {
+            sourceTextHash: "comments-large",
+            translatedText: "C".repeat(900),
+        },
+    };
+
+    const pruned = pruneUnifiedCacheToLimit(env, cache, 3, 900);
+
+    assert.equal(pruned.google.comments.large, undefined);
+    assert.equal(pruned.google.people.small.name.translatedText, "汤姆·汉克斯");
 });
 
 test("cache utils: pruneUnifiedCacheToLimit keeps serialization calls bounded", () => {

@@ -769,7 +769,7 @@ async function handlePeopleDetail() {
     const originalBiography = String(data.biography ?? "").trim();
     const cachedName = originalName ? getCachedPersonNameTranslation(cacheEntry, originalName) : "";
     const cachedNameEntry = getValidPersonNameCacheEntry(cacheEntry);
-    const biographyContextName = originalName ? getCachedTmdbPersonNameTranslation(cacheEntry, originalName) : "";
+    let biographyContextName = originalName ? getCachedTmdbPersonNameTranslation(cacheEntry, originalName) : "";
     const cachedBiography = originalBiography ? getCachedPersonBiographyTranslation(cacheEntry, originalBiography) : "";
 
     if (cachedName) {
@@ -791,9 +791,28 @@ async function handlePeopleDetail() {
 
     const shouldFetchTmdbName = originalName && commonUtils.isNonNullish(data?.ids?.tmdb) && cachedNameEntry?.source !== PEOPLE_NAME_SOURCE.TMDB;
     const namePromise = shouldFetchTmdbName ? fetchTmdbPerson(data.ids.tmdb) : null;
+    let hasTranslatedName = !!cachedName;
+    if (namePromise) {
+        try {
+            const translatedName = String((await namePromise)?.name ?? "").trim();
+            if (translatedName && commonUtils.containsChineseCharacter(translatedName)) {
+                data.name = buildPersonNameDisplay(originalName, translatedName);
+                nextCacheEntry.name = {
+                    sourceTextHash: commonUtils.computeStringHash(originalName),
+                    translatedText: translatedName,
+                    source: PEOPLE_NAME_SOURCE.TMDB,
+                };
+                biographyContextName = translatedName;
+                hasTranslatedName = true;
+            }
+        } catch (error) {
+            context.env.log(`Trakt people name translation failed for ${personId}: ${error}`);
+        }
+    }
+
     const googleTranslationTargets = [];
     const hasMatchingTmdbName = !!getCachedTmdbPersonNameTranslation(cacheEntry, originalName);
-    const shouldFetchGoogleName = context.argument.googleTranslationEnabled && originalName && !cachedName && !hasMatchingTmdbName;
+    const shouldFetchGoogleName = context.argument.googleTranslationEnabled && originalName && !hasTranslatedName && !hasMatchingTmdbName;
     const shouldFetchGoogleBiography = context.argument.googleTranslationEnabled && originalBiography && !cachedBiography;
     if (shouldFetchGoogleName) {
         googleTranslationTargets.push({ field: "name", sourceText: originalName });
@@ -812,29 +831,10 @@ async function handlePeopleDetail() {
               )
             : null;
 
-    const [nameResult, googleResult] = await Promise.allSettled([namePromise ?? Promise.resolve(null), googlePromise ?? Promise.resolve(null)]);
-
-    let hasTranslatedName = !!cachedName;
-    if (namePromise) {
-        if (nameResult.status === "fulfilled") {
-            const translatedName = String(nameResult.value?.name ?? "").trim();
-            if (translatedName && commonUtils.containsChineseCharacter(translatedName)) {
-                data.name = buildPersonNameDisplay(originalName, translatedName);
-                nextCacheEntry.name = {
-                    sourceTextHash: commonUtils.computeStringHash(originalName),
-                    translatedText: translatedName,
-                    source: PEOPLE_NAME_SOURCE.TMDB,
-                };
-                hasTranslatedName = true;
-            }
-        } else {
-            context.env.log(`Trakt people name translation failed for ${personId}: ${nameResult.reason}`);
-        }
-    }
-
     if (googlePromise) {
-        if (googleResult.status === "fulfilled") {
-            const googleTranslations = commonUtils.ensureArray(googleResult.value);
+        try {
+            const googleResult = await googlePromise;
+            const googleTranslations = commonUtils.ensureArray(googleResult);
             googleTranslationTargets.forEach((target, index) => {
                 if (target.field === "name") {
                     const translatedName = String(googleTranslations[index] ?? "").trim();
@@ -860,8 +860,8 @@ async function handlePeopleDetail() {
                     }
                 }
             });
-        } else {
-            context.env.log(`Trakt people Google translation failed for ${personId}: ${googleResult.reason}`);
+        } catch (error) {
+            context.env.log(`Trakt people Google translation failed for ${personId}: ${error}`);
         }
     }
 

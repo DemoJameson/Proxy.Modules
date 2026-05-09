@@ -2242,8 +2242,8 @@ test("统一缓存 version 不匹配时会迁移并正常写入新翻译", async
     assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "港版标题");
 });
 
-test("统一缓存超过上限时会优先保留媒体翻译和历史分页去重缓存", async () => {
-    const largeText = "A".repeat(600 * 1024);
+test("统一缓存超过上限时会裁剪低优先级 Google 评论并保留媒体翻译与持久状态", async () => {
+    const largeText = "A".repeat(1100 * 1024);
     const { persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/comments/123/replies",
         body: readFixture("comments.json"),

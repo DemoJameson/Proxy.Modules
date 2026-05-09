@@ -4,21 +4,22 @@ import * as commonUtils from "../utils/common.mjs";
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
 const UNIFIED_CACHE_SCHEMA_VERSION = 8;
-const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024 - 8 * 1024;
+const UNIFIED_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 512 * 1024;
 const LINK_ID_FIELDS = ["trakt", "tmdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
 const PRUNE_PRIORITY = {
     "google.comments": 1,
     "google.sentiments": 1,
     "google.list": 1,
-    "google.people": 2,
-    "trakt.linkIds": 3,
-    "trakt.image.not_found": 4,
-    "trakt.image.partial_found": 5,
-    "trakt.image.found": 6,
-    "trakt.translation.not_found": 6,
-    "trakt.translation.partial_found": 7,
-    "trakt.translation.found": 8,
+    "trakt.image.not_found": 2,
+    "trakt.image.partial_found": 3,
+    "trakt.image.found": 4,
+    "trakt.translation.not_found": 5,
+    "trakt.translation.partial_found": 6,
+    "trakt.translation.found": 7,
+    "trakt.linkIds": 8,
+    "google.people": 9,
 };
 
 function buildFieldTranslationCacheKey(id) {
@@ -339,6 +340,10 @@ function estimateCacheBytes(env, value) {
     return serialized ? serialized.length : 0;
 }
 
+function estimateEntryMapBytes(env, entries) {
+    return Object.entries(commonUtils.ensureObject(entries)).reduce((total, [key, entry]) => total + estimatePrunableEntryBytes(env, key, entry), 0);
+}
+
 function readUnifiedCacheRev(env, unifiedCacheRevKey = UNIFIED_CACHE_REV_KEY) {
     const rev = Number(env.getjson(unifiedCacheRevKey, 0));
     return Number.isFinite(rev) && rev > 0 ? rev : 0;
@@ -467,12 +472,27 @@ function applyOwnedBucket(unifiedCache, owner) {
     target[owner.path[owner.path.length - 1]] = owner.value;
 }
 
-function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
-    const nextCache = normalizeUnifiedCache(cache, schemaVersion, maxBytes);
-    const limit = Number.isFinite(Number(nextCache.maxBytes)) ? Number(nextCache.maxBytes) : maxBytes;
+function deletePrunableEntry(cache, target) {
+    if (!target) {
+        return;
+    }
+
+    delete cache[target.scope][target.bucket][target.key];
+}
+
+function sortPrunableEntries(entries) {
+    return entries.sort((a, b) => {
+        if (a.priority !== b.priority) {
+            return a.priority - b.priority;
+        }
+        return b.estimatedBytes - a.estimatedBytes;
+    });
+}
+
+function buildPrunableEntries(env, cache) {
     const prunableEntries = [];
 
-    Object.entries(commonUtils.ensureObject(nextCache.google.comments)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.google.comments)).forEach(([key, entry]) => {
         prunableEntries.push({
             scope: "google",
             bucket: "comments",
@@ -481,7 +501,7 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(nextCache.google.sentiments)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.google.sentiments)).forEach(([key, entry]) => {
         prunableEntries.push({
             scope: "google",
             bucket: "sentiments",
@@ -490,7 +510,7 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(nextCache.google.list)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.google.list)).forEach(([key, entry]) => {
         prunableEntries.push({
             scope: "google",
             bucket: "list",
@@ -499,7 +519,7 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(nextCache.google.people)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.google.people)).forEach(([key, entry]) => {
         prunableEntries.push({
             scope: "google",
             bucket: "people",
@@ -508,7 +528,7 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(nextCache.trakt.linkIds)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.trakt.linkIds)).forEach(([key, entry]) => {
         prunableEntries.push({
             scope: "trakt",
             bucket: "linkIds",
@@ -517,7 +537,7 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(nextCache.trakt.image)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.trakt.image)).forEach(([key, entry]) => {
         const fields = Object.values(commonUtils.ensureObject(entry));
         const hasNotFound = fields.some((field) => field?.status === translationCache.CACHE_STATUS.NOT_FOUND);
         const hasPartialFound = fields.some((field) => field?.status === translationCache.CACHE_STATUS.PARTIAL_FOUND);
@@ -530,7 +550,7 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(nextCache.trakt.translation)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.trakt.translation)).forEach(([key, entry]) => {
         const status =
             entry?.status === translationCache.CACHE_STATUS.FOUND ? "found" : entry?.status === translationCache.CACHE_STATUS.PARTIAL_FOUND ? "partial_found" : "not_found";
         prunableEntries.push({
@@ -542,31 +562,55 @@ function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHE
         });
     });
 
-    prunableEntries.sort((a, b) => {
-        if (a.priority !== b.priority) {
-            return a.priority - b.priority;
-        }
-        return b.estimatedBytes - a.estimatedBytes;
-    });
+    return sortPrunableEntries(prunableEntries);
+}
+
+function prunePeopleCacheToQuota(env, cache, maxBytes = GOOGLE_PEOPLE_CACHE_MAX_BYTES) {
+    const limit = Number(maxBytes);
+    if (!Number.isFinite(limit) || limit <= 0) {
+        cache.google.people = {};
+        return;
+    }
+
+    const peopleEntries = sortPrunableEntries(
+        Object.entries(commonUtils.ensureObject(cache.google.people)).map(([key, entry]) => ({
+            scope: "google",
+            bucket: "people",
+            key,
+            priority: PRUNE_PRIORITY["google.people"],
+            estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
+        })),
+    );
+
+    let estimatedBytes = estimateEntryMapBytes(env, cache.google.people);
+    while (estimatedBytes > limit && peopleEntries.length > 0) {
+        const target = peopleEntries.shift();
+        deletePrunableEntry(cache, target);
+        estimatedBytes = Math.max(estimatedBytes - target.estimatedBytes, 0);
+    }
+
+    while (estimateEntryMapBytes(env, cache.google.people) > limit && peopleEntries.length > 0) {
+        deletePrunableEntry(cache, peopleEntries.shift());
+    }
+}
+
+function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
+    const nextCache = normalizeUnifiedCache(cache, schemaVersion, maxBytes);
+    const limit = Number.isFinite(Number(nextCache.maxBytes)) ? Number(nextCache.maxBytes) : maxBytes;
+
+    prunePeopleCacheToQuota(env, nextCache);
+
+    const prunableEntries = buildPrunableEntries(env, nextCache);
 
     let estimatedBytes = estimateCacheBytes(env, nextCache);
     while (estimatedBytes > limit && prunableEntries.length > 0) {
         const target = prunableEntries.shift();
-        if (!target) {
-            break;
-        }
-
-        delete nextCache[target.scope][target.bucket][target.key];
+        deletePrunableEntry(nextCache, target);
         estimatedBytes = Math.max(estimatedBytes - target.estimatedBytes, 0);
     }
 
     while (estimateCacheBytes(env, nextCache) > limit && prunableEntries.length > 0) {
-        const target = prunableEntries.shift();
-        if (!target) {
-            break;
-        }
-
-        delete nextCache[target.scope][target.bucket][target.key];
+        deletePrunableEntry(nextCache, prunableEntries.shift());
     }
 
     return nextCache;
@@ -854,6 +898,7 @@ export {
     buildFieldTranslationCacheKey,
     clearCurrentSeason,
     createEmptyUnifiedCache,
+    GOOGLE_PEOPLE_CACHE_MAX_BYTES,
     getCurrentSeason,
     getHashedFieldTranslation,
     loadCache,
