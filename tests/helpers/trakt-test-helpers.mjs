@@ -287,4 +287,5 @@ export {
     runRequestCase,
     runResponseCase,
     UNIFIED_CACHE_KEY,
+    UNIFIED_CACHE_SCHEMA_VERSION,
 };

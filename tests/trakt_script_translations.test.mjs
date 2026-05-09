@@ -22,6 +22,7 @@ import {
     runRequestCase,
     runResponseCase,
     UNIFIED_CACHE_KEY,
+    UNIFIED_CACHE_SCHEMA_VERSION,
 } from "./helpers/trakt-test-helpers.mjs";
 
 const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
@@ -531,6 +532,81 @@ test("/movies/:id 会用 TMDb 中文 w780 海报替换 images.poster[0]", async 
     assert.equal(cachePoster.url, "https://image.tmdb.org/t/p/original/best-cn-poster.jpg");
     assert.equal(cachePoster.expiresAt, null);
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_MOVIE_IMAGES_URL));
+});
+
+test("后端批量翻译即使保存时被本地缓存限额裁剪，当前响应仍会应用", async () => {
+    const body = JSON.stringify([
+        {
+            movie: {
+                title: "Movie 101",
+                overview: "Overview 101",
+                ids: {
+                    trakt: 101,
+                },
+                available_translations: ["zh"],
+            },
+        },
+        {
+            movie: {
+                title: "Movie 102",
+                overview: "Overview 102",
+                ids: {
+                    trakt: 102,
+                },
+                available_translations: ["zh"],
+            },
+        },
+        {
+            movie: {
+                title: "Movie 103",
+                overview: "Overview 103",
+                ids: {
+                    trakt: 103,
+                },
+                available_translations: ["zh"],
+            },
+        },
+        {
+            movie: {
+                title: "Movie 104",
+                overview: "Overview 104",
+                ids: {
+                    trakt: 104,
+                },
+                available_translations: ["zh"],
+            },
+        },
+    ]);
+
+    const { result, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/users/demo/watchlist/movies",
+        body,
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        persistentData: createUnifiedPersistentData({
+            maxBytes: 1,
+        }),
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=101,102,103,104`]: JSON.stringify({
+                movies: {
+                    101: {
+                        status: 1,
+                        translation: {
+                            title: "后端中文标题",
+                            overview: "后端中文简介",
+                        },
+                    },
+                },
+            }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const storedTranslationCache = parseUnifiedCache(persistentData).trakt.translation;
+    assert.equal(payload.find((item) => item?.movie?.ids?.trakt === 101)?.movie?.title, "后端中文标题");
+    assert.equal(payload.find((item) => item?.movie?.ids?.trakt === 101)?.movie?.overview, "后端中文简介");
+    assert.equal(storedTranslationCache["movie:101"], undefined);
 });
 
 test("posterImageMode=default 时 movie/show 不请求也不替换中文图片", async () => {
@@ -2131,7 +2207,7 @@ test("统一缓存 version 不匹配时会迁移并正常写入新翻译", async
     });
 
     const unifiedCache = parseUnifiedCache(persistentData);
-    assert.equal(unifiedCache.version, 7);
+    assert.equal(unifiedCache.version, UNIFIED_CACHE_SCHEMA_VERSION);
     assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "港版标题");
 });
 
