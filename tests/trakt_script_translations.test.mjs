@@ -534,36 +534,38 @@ test("/movies/:id 会用 TMDb 中文 w780 海报替换 images.poster[0]", async 
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_MOVIE_IMAGES_URL));
 });
 
-test("非 Trakt/Rippple 客户端即使开启 posterImageMode 也不替换海报", async () => {
-    const original = createMovieWithPoster();
-    const { result, persistentData, httpLogs } = await runResponseCase({
-        url: "https://api.trakt.tv/movies/123",
-        headers: {
-            "user-agent": "Infuse/8.0",
-        },
-        body: JSON.stringify(original),
-        argument: {
-            posterImageMode: "chinese",
-        },
-        persistentData: createUnifiedPersistentData(),
-        httpGetMocks: {
-            [TEST_TMDB_MOVIE_IMAGES_URL]: createTmdbImagesResponse([
-                {
-                    iso_639_1: "zh",
-                    iso_3166_1: "CN",
-                    file_path: "/infuse-should-not-use.jpg",
-                    vote_average: 9,
-                    vote_count: 10,
-                },
-            ]),
-        },
-    });
+for (const userAgent of ["Rippple/1.0", "Infuse/8.0"]) {
+    test(`${userAgent} 即使开启 posterImageMode 也不替换海报`, async () => {
+        const original = createMovieWithPoster();
+        const { result, persistentData, httpLogs } = await runResponseCase({
+            url: "https://api.trakt.tv/movies/123",
+            headers: {
+                "user-agent": userAgent,
+            },
+            body: JSON.stringify(original),
+            argument: {
+                posterImageMode: "chinese",
+            },
+            persistentData: createUnifiedPersistentData(),
+            httpGetMocks: {
+                [TEST_TMDB_MOVIE_IMAGES_URL]: createTmdbImagesResponse([
+                    {
+                        iso_639_1: "zh",
+                        iso_3166_1: "CN",
+                        file_path: "/non-trakt-should-not-use.jpg",
+                        vote_average: 9,
+                        vote_count: 10,
+                    },
+                ]),
+            },
+        });
 
-    const payload = JSON.parse(result.body);
-    assert.equal(payload.images.poster[0], original.images.poster[0]);
-    assert.deepEqual(parseUnifiedCache(persistentData).trakt.image, {});
-    assert.ok(!httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_MOVIE_IMAGES_URL));
-});
+        const payload = JSON.parse(result.body);
+        assert.equal(payload.images.poster[0], original.images.poster[0]);
+        assert.deepEqual(parseUnifiedCache(persistentData).trakt.image, {});
+        assert.ok(!httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_MOVIE_IMAGES_URL));
+    });
+}
 
 test("后端批量翻译即使保存时被本地缓存限额裁剪，当前响应仍会应用", async () => {
     const body = JSON.stringify([

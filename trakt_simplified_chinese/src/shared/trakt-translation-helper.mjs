@@ -190,7 +190,7 @@ function getPosterImageMode() {
 }
 
 function isPosterImageReplacementUserAgent(userAgent = globalThis.$ctx?.userAgent) {
-    return /^(Trakt|Rippple)/i.test(String(userAgent ?? "").trim());
+    return /^Trakt/i.test(String(userAgent ?? "").trim());
 }
 
 function shouldReplaceImages() {
