@@ -2,7 +2,7 @@ import * as commonUtils from "../utils/common.mjs";
 
 import * as mediaTypes from "./media-types.mjs";
 
-const ALLOWED_ID_FIELDS = ["trakt", "tmdb"];
+const ALLOWED_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 
 function normalizeIds(ids) {
     const source = commonUtils.ensureObject(ids);
@@ -163,13 +163,29 @@ function cacheEpisodeIdsFromSeasonList(linkCache, showId, seasons) {
     return changed;
 }
 
-async function ensureMediaIdsCacheEntry(fetchMediaDetail, saveLinkIdsCache, linkCache, mediaType, traktId) {
+function hasRequiredIds(entry, requiredIdFields = ["tmdb"]) {
+    if (!commonUtils.isPlainObject(entry?.ids)) {
+        return false;
+    }
+
+    return commonUtils.ensureArray(requiredIdFields).every((field) => commonUtils.isNonNullish(entry.ids[field]));
+}
+
+function hasRequiredFields(entry, requiredFields = []) {
+    if (!commonUtils.isPlainObject(entry)) {
+        return false;
+    }
+
+    return commonUtils.ensureArray(requiredFields).every((field) => commonUtils.isNonNullish(entry[field]));
+}
+
+async function ensureMediaIdsCacheEntry(fetchMediaDetail, saveLinkIdsCache, linkCache, mediaType, traktId, options = {}) {
     if (!linkCache || commonUtils.isNullish(traktId)) {
         return null;
     }
 
     let entry = getLinkIdsCacheEntry(linkCache, traktId);
-    if (entry?.ids && commonUtils.isNonNullish(entry.ids.tmdb)) {
+    if (hasRequiredIds(entry, options.requiredIdFields) && hasRequiredFields(entry, options.requiredFields)) {
         return entry;
     }
 

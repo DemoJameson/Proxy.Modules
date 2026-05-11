@@ -43,6 +43,15 @@ function buildMediaDetailUrl(mediaType, traktId) {
     return "";
 }
 
+function buildEpisodeDetailUrl(ref) {
+    const traktApiBaseUrl = resolveTraktApiBaseUrl();
+    if (!traktApiBaseUrl || commonUtils.isNullish(ref?.showId) || commonUtils.isNullish(ref?.seasonNumber) || commonUtils.isNullish(ref?.episodeNumber)) {
+        return "";
+    }
+
+    return `${traktApiBaseUrl}/shows/${ref.showId}/seasons/${ref.seasonNumber}/episodes/${ref.episodeNumber}?extended=cloud9,full,watchnow`;
+}
+
 async function fetchTranslationPayload(mediaType, ref, extraHeaders) {
     const url = buildTranslationUrl(mediaType, ref);
     const payload = await httpUtils.get({
@@ -71,4 +80,9 @@ function fetchMediaDetail(mediaType, traktId) {
     return url ? httpUtils.fetchJson(url) : Promise.resolve(null);
 }
 
-export { fetchMediaDetail, fetchTranslationPayload };
+function fetchEpisodeDetail(ref) {
+    const url = buildEpisodeDetailUrl(ref);
+    return url ? httpUtils.fetchJson(url) : Promise.resolve(null);
+}
+
+export { fetchEpisodeDetail, fetchMediaDetail, fetchTranslationPayload };

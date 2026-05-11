@@ -2246,7 +2246,7 @@ test("/movies/:id 遇到损坏的媒体缓存字符串时会安全降级", async
     assert.equal(payload.tagline, "Original Tagline");
 });
 
-test("统一缓存 version 不匹配时会迁移并正常写入新翻译", async () => {
+test("统一缓存 version 不匹配时会清空旧缓存并正常写入新翻译", async () => {
     const { persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/translations/zh?extended=all",
         body: readFixture("translations.json"),
@@ -2260,6 +2260,11 @@ test("统一缓存 version 不匹配时会迁移并正常写入新翻译", async
                                 title: "旧标题",
                             },
                         }),
+                        "movie:456": createMediaTranslationEntry({
+                            translation: {
+                                title: "应被清空的旧标题",
+                            },
+                        }),
                     },
                 },
             }),
@@ -2269,6 +2274,7 @@ test("统一缓存 version 不匹配时会迁移并正常写入新翻译", async
     const unifiedCache = parseUnifiedCache(persistentData);
     assert.equal(unifiedCache.version, UNIFIED_CACHE_SCHEMA_VERSION);
     assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "港版标题");
+    assert.equal(unifiedCache.trakt.translation["movie:456"], undefined);
 });
 
 test("统一缓存超过上限时会裁剪低优先级 Google 评论并保留媒体翻译与持久状态", async () => {

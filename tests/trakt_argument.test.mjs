@@ -7,12 +7,23 @@ import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
 test("字符串参数第一位解析为 posterImageMode，不兼容旧顺序", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false,false]"));
 
     assert.equal(parsed.posterImageMode, "original");
     assert.equal(parsed.historyEpisodesMergedByShow, true);
     assert.equal(parsed.googleTranslationEnabled, true);
+    assert.equal(parsed.characterTranslationEnabled, false);
     assert.equal(parsed.playerButtonEnabled.eplayerx, false);
+});
+
+test("characterTranslationEnabled 默认开启，且位于 googleTranslationEnabled 后一位", () => {
+    const defaults = normalizeArgument(createDefaultArgumentConfig());
+    assert.equal(defaults.characterTranslationEnabled, true);
+
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false]"));
+    assert.equal(parsed.googleTranslationEnabled, true);
+    assert.equal(parsed.characterTranslationEnabled, false);
+    assert.equal(parsed.playerButtonEnabled.eplayerx, true);
 });
 
 test("posterImageMode 非法值回退 original", () => {

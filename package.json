@@ -3,6 +3,7 @@
     "private": true,
     "scripts": {
         "build:trakt": "node scripts/build-trakt.mjs",
+        "serve:files": "node scripts/serve-project-files.mjs",
         "sync:env.js": "node scripts/build-trakt.mjs --sync-env",
         "migrate:trakt:image-keys": "node scripts/migrate-trakt-image-cache-keys.mjs",
         "format": "biome check --write .",

@@ -20,6 +20,70 @@ import {
 const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
 const TMDB_MOVIE_CREDITS_URL = "regex:^https://api\\.tmdb\\.org/3/movie/456\\?";
 const TMDB_PERSON_URL = "regex:^https://api\\.tmdb\\.org/3/person/31\\?";
+const DOUBAN_SEARCH_TT123_MOVIE_URL = "https://frodo.douban.com/api/v2/search/suggestion?q=tt123&apikey=0ac44ae016490db2204ce0a042db2916";
+const DOUBAN_SEARCH_TT456_TV_URL = "https://frodo.douban.com/api/v2/search/suggestion?q=tt456&apikey=0ac44ae016490db2204ce0a042db2916";
+const DOUBAN_SEARCH_TTSEASON_TV_URL = "https://frodo.douban.com/api/v2/search/suggestion?q=ttseason201&apikey=0ac44ae016490db2204ce0a042db2916";
+const DOUBAN_MOVIE_CREDITS_35517044_URL = "https://frodo.douban.com/api/v2/movie/35517044/credits_stats?start=0&count=1000&apikey=0ac44ae016490db2204ce0a042db2916";
+const DOUBAN_MOVIE_CREDITS_4707205_URL = "https://frodo.douban.com/api/v2/movie/4707205/credits_stats?start=0&count=1000&apikey=0ac44ae016490db2204ce0a042db2916";
+const DOUBAN_TV_SEASONS_35517044_URL = "https://frodo.douban.com/api/v2/tv/35517044/seasons?apikey=0ac44ae016490db2204ce0a042db2916";
+const TRAKT_SHOW_123_DETAIL_URL = "https://api.trakt.tv/shows/123?extended=cloud9,full,watchnow";
+const TRAKT_SEASON_2_EPISODE_1_URL = "https://api.trakt.tv/shows/123/seasons/2/episodes/1?extended=cloud9,full,watchnow";
+
+function createDoubanSearchResponse(id, targetType = "movie") {
+    return JSON.stringify({
+        cards: [
+            {
+                target_id: id,
+                target_type: targetType,
+                target: {
+                    id,
+                },
+            },
+        ],
+    });
+}
+
+function createDoubanCreditsResponse(simpleCharacter, name = "汤姆·汉克斯") {
+    return JSON.stringify({
+        items: [
+            {
+                name,
+                category: "演员",
+                roles: ["演员"],
+                simple_character: simpleCharacter,
+            },
+            {
+                name: "导演甲",
+                category: "导演",
+                roles: ["导演"],
+                simple_character: "导演",
+            },
+        ],
+    });
+}
+
+function createTraktEpisodeDetailResponse(imdb = "ttseason201") {
+    return JSON.stringify({
+        season: 2,
+        number: 1,
+        ids: {
+            trakt: 201,
+            imdb,
+        },
+    });
+}
+
+function createTraktShowDetailResponse(language = "zh", imdb = "tt456") {
+    return JSON.stringify({
+        title: "测试剧集",
+        language,
+        ids: {
+            trakt: 123,
+            tmdb: 456,
+            imdb,
+        },
+    });
+}
 
 const peopleDetailGoogleFailureCases = [
     {
@@ -429,6 +493,452 @@ test("media people 列表会从 TMDb credits 补出中文姓名并写回缓存",
         translatedText: "汤姆·汉克斯",
         source: "tmdb",
     });
+});
+
+test("media people 列表会用豆瓣补全一人一角并写入缓存", async () => {
+    const body = JSON.stringify({
+        cast: [
+            {
+                person: {
+                    name: "汤姆·汉克斯",
+                    ids: {
+                        trakt: 42,
+                    },
+                },
+                character: "Detective",
+                characters: ["Detective"],
+            },
+        ],
+        crew: {
+            directing: [
+                {
+                    person: {
+                        name: "导演甲",
+                    },
+                    job: "Director",
+                },
+            ],
+        },
+    });
+    const { result, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/people",
+        body,
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt123",
+                    },
+                    language: "zh",
+                },
+            },
+        }),
+        httpGetMocks: {
+            [TMDB_MOVIE_CREDITS_URL]: createTmdbMovieCreditsResponse(),
+            [DOUBAN_SEARCH_TT123_MOVIE_URL]: createDoubanSearchResponse("35517044", "movie"),
+            [DOUBAN_MOVIE_CREDITS_35517044_URL]: createDoubanCreditsResponse("饰 张一昂"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "张一昂");
+    assert.deepEqual(payload.cast[0].characters, ["张一昂"]);
+    assert.equal(payload.crew.directing[0].job, "Director");
+
+    const cache = parseUnifiedCache(persistentData).douban;
+    assert.equal(cache.search["movie:tt123"].id, "35517044");
+    assert.deepEqual(cache.credits["35517044"].汤姆·汉克斯, ["张一昂"]);
+});
+
+test("media people 列表会处理一人多角、配音前缀和纯职位无效值", async () => {
+    const { result, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "迈克尔·B·乔丹",
+                    },
+                    character: "Smoke / Stack",
+                    characters: ["Smoke", "Stack"],
+                },
+                {
+                    person: {
+                        name: "小野大辅",
+                    },
+                    character: "Satoru Gojo (voice)",
+                    characters: ["Satoru Gojo (voice)"],
+                },
+                {
+                    person: {
+                        name: "配音甲",
+                    },
+                    character: "Jotaro",
+                    characters: ["Jotaro"],
+                },
+                {
+                    person: {
+                        name: "职位甲",
+                    },
+                    character: "Director",
+                    characters: ["Director"],
+                },
+            ],
+            crew: {},
+        }),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt123",
+                    },
+                    language: "ja",
+                },
+            },
+        }),
+        httpGetMocks: {
+            [DOUBAN_SEARCH_TT123_MOVIE_URL]: createDoubanSearchResponse("35517044", "movie"),
+            [DOUBAN_MOVIE_CREDITS_35517044_URL]: JSON.stringify({
+                items: [
+                    {
+                        name: "迈克尔·B·乔丹",
+                        category: "演员",
+                        roles: ["演员"],
+                        simple_character: "饰 Smoke / Stack",
+                    },
+                    {
+                        name: "小野大辅",
+                        category: "演员",
+                        roles: ["演员", "配音"],
+                        simple_character: "饰 五条悟",
+                    },
+                    {
+                        name: "配音甲",
+                        category: "演员",
+                        roles: ["演员"],
+                        simple_character: "配 空条承太郎",
+                    },
+                    {
+                        name: "职位甲",
+                        category: "演员",
+                        roles: ["演员"],
+                        simple_character: "配音",
+                    },
+                ],
+            }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "Smoke / Stack");
+    assert.deepEqual(payload.cast[0].characters, ["Smoke", "Stack"]);
+    assert.equal(payload.cast[1].character, "五条悟（配音）");
+    assert.deepEqual(payload.cast[1].characters, ["五条悟（配音）"]);
+    assert.equal(payload.cast[2].character, "空条承太郎（配音）");
+    assert.deepEqual(payload.cast[2].characters, ["空条承太郎（配音）"]);
+    assert.equal(payload.cast[3].character, "Director");
+    assert.equal(parseUnifiedCache(persistentData).douban.credits["35517044"].职位甲, undefined);
+});
+
+test("media people 列表所有 characters 已含中文时跳过，部分中文时整体覆盖", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "演员甲",
+                    },
+                    character: "角色甲 / Role B",
+                    characters: ["角色甲", "Role B"],
+                },
+                {
+                    person: {
+                        name: "演员乙",
+                    },
+                    character: "角色丙",
+                    characters: ["角色丙"],
+                },
+            ],
+            crew: {},
+        }),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt123",
+                    },
+                    language: "ko",
+                },
+            },
+            doubanSearch: {
+                "movie:tt123": {
+                    id: "35517044",
+                    targetType: "movie",
+                },
+            },
+            doubanCredits: {
+                35517044: {
+                    演员甲: ["豆瓣甲", "豆瓣乙"],
+                    演员乙: ["豆瓣丙"],
+                },
+            },
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "豆瓣甲 / 豆瓣乙");
+    assert.deepEqual(payload.cast[0].characters, ["豆瓣甲", "豆瓣乙"]);
+    assert.equal(payload.cast[1].character, "角色丙");
+    assert.deepEqual(payload.cast[1].characters, ["角色丙"]);
+});
+
+test("show people 命中缺少 language 的 linkIds 缓存时会补 detail 后再请求豆瓣", async () => {
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/123/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "任素汐",
+                    },
+                    character: "Hu Wenjing",
+                    characters: ["Hu Wenjing"],
+                },
+            ],
+            crew: {},
+        }),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt456",
+                    },
+                },
+            },
+        }),
+        httpGetMocks: {
+            [TRAKT_SHOW_123_DETAIL_URL]: createTraktShowDetailResponse("zh", "tt456"),
+            [DOUBAN_SEARCH_TT456_TV_URL]: createDoubanSearchResponse("35517044", "tv"),
+            [DOUBAN_TV_SEASONS_35517044_URL]: JSON.stringify([]),
+            [DOUBAN_MOVIE_CREDITS_35517044_URL]: createDoubanCreditsResponse("饰 胡文静", "任素汐"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "胡文静");
+    assert.deepEqual(payload.cast[0].characters, ["胡文静"]);
+    assert.equal(
+        httpLogs.some((entry) => entry.url === TRAKT_SHOW_123_DETAIL_URL),
+        true,
+    );
+    assert.equal(
+        httpLogs.some((entry) => entry.url === DOUBAN_SEARCH_TT456_TV_URL),
+        true,
+    );
+    const cache = parseUnifiedCache(persistentData);
+    assert.equal(cache.trakt.linkIds["123"].language, "zh");
+    assert.equal(cache.douban.search["tv:tt456"].id, "35517044");
+});
+
+test("show people 在豆瓣 seasons 请求失败时仍会使用主剧 credits 补全角色", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/123/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "任素汐",
+                    },
+                    character: "Hu Wenjing",
+                    characters: ["Hu Wenjing"],
+                },
+            ],
+            crew: {},
+        }),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt456",
+                    },
+                    language: "zh",
+                },
+            },
+        }),
+        httpGetMocks: {
+            [DOUBAN_SEARCH_TT456_TV_URL]: createDoubanSearchResponse("35517044", "tv"),
+            [DOUBAN_TV_SEASONS_35517044_URL]: createHttpErrorMock("douban seasons unavailable"),
+            [DOUBAN_MOVIE_CREDITS_35517044_URL]: createDoubanCreditsResponse("饰 胡文静", "任素汐"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "胡文静");
+    assert.deepEqual(payload.cast[0].characters, ["胡文静"]);
+    assert.equal(
+        httpLogs.some((entry) => entry.url === DOUBAN_MOVIE_CREDITS_35517044_URL),
+        true,
+    );
+});
+
+test("characterTranslationEnabled=false 时不触发豆瓣补全", async () => {
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "汤姆·汉克斯",
+                    },
+                    character: "Detective",
+                    characters: ["Detective"],
+                },
+            ],
+            crew: {},
+        }),
+        argument: {
+            characterTranslationEnabled: false,
+        },
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt123",
+                    },
+                    language: "zh",
+                },
+            },
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "Detective");
+    assert.equal(
+        httpLogs.some((entry) => entry.url.includes("frodo.douban.com")),
+        false,
+    );
+    assert.deepEqual(parseUnifiedCache(persistentData).douban, {
+        search: {},
+        seasons: {},
+        credits: {},
+    });
+});
+
+test("episode people 可用已缓存 seasons 推断豆瓣季 ID 时不请求第一集 detail", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/123/seasons/2/episodes/2/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "汤姆·汉克斯",
+                    },
+                    character: "Detective",
+                    characters: ["Detective"],
+                },
+            ],
+            crew: {},
+        }),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt456",
+                    },
+                    language: "zh",
+                },
+            },
+            doubanSearch: {
+                "tv:tt456": {
+                    id: "35517044",
+                    targetType: "tv",
+                },
+            },
+            doubanSeasons: {
+                35517044: {
+                    ids: ["4707205"],
+                },
+            },
+            doubanCredits: {
+                4707205: {
+                    汤姆·汉克斯: ["第二季角色"],
+                },
+            },
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "第二季角色");
+    assert.equal(
+        httpLogs.some((entry) => entry.url === TRAKT_SEASON_2_EPISODE_1_URL),
+        false,
+    );
+});
+
+test("episode people 无 seasons 缓存时用当前季第一集 imdb 查询豆瓣 ID", async () => {
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/123/seasons/2/episodes/2/people",
+        body: JSON.stringify({
+            cast: [
+                {
+                    person: {
+                        name: "汤姆·汉克斯",
+                    },
+                    character: "Detective",
+                    characters: ["Detective"],
+                },
+            ],
+            crew: {},
+        }),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: {
+                        trakt: 123,
+                        tmdb: 456,
+                        imdb: "tt456",
+                    },
+                    language: "zh",
+                },
+            },
+            doubanSearch: {
+                "tv:tt456": {
+                    id: "35517044",
+                    targetType: "tv",
+                },
+            },
+        }),
+        httpGetMocks: {
+            [TRAKT_SEASON_2_EPISODE_1_URL]: createTraktEpisodeDetailResponse(),
+            [DOUBAN_SEARCH_TTSEASON_TV_URL]: createDoubanSearchResponse("4707205", "tv"),
+            [DOUBAN_MOVIE_CREDITS_4707205_URL]: createDoubanCreditsResponse("饰 第二季角色"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.cast[0].character, "第二季角色");
+    assert.equal(
+        httpLogs.some((entry) => entry.url === TRAKT_SEASON_2_EPISODE_1_URL),
+        true,
+    );
+    const cache = parseUnifiedCache(persistentData);
+    assert.equal(cache.douban.search["tv:ttseason201"].id, "4707205");
+    assert.equal(cache.trakt.linkIds["episode:first:123:2"].ids.imdb, "ttseason201");
 });
 
 test("googleTranslationEnabled=false 时 media people 列表不触发 Google 回退，但 TMDb 姓名翻译仍生效", async () => {

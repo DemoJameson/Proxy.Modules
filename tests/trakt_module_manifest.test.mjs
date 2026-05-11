@@ -40,4 +40,9 @@ test("module manifest generates current BoxJs keys from argument fields", async 
     assert.equal(app.keys[0], `@${BOXJS_CONFIG_KEY}.posterImageMode`);
     assert.equal(app.settings[0].id, `@${BOXJS_CONFIG_KEY}.posterImageMode`);
     assert.ok(app.keys.includes(`@${BOXJS_CONFIG_KEY}.historyEpisodesMergedByShow`));
+    assert.ok(app.keys.includes(`@${BOXJS_CONFIG_KEY}.characterTranslationEnabled`));
+
+    const characterSetting = app.settings.find((setting) => setting.id === `@${BOXJS_CONFIG_KEY}.characterTranslationEnabled`);
+    assert.ok(characterSetting);
+    assert.equal(characterSetting.name, "用豆瓣翻译角色名");
 });

@@ -118,6 +118,42 @@ test("cache utils: normalizeUnifiedCache keeps comments cache in current nested 
 
     assert.equal(normalized.google.comments["9001"].comment.translatedText, "很棒的电影");
     assert.equal(normalized.google.comments["9001"].rev, undefined);
+    assert.deepEqual(normalized.douban, {
+        search: {},
+        seasons: {},
+        credits: {},
+    });
+});
+
+test("cache utils: normalizeUnifiedCache 保留豆瓣角色缓存摘要", () => {
+    const normalized = normalizeUnifiedCache({
+        version: 9,
+        douban: {
+            search: {
+                "tv:tt123": {
+                    id: "35517044",
+                    targetType: "tv",
+                },
+            },
+            seasons: {
+                35517044: {
+                    ids: ["4707205", "", "4707205", "6312211"],
+                },
+            },
+            credits: {
+                4707205: {
+                    王骁: ["张一昂", "", "张一昂"],
+                },
+            },
+        },
+    });
+
+    assert.deepEqual(normalized.douban.search["tv:tt123"], {
+        id: "35517044",
+        targetType: "tv",
+    });
+    assert.deepEqual(normalized.douban.seasons["35517044"].ids, ["4707205", "6312211"]);
+    assert.deepEqual(normalized.douban.credits["4707205"].王骁, ["张一昂"]);
 });
 
 test("cache utils: normalizeUnifiedCache 不迁移旧 poster 图片缓存", () => {
@@ -228,6 +264,27 @@ test("cache utils: pruneUnifiedCacheToLimit keeps people translations before med
     assert.equal(pruned.google.people["person:1"].name.translatedText, "汤姆·汉克斯");
 });
 
+test("cache utils: pruneUnifiedCacheToLimit can prune douban cache before link ids", () => {
+    const env = createEnv();
+    const cache = createEmptyUnifiedCache(9, 900);
+    cache.douban.credits["35517044"] = {
+        王骁: ["A".repeat(800)],
+    };
+    cache.trakt.linkIds["123"] = {
+        ids: {
+            trakt: 123,
+            tmdb: 456,
+            imdb: "tt123",
+        },
+        language: "cn",
+    };
+
+    const pruned = pruneUnifiedCacheToLimit(env, cache, 9, 900);
+
+    assert.equal(pruned.douban.credits["35517044"], undefined);
+    assert.equal(pruned.trakt.linkIds["123"].ids.imdb, "tt123");
+});
+
 test("cache utils: pruneUnifiedCacheToLimit caps oversized people translations even under total limit", () => {
     const env = createEnv();
     const cache = createEmptyUnifiedCache(3, GOOGLE_PEOPLE_CACHE_MAX_BYTES * 4);
@@ -289,6 +346,34 @@ test("cache utils: 同一次请求内多次 load 共享 unified cache 实例", (
     assert.equal(unifiedCache, secondUnifiedCache);
     assert.equal(translationCache, unifiedCache.trakt.translation);
     assert.equal(env.getjsonCallsFor(UNIFIED_CACHE_KEY), 1);
+});
+
+test("cache utils: version 不匹配时清空旧 unified cache", () => {
+    const oldCache = createStoredUnifiedCache(100);
+    oldCache.version = 999;
+    oldCache.trakt.translation["movie:1"] = {
+        status: 1,
+        translation: {
+            title: "旧标题",
+        },
+    };
+    oldCache.google.people["42"] = createPeopleEntry(32);
+
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: oldCache,
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    const unifiedCache = loadUnifiedCache(env);
+
+    assert.equal(unifiedCache.version, createEmptyUnifiedCache().version);
+    assert.deepEqual(unifiedCache.trakt.translation, {});
+    assert.deepEqual(unifiedCache.google.people, {});
+    assert.deepEqual(unifiedCache.douban, {
+        search: {},
+        seasons: {},
+        credits: {},
+    });
 });
 
 test("cache utils: 无 revision 冲突时 save 不会重读完整 unified cache", () => {

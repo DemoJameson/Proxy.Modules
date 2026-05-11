@@ -47,6 +47,13 @@ const argumentFields = [
         desc: "启用后会翻译评论、社区情绪、冷知识、演员、片单等谷歌翻译场景",
     },
     {
+        key: "characterTranslationEnabled",
+        defaultValue: true,
+        type: "boolean",
+        tag: "用豆瓣翻译角色名",
+        desc: "启用后会用豆瓣翻译角色名",
+    },
+    {
         key: "eplayerxEnabled",
         defaultValue: true,
         type: "boolean",
@@ -92,7 +99,15 @@ const argumentFields = [
 
 const ALL_ARGUMENT_KEYS = argumentFields.map((field) => field.key);
 const PLAYER_ARGUMENT_KEYS = ["eplayerxEnabled", "forwardEnabled", "infuseEnabled"];
-const CORE_ARGUMENT_KEYS = ["posterImageMode", "historyEpisodesMergedByShow", "googleTranslationEnabled", "useShortcutsJumpEnabled", "backendBaseUrl", "debugEnabled"];
+const CORE_ARGUMENT_KEYS = [
+    "posterImageMode",
+    "historyEpisodesMergedByShow",
+    "googleTranslationEnabled",
+    "characterTranslationEnabled",
+    "useShortcutsJumpEnabled",
+    "backendBaseUrl",
+    "debugEnabled",
+];
 const CORE_WITH_PLAYER_ARGUMENT_KEYS = CORE_ARGUMENT_KEYS.flatMap((key) => (key === "useShortcutsJumpEnabled" ? [...PLAYER_ARGUMENT_KEYS, key] : key));
 
 const scriptRules = [

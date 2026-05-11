@@ -60,6 +60,11 @@ function createUnifiedCache(overrides = {}) {
             people: overrides.googlePeople ?? {},
             list: overrides.googleList ?? {},
         },
+        douban: {
+            search: overrides.doubanSearch ?? {},
+            seasons: overrides.doubanSeasons ?? {},
+            credits: overrides.doubanCredits ?? {},
+        },
         persistent: {
             currentSeason: overrides.persistentCurrentSeason ?? null,
             historyShows: overrides.persistentHistoryShows ?? {},
@@ -162,6 +167,7 @@ function createWatchnowIdsEntry(overrides = {}) {
         ids: {
             trakt: 123,
             tmdb: 456,
+            imdb: "tt123",
         },
         ...overrides,
     };
@@ -172,6 +178,7 @@ function createEpisodeWatchnowIdsEntry(overrides = {}) {
         ids: {
             trakt: 1001,
             tmdb: 9001,
+            imdb: "tt1001",
         },
         showIds: {
             trakt: 555,

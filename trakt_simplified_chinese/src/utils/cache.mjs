@@ -3,10 +3,10 @@ import * as commonUtils from "../utils/common.mjs";
 
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
-const UNIFIED_CACHE_SCHEMA_VERSION = 8;
+const UNIFIED_CACHE_SCHEMA_VERSION = 9;
 const UNIFIED_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 512 * 1024;
-const LINK_ID_FIELDS = ["trakt", "tmdb"];
+const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
 const PRUNE_PRIORITY = {
     "google.comments": 1,
@@ -18,6 +18,9 @@ const PRUNE_PRIORITY = {
     "trakt.translation.not_found": 5,
     "trakt.translation.partial_found": 6,
     "trakt.translation.found": 7,
+    "douban.search": 7,
+    "douban.seasons": 7,
+    "douban.credits": 7,
     "trakt.linkIds": 8,
     "google.people": 9,
 };
@@ -159,6 +162,47 @@ function normalizeHistoryShowsEntry(entry) {
     return Object.keys(shows).length > 0 ? { shows } : null;
 }
 
+function normalizeDoubanSearchEntry(entry) {
+    const id = String(entry?.id ?? "").trim();
+    const targetType = String(entry?.targetType ?? "")
+        .trim()
+        .toLowerCase();
+    return id && targetType ? { id, targetType } : null;
+}
+
+function normalizeStringArray(value) {
+    return commonUtils
+        .ensureArray(value)
+        .map((item) => String(item ?? "").trim())
+        .filter((item, index, array) => item && array.indexOf(item) === index);
+}
+
+function normalizeDoubanSeasonsEntry(entry) {
+    const ids = normalizeStringArray(commonUtils.isPlainObject(entry) ? entry.ids : entry);
+    return ids.length > 0 ? { ids } : null;
+}
+
+function normalizeDoubanCreditsEntry(entry) {
+    const normalized = {};
+    Object.entries(commonUtils.ensureObject(entry)).forEach(([name, roles]) => {
+        const normalizedName = String(name ?? "").trim();
+        const normalizedRoles = normalizeStringArray(roles);
+        if (normalizedName && normalizedRoles.length > 0) {
+            normalized[normalizedName] = normalizedRoles;
+        }
+    });
+    return Object.keys(normalized).length > 0 ? normalized : null;
+}
+
+function normalizeDoubanCache(cache) {
+    const source = commonUtils.ensureObject(cache);
+    return {
+        search: normalizeEntryMap(source.search, normalizeDoubanSearchEntry),
+        seasons: normalizeEntryMap(source.seasons, normalizeDoubanSeasonsEntry),
+        credits: normalizeEntryMap(source.credits, normalizeDoubanCreditsEntry),
+    };
+}
+
 function normalizeLinkIdsEntry(entry) {
     const source = commonUtils.ensureObject(entry);
     const normalized = {};
@@ -253,6 +297,11 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
             people: {},
             list: {},
         },
+        douban: {
+            search: {},
+            seasons: {},
+            credits: {},
+        },
         persistent: {
             currentSeason: null,
             historyShows: {},
@@ -327,6 +376,8 @@ function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VE
         return Object.keys(normalized).length > 0 ? normalized : null;
     });
 
+    nextCache.douban = normalizeDoubanCache(cache.douban);
+
     const persistentCache = commonUtils.ensureObject(cache.persistent);
     nextCache.persistent.currentSeason = commonUtils.isPlainObject(persistentCache.currentSeason) ? persistentCache.currentSeason : null;
     nextCache.persistent.historyShows = normalizeEntryMap(persistentCache.historyShows, normalizeHistoryShowsEntry);
@@ -396,20 +447,22 @@ function loadUnifiedCacheSnapshot(
         };
     }
 
-    const normalizedCache = normalizeUnifiedCache(rawCache, unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
-    const bodyRev = readBodyRev(normalizedCache);
     if (Number(rawCache.version) !== unifiedCacheSchemaVersion) {
+        const resetCache = createEmptyUnifiedCache(unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
         return {
             rawCache,
-            normalizedCache,
-            bodyRev,
+            normalizedCache: resetCache,
+            bodyRev: readBodyRev(resetCache),
             sidecarRev,
-            loadedRev: Math.max(bodyRev, sidecarRev),
+            loadedRev: sidecarRev,
             isValid: true,
             needsRepair: true,
-            snapshotConsistent: bodyRev >= sidecarRev,
+            snapshotConsistent: true,
         };
     }
+
+    const normalizedCache = normalizeUnifiedCache(rawCache, unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
+    const bodyRev = readBodyRev(normalizedCache);
     if (bodyRev < sidecarRev && retryCount + 1 < UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT) {
         return loadUnifiedCacheSnapshot(env, unifiedCacheKey, unifiedCacheSchemaVersion, unifiedCacheMaxBytes, unifiedCacheRevKey, retryCount + 1);
     }
@@ -525,6 +578,33 @@ function buildPrunableEntries(env, cache) {
             bucket: "people",
             key,
             priority: PRUNE_PRIORITY["google.people"],
+            estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
+        });
+    });
+    Object.entries(commonUtils.ensureObject(cache.douban.search)).forEach(([key, entry]) => {
+        prunableEntries.push({
+            scope: "douban",
+            bucket: "search",
+            key,
+            priority: PRUNE_PRIORITY["douban.search"],
+            estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
+        });
+    });
+    Object.entries(commonUtils.ensureObject(cache.douban.seasons)).forEach(([key, entry]) => {
+        prunableEntries.push({
+            scope: "douban",
+            bucket: "seasons",
+            key,
+            priority: PRUNE_PRIORITY["douban.seasons"],
+            estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
+        });
+    });
+    Object.entries(commonUtils.ensureObject(cache.douban.credits)).forEach(([key, entry]) => {
+        prunableEntries.push({
+            scope: "douban",
+            bucket: "credits",
+            key,
+            priority: PRUNE_PRIORITY["douban.credits"],
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
@@ -826,6 +906,22 @@ function savePeopleTranslationCache(env, cache) {
     });
 }
 
+function loadDoubanCache(env) {
+    return normalizeDoubanCache(loadUnifiedCache(env).douban);
+}
+
+function saveDoubanCache(env, cache) {
+    const normalizedCache = normalizeDoubanCache(cache);
+    const unifiedCache = loadUnifiedCache(env);
+    unifiedCache.douban = normalizedCache;
+    saveUnifiedCache(env, unifiedCache, UNIFIED_CACHE_KEY, UNIFIED_CACHE_SCHEMA_VERSION, UNIFIED_CACHE_MAX_BYTES, {
+        owner: {
+            path: ["douban"],
+            value: normalizedCache,
+        },
+    });
+}
+
 function loadListTranslationCache(env) {
     return commonUtils.ensureObject(loadUnifiedCache(env).google.list);
 }
@@ -903,6 +999,7 @@ export {
     getHashedFieldTranslation,
     loadCache,
     loadCommentTranslationCache,
+    loadDoubanCache,
     loadHistoryShowsCache,
     loadImageCache,
     loadLinkIdsCache,
@@ -918,6 +1015,7 @@ export {
     pruneUnifiedCacheToLimit,
     saveCache,
     saveCommentTranslationCache,
+    saveDoubanCache,
     saveHistoryShowsCache,
     saveImageCache,
     saveLinkIdsCache,

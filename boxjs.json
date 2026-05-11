@@ -13,6 +13,7 @@
                 "@dj_trakt_boxjs_configs.posterImageMode",
                 "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
                 "@dj_trakt_boxjs_configs.googleTranslationEnabled",
+                "@dj_trakt_boxjs_configs.characterTranslationEnabled",
                 "@dj_trakt_boxjs_configs.eplayerxEnabled",
                 "@dj_trakt_boxjs_configs.forwardEnabled",
                 "@dj_trakt_boxjs_configs.infuseEnabled",
@@ -61,6 +62,13 @@
                     "val": true,
                     "type": "boolean",
                     "desc": "启用后会翻译评论、社区情绪、冷知识、演员、片单等谷歌翻译场景"
+                },
+                {
+                    "id": "@dj_trakt_boxjs_configs.characterTranslationEnabled",
+                    "name": "用豆瓣翻译角色名",
+                    "val": true,
+                    "type": "boolean",
+                    "desc": "启用后会用豆瓣翻译角色名"
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.eplayerxEnabled",
