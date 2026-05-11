@@ -4,6 +4,7 @@
     "scripts": {
         "build:trakt": "node scripts/build-trakt.mjs",
         "sync:env.js": "node scripts/build-trakt.mjs --sync-env",
+        "migrate:trakt:image-keys": "node scripts/migrate-trakt-image-cache-keys.mjs",
         "format": "biome check --write .",
         "format:check": "biome check .",
         "check:trakt": "npm run format:check && npm run build:trakt && node --check scripts/vendor/Env.js && node --check scripts/vendor/Env.module.mjs && node --check trakt_simplified_chinese/src/main.mjs && node --check trakt_simplified_chinese/src/main-clear-cache.mjs && node --check trakt_simplified_chinese/src/main-expand-cache.mjs && node --check trakt_simplified_chinese/src/utils/common.mjs && node --check trakt_simplified_chinese/trakt_simplified_chinese.js && node --check trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js && node --check trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js",

@@ -12,10 +12,12 @@ const AUTO_MOVIE_123 = "trakt:translation:movies:123";
 const TRANSLATION_OVERRIDES_KEY = "trakt:translation:overrides";
 const AUTO_MOVIE_456 = "trakt:translation:movies:456";
 const AUTO_EPISODE_123_1_2 = "trakt:translation:episodes:123:1:2";
-const IMAGE_MOVIE_123 = "trakt:image:movies:123";
-const IMAGE_SHOW_555 = "trakt:image:shows:555";
-const IMAGE_SEASON_555_1 = "trakt:image:seasons:555:1";
-const ORIGINAL_IMAGE_MOVIE_123 = "original:movies:123";
+const CHINESE_IMAGE_MOVIE_123 = "trakt:image:chinese:movies:123";
+const CHINESE_IMAGE_SHOW_555 = "trakt:image:chinese:shows:555";
+const CHINESE_IMAGE_SEASON_555_1 = "trakt:image:chinese:seasons:555:1";
+const ORIGINAL_IMAGE_MOVIE_123 = "trakt:image:original:movies:123";
+const LEGACY_CHINESE_IMAGE_MOVIE_123 = "trakt:image:movies:123";
+const LEGACY_ORIGINAL_IMAGE_MOVIE_123 = "original:movies:123";
 
 function createResponse() {
     return {
@@ -336,7 +338,7 @@ test("backend translations GET returns auto entries while translation-overrides 
 test("backend images GET 批量读取 movie/show/season 图片缓存", async () => {
     const store = new Map();
     store.set(
-        IMAGE_MOVIE_123,
+        CHINESE_IMAGE_MOVIE_123,
         jsonValue({
             poster: {
                 status: 1,
@@ -349,7 +351,7 @@ test("backend images GET 批量读取 movie/show/season 图片缓存", async () 
         }),
     );
     store.set(
-        IMAGE_SHOW_555,
+        CHINESE_IMAGE_SHOW_555,
         jsonValue({
             poster: {
                 status: 3,
@@ -357,7 +359,7 @@ test("backend images GET 批量读取 movie/show/season 图片缓存", async () 
         }),
     );
     store.set(
-        IMAGE_SEASON_555_1,
+        CHINESE_IMAGE_SEASON_555_1,
         jsonValue({
             poster: {
                 status: 1,
@@ -381,7 +383,53 @@ test("backend images GET 批量读取 movie/show/season 图片缓存", async () 
         assert.equal(res.jsonBody.shows["555"].poster.status, 3);
         assert.ok(Number.isFinite(res.jsonBody.shows["555"].poster.expiresAt));
         assert.equal(res.jsonBody.seasons["555:1"].poster.url, "https://image.tmdb.org/t/p/original/season.jpg");
-        assert.deepEqual(store.mgetCommands[0], ["JSON.MGET", IMAGE_SHOW_555, IMAGE_MOVIE_123, IMAGE_SEASON_555_1, "$"]);
+        assert.deepEqual(store.mgetCommands[0], ["JSON.MGET", CHINESE_IMAGE_SHOW_555, CHINESE_IMAGE_MOVIE_123, CHINESE_IMAGE_SEASON_555_1, "$"]);
+    });
+});
+
+test("backend images GET 硬切后不读取旧图片缓存 key", async () => {
+    const store = new Map();
+    store.set(
+        LEGACY_CHINESE_IMAGE_MOVIE_123,
+        jsonValue({
+            poster: {
+                status: 1,
+                url: "https://image.tmdb.org/t/p/original/legacy-chinese.jpg",
+            },
+        }),
+    );
+    store.set(
+        LEGACY_ORIGINAL_IMAGE_MOVIE_123,
+        jsonValue({
+            poster: {
+                status: 1,
+                url: "https://image.tmdb.org/t/p/original/legacy-original.jpg",
+            },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const chineseRes = await invoke(imagesHandler, {
+            query: {
+                movies: "123",
+                mode: "chinese",
+            },
+        });
+        const originalRes = await invoke(imagesHandler, {
+            query: {
+                movies: "123",
+                mode: "original",
+            },
+        });
+
+        assert.equal(chineseRes.statusCode, 200);
+        assert.deepEqual(chineseRes.jsonBody.movies, {});
+        assert.equal(originalRes.statusCode, 200);
+        assert.deepEqual(originalRes.jsonBody.movies, {});
+        assert.deepEqual(store.mgetCommands, [
+            ["JSON.MGET", CHINESE_IMAGE_MOVIE_123, "$"],
+            ["JSON.MGET", ORIGINAL_IMAGE_MOVIE_123, "$"],
+        ]);
     });
 });
 
@@ -433,14 +481,14 @@ test("backend images POST 写入 FOUND/NOT_FOUND 并为任一 NOT_FOUND 设置 5
             movies: 2,
             seasons: 1,
         });
-        assert.equal(getJsonValue(store, IMAGE_MOVIE_123).poster.url, "https://image.tmdb.org/t/p/original/movie.jpg");
-        assert.equal(getJsonValue(store, IMAGE_MOVIE_123).logo.status, 3);
-        assert.ok(Number.isFinite(getJsonValue(store, IMAGE_MOVIE_123).logo.expiresAt));
-        assert.equal(getJsonValue(store, IMAGE_SEASON_555_1).poster.status, 3);
-        assert.ok(Number.isFinite(getJsonValue(store, IMAGE_SEASON_555_1).poster.expiresAt));
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).poster.url, "https://image.tmdb.org/t/p/original/movie.jpg");
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.status, 3);
+        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.expiresAt));
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).poster.status, 3);
+        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).poster.expiresAt));
         assert.equal(getJsonValue(store, ORIGINAL_IMAGE_MOVIE_123).poster.url, "https://image.tmdb.org/t/p/original/original-movie.jpg");
-        assert.ok(store.expireCommands.some((command) => command[1] === IMAGE_MOVIE_123 && command[2] === 5 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === IMAGE_SEASON_555_1 && command[2] === 5 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 5 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 5 * 24 * 60 * 60));
     });
 });
 
@@ -490,11 +538,11 @@ test("backend images POST 为 PARTIAL_FOUND 设置 30 天 TTL，NOT_FOUND 优先
         });
 
         assert.equal(res.statusCode, 200);
-        assert.equal(getJsonValue(store, IMAGE_MOVIE_123).logo.status, 2);
-        assert.ok(Number.isFinite(getJsonValue(store, IMAGE_MOVIE_123).logo.expiresAt));
-        assert.ok(store.expireCommands.some((command) => command[1] === IMAGE_MOVIE_123 && command[2] === 30 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === IMAGE_SEASON_555_1 && command[2] === 30 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === IMAGE_SHOW_555 && command[2] === 5 * 24 * 60 * 60));
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.status, 2);
+        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.expiresAt));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 30 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 30 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SHOW_555 && command[2] === 5 * 24 * 60 * 60));
     });
 });
 
@@ -527,7 +575,7 @@ test("backend images POST 在全部字段 FOUND 时不设置 TTL", async () => {
         assert.equal(res.statusCode, 200);
         assert.equal(store.persistCommands, undefined);
         assert.equal(
-            (store.expireCommands || []).some((command) => command[1] === IMAGE_MOVIE_123),
+            (store.expireCommands || []).some((command) => command[1] === CHINESE_IMAGE_MOVIE_123),
             false,
         );
     });

@@ -297,10 +297,7 @@ function buildImageCacheKeyForMode(mode, group, lookupKey) {
     if (!normalizedGroup || !normalizedLookupKey) {
         return "";
     }
-    if (normalizedMode === "chinese") {
-        return `trakt:image:${normalizedGroup}:${normalizedLookupKey}`;
-    }
-    return `${normalizedMode}:${normalizedGroup}:${normalizedLookupKey}`;
+    return `trakt:image:${normalizedMode}:${normalizedGroup}:${normalizedLookupKey}`;
 }
 
 function buildOverrideCacheKey(mediaType, lookupKey) {
