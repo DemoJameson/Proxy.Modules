@@ -445,14 +445,8 @@ function removeBiographyGoogleContext(translatedBiography, contextName) {
         return biography;
     }
 
-    if (!biography.startsWith(name)) {
-        return biography;
-    }
-
-    return biography
-        .slice(name.length)
-        .replace(/^\s*[：:，,。.]?\s*/, "")
-        .trim();
+    const contextSeparatorIndex = biography.indexOf(BIOGRAPHY_CONTEXT_SEPARATOR);
+    return contextSeparatorIndex >= 0 ? biography.slice(contextSeparatorIndex + 1).trim() : biography;
 }
 
 function buildPersonNameDisplay(sourceText, translatedText) {
