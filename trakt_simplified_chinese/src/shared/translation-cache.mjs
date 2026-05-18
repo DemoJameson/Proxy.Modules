@@ -94,7 +94,7 @@ function normalizeTranslationFieldsInPlace(translation) {
             delete translation[field];
             return;
         }
-        translation[field] = normalizedValue;
+        translation[field] = chineseScriptConverter.convertTraditionalChineseToSimplified(normalizedValue);
     });
 
     return translation;
@@ -121,7 +121,7 @@ function copyFallbackFieldToCnTranslation(cnTranslation, items, field) {
         const region = TRANSLATION_FALLBACK_REGIONS[i];
         const fallback = findTranslationByRegion(items, region);
         if (fallback && !isEmptyTranslationValue(fallback[field])) {
-            cnTranslation[field] = chineseScriptConverter.convertRegionalTraditionalChineseToSimplified(fallback[field], region);
+            cnTranslation[field] = fallback[field];
             return;
         }
     }

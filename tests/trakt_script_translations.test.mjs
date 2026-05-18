@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
 
 import {
     computeStringHash,
@@ -182,6 +183,20 @@ function createGoogleFailureCases() {
     ];
 }
 
+test("通用繁转简会统一转换不同区域的繁体样例", () => {
+    assert.equal(convertTraditionalChineseToSimplified("國行標題"), "国行标题");
+    assert.equal(convertTraditionalChineseToSimplified("台灣標題"), "台湾标题");
+    assert.equal(convertTraditionalChineseToSimplified("港版標語"), "港版标语");
+    assert.equal(convertTraditionalChineseToSimplified("新加坡標題"), "新加坡标题");
+});
+
+test("通用繁转简对简体与空值输入保持稳定", () => {
+    assert.equal(convertTraditionalChineseToSimplified("中文简介"), "中文简介");
+    assert.equal(convertTraditionalChineseToSimplified(""), "");
+    assert.equal(convertTraditionalChineseToSimplified(null), "");
+    assert.equal(convertTraditionalChineseToSimplified(undefined), "");
+});
+
 test("/translations/zh 会把 fallback zh 响应归一化为 zh-cn 条目", async () => {
     const { result, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/translations/zh?extended=all",
@@ -240,7 +255,7 @@ test("/translations/zh 仅有 tw 条目时会按字段转成简体中文", async
     assert.equal(payload[0].tagline, "繁体标语");
 });
 
-test("/translations/zh 命中 cn 条目时即使是繁体也保持原文", async () => {
+test("/translations/zh 命中 cn 条目时会统一转为简体", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/translations/zh?extended=all",
         body: readFixture("translations-traditional-cn.json"),
@@ -248,12 +263,12 @@ test("/translations/zh 命中 cn 条目时即使是繁体也保持原文", async
 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].country, "cn");
-    assert.equal(payload[0].title, "國行標題");
-    assert.equal(payload[0].overview, "繁體簡介與觀眾評價");
-    assert.equal(payload[0].tagline, "繁體標語");
+    assert.equal(payload[0].title, "国行标题");
+    assert.equal(payload[0].overview, "繁体简介与观众评价");
+    assert.equal(payload[0].tagline, "繁体标语");
 });
 
-test("/translations/zh 使用 sg fallback 时保持原文不转换", async () => {
+test("/translations/zh 使用 sg fallback 时也会统一转为简体", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/translations/zh?extended=all",
         body: readFixture("translations-traditional-sg.json"),
@@ -261,12 +276,12 @@ test("/translations/zh 使用 sg fallback 时保持原文不转换", async () =>
 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].country, "cn");
-    assert.equal(payload[0].title, "新加坡標題");
-    assert.equal(payload[0].overview, "繁體簡介與觀眾評價");
-    assert.equal(payload[0].tagline, "繁體標語");
+    assert.equal(payload[0].title, "新加坡标题");
+    assert.equal(payload[0].overview, "繁体简介与观众评价");
+    assert.equal(payload[0].tagline, "繁体标语");
 });
 
-test("/translations/zh 混合来源时只转换来自 hk 或 tw 的字段", async () => {
+test("/translations/zh 混合来源时所有进入结果的字段都会统一转为简体", async () => {
     const { result, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/translations/zh?extended=all",
         body: readFixture("translations-traditional-mixed.json"),
@@ -275,13 +290,13 @@ test("/translations/zh 混合来源时只转换来自 hk 或 tw 的字段", asyn
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].country, "cn");
     assert.equal(payload[0].title, "台湾标题");
-    assert.equal(payload[0].overview, "新加坡繁體簡介");
+    assert.equal(payload[0].overview, "新加坡繁体简介");
     assert.equal(payload[0].tagline, "港版标语");
 
     const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
     assert.deepEqual(cacheEntry.translation, {
         title: "台湾标题",
-        overview: "新加坡繁體簡介",
+        overview: "新加坡繁体简介",
         tagline: "港版标语",
     });
 });
