@@ -81,15 +81,25 @@ function buildForwardDeeplink(target, deeplinkContext) {
         return "";
     }
 
+    const baseUrl = "https://fwds.cc/tmdb";
+
     if (target.mediaType === mediaTypes.MEDIA_TYPE.MOVIE && commonUtils.isNonNullish(deeplinkContext.tmdbId)) {
-        return `forward://tmdb?id=${deeplinkContext.tmdbId}&type=movie`;
+        return `${baseUrl}?type=movie&id=${deeplinkContext.tmdbId}`;
     }
 
     if (
         (target.mediaType === mediaTypes.MEDIA_TYPE.SHOW || target.mediaType === mediaTypes.MEDIA_TYPE.EPISODE) &&
         commonUtils.isNonNullish(deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId)
     ) {
-        return `forward://tmdb?id=${deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId}&type=tv`;
+        const link = `${baseUrl}?type=tv&id=${deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId}`;
+        if (commonUtils.isNonNullish(deeplinkContext.seasonNumber)) {
+            const seasonLink = `${link}&season=${deeplinkContext.seasonNumber}`;
+            if (commonUtils.isNonNullish(deeplinkContext.episodeNumber)) {
+                return `${seasonLink}&episode=${deeplinkContext.episodeNumber}`;
+            }
+            return seasonLink;
+        }
+        return link;
     }
 
     return "";
@@ -103,14 +113,14 @@ function buildEplayerXDeeplink(target, deeplinkContext) {
     const baseUrl = "https://eplayerx.com/tmdb-info/detail";
 
     if (target.mediaType === mediaTypes.MEDIA_TYPE.MOVIE && commonUtils.isNonNullish(deeplinkContext.tmdbId)) {
-        return `${baseUrl}?id=${deeplinkContext.tmdbId}&type=movie`;
+        return `${baseUrl}?type=movie&id=${deeplinkContext.tmdbId}`;
     }
 
     if (
         (target.mediaType === mediaTypes.MEDIA_TYPE.SHOW || target.mediaType === mediaTypes.MEDIA_TYPE.EPISODE) &&
         commonUtils.isNonNullish(deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId)
     ) {
-        const link = `${baseUrl}?id=${deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId}&type=tv`;
+        const link = `${baseUrl}?type=tv&id=${deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId}`;
         if (commonUtils.isNonNullish(deeplinkContext.seasonNumber)) {
             const seasonLink = `${link}&traktSeason=${deeplinkContext.seasonNumber}`;
             if (commonUtils.isNonNullish(deeplinkContext.episodeNumber)) {

@@ -306,8 +306,11 @@ test("Sofa streaming availability 默认使用 EplayerX Universal Link movie 链
 
     const payload = JSON.parse(result.body);
     const eplayerxOption = payload.streamingOptions.us.find((item) => item.service.id === "eplayerx");
-    assert.equal(eplayerxOption.link, "https://eplayerx.com/tmdb-info/detail?id=123&type=movie");
-    assert.equal(eplayerxOption.videoLink, "https://eplayerx.com/tmdb-info/detail?id=123&type=movie");
+    const forwardOption = payload.streamingOptions.us.find((item) => item.service.id === "forward");
+    assert.equal(eplayerxOption.link, "https://eplayerx.com/tmdb-info/detail?type=movie&id=123");
+    assert.equal(eplayerxOption.videoLink, "https://eplayerx.com/tmdb-info/detail?type=movie&id=123");
+    assert.equal(forwardOption.link, "https://fwds.cc/tmdb?type=movie&id=123");
+    assert.equal(forwardOption.videoLink, "https://fwds.cc/tmdb?type=movie&id=123");
 });
 
 test("Sofa streaming availability 默认使用 EplayerX Universal Link TV 链接且不追加季集参数", async () => {
@@ -344,10 +347,17 @@ test("Sofa streaming availability 默认使用 EplayerX Universal Link TV 链接
     const showOption = payload.streamingOptions.us.find((item) => item.service.id === "eplayerx");
     const seasonOption = payload.seasons[0].streamingOptions.us.find((item) => item.service.id === "eplayerx");
     const episodeOption = payload.seasons[0].episodes[0].streamingOptions.us.find((item) => item.service.id === "eplayerx");
-    assert.equal(showOption.link, "https://eplayerx.com/tmdb-info/detail?id=299167&type=tv");
-    assert.equal(seasonOption.link, "https://eplayerx.com/tmdb-info/detail?id=299167&type=tv");
-    assert.equal(episodeOption.link, "https://eplayerx.com/tmdb-info/detail?id=299167&type=tv");
-    assert.equal(episodeOption.videoLink, "https://eplayerx.com/tmdb-info/detail?id=299167&type=tv");
+    const forwardShowOption = payload.streamingOptions.us.find((item) => item.service.id === "forward");
+    const forwardSeasonOption = payload.seasons[0].streamingOptions.us.find((item) => item.service.id === "forward");
+    const forwardEpisodeOption = payload.seasons[0].episodes[0].streamingOptions.us.find((item) => item.service.id === "forward");
+    assert.equal(showOption.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
+    assert.equal(seasonOption.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
+    assert.equal(episodeOption.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
+    assert.equal(episodeOption.videoLink, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
+    assert.equal(forwardShowOption.link, "https://fwds.cc/tmdb?type=tv&id=299167");
+    assert.equal(forwardSeasonOption.link, "https://fwds.cc/tmdb?type=tv&id=299167");
+    assert.equal(forwardEpisodeOption.link, "https://fwds.cc/tmdb?type=tv&id=299167");
+    assert.equal(forwardEpisodeOption.videoLink, "https://fwds.cc/tmdb?type=tv&id=299167");
 });
 
 test("Sofa streaming availability 在 404 时会反查 IMDb 到 TMDb 并返回注入结果", async () => {
