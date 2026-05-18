@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import * as esbuild from "esbuild";
 
-import { argumentFields, boxjs, metadata, mitmHosts, SHORTCUT_URL, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+import { argumentFields, boxjs, metadata, mitmHosts, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, "..");
@@ -305,8 +305,6 @@ function renderSgmodule() {
         `#!author=${metadata.author}`,
         `#!arguments=${argumentPairs}`,
         `#!arguments-desc=${argumentDescriptions}`,
-        "",
-        `#借助快捷指令跳转选项的配套快捷指令: ${SHORTCUT_URL}`,
         "",
         "[Script]",
     ];

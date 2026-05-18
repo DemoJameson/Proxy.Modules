@@ -1833,12 +1833,9 @@ test("live script: request route coverage matrix covers all request phase routes
     const requestCases = [
         {
             url: `${WATCHNOW_REDIRECT_URL}?deeplink=infuse%3A%2F%2Fmovie%2F123`,
-            argument: {
-                useShortcutsJumpEnabled: true,
-            },
             assertResult(result) {
                 assert.equal(result.response.status, 302);
-                assert.match(result.response.headers.Location, /^shortcuts:\/\/run-shortcut\?/);
+                assert.equal(result.response.headers.Location, "infuse://movie/123");
             },
         },
         {

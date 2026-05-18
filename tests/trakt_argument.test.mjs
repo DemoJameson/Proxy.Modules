@@ -65,24 +65,9 @@ test("historyEpisodesMergedByShow=true 时历史剧集请求会改写到最小 l
     assert.equal(result.url, "https://api.trakt.tv/users/me/history/episodes?page=1&limit=500");
 });
 
-test("useShortcutsJumpEnabled=true 时 redirect 请求会返回 shortcuts jump", async () => {
+test("redirect 请求直接返回原 deeplink", async () => {
     const { result } = await runRequestCase({
         url: `${WATCHNOW_REDIRECT_URL}?deeplink=infuse%3A%2F%2Fmovie%2F456`,
-        argument: {
-            useShortcutsJumpEnabled: true,
-        },
-    });
-
-    assert.equal(result.response.status, 302);
-    assert.equal(result.response.headers.Location, "shortcuts://run-shortcut?name=%E6%89%93%E5%BC%80%E9%93%BE%E6%8E%A5&input=text&text=infuse%3A%2F%2Fmovie%2F456");
-});
-
-test("useShortcutsJumpEnabled=false 时 redirect 请求直接返回原 deeplink", async () => {
-    const { result } = await runRequestCase({
-        url: `${WATCHNOW_REDIRECT_URL}?deeplink=infuse%3A%2F%2Fmovie%2F456`,
-        argument: {
-            useShortcutsJumpEnabled: false,
-        },
     });
 
     assert.equal(result.response.status, 302);

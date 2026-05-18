@@ -507,35 +507,19 @@ test("/shows/:id/seasons 会应用缓存剧集翻译并更新 link id 缓存", a
     assert.equal(parseUnifiedCache(persistentData).persistent.currentSeason, null);
 });
 
-test("direct redirect 请求在启用时会返回 shortcuts 跳转", async () => {
+test("direct redirect 请求会直接返回 deeplink", async () => {
     const deeplink = "infuse://movie/123";
     const { result } = await runRequestCase({
         url: `${WATCHNOW_REDIRECT_URL}?deeplink=${encodeURIComponent(deeplink)}`,
-        argument: {
-            useShortcutsJumpEnabled: true,
-        },
     });
 
     assert.equal(result.response.status, 302);
-    assert.match(result.response.headers.Location, /^shortcuts:\/\/run-shortcut\?/);
-    assert.match(result.response.headers.Location, /input=text/);
+    assert.equal(result.response.headers.Location, deeplink);
 });
 
 test("tmdb logo 请求会重定向到仓库内置 logo 资源", async () => {
     const { result } = await runRequestCase({
         url: "https://image.tmdb.org/t/p/w342/forward_logo.webp",
-    });
-
-    assert.equal(result.response.status, 302);
-    assert.equal(result.response.headers.Location, "https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/images/forward_logo.webp");
-});
-
-test("useShortcutsJumpEnabled 不会影响 tmdb logo redirect 的目标地址", async () => {
-    const { result } = await runRequestCase({
-        url: "https://image.tmdb.org/t/p/w342/forward_logo.webp",
-        argument: {
-            useShortcutsJumpEnabled: true,
-        },
     });
 
     assert.equal(result.response.status, 302);

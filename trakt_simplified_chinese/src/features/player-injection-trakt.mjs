@@ -6,7 +6,6 @@ import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
 const WATCHNOW_REDIRECT_URL = "https://proxy-modules.demojameson.de5.net/api/redirect";
-const SHORTCUTS_OPENLINK_URL = `shortcuts://run-shortcut?name=${encodeURIComponent("打开链接")}&input=text&text=`;
 
 const WATCHNOW_DEFAULT_REGION = "us";
 const WATCHNOW_DEFAULT_CURRENCY = "usd";
@@ -60,10 +59,6 @@ function buildWatchnowLink(link) {
     }
 
     return `${WATCHNOW_REDIRECT_URL}?deeplink=${encodeURIComponent(link)}`;
-}
-
-function buildShortcutsJumpLink(deeplink) {
-    return deeplink ? `${SHORTCUTS_OPENLINK_URL}${encodeURIComponent(deeplink)}` : "";
 }
 
 function fetchMediaDetail(mediaType, traktId) {
@@ -345,18 +340,6 @@ function resolveDirectRedirectLocation(url) {
     return "";
 }
 
-function isWatchnowRedirectUrl(url) {
-    try {
-        const redirectUrl = new URL(WATCHNOW_REDIRECT_URL);
-        return (
-            String(url.hostname).toLowerCase() === String(redirectUrl.hostname).toLowerCase() &&
-            commonUtils.normalizePathname(url.pathname) === commonUtils.normalizePathname(redirectUrl.pathname)
-        );
-    } catch {
-        return false;
-    }
-}
-
 async function handleWatchnow() {
     const context = globalThis.$ctx;
     const payload = JSON.parse(context.responseBody);
@@ -397,13 +380,6 @@ async function handleUserSettings() {
 async function handleDirectRedirectRequest() {
     const context = globalThis.$ctx;
     const location = resolveDirectRedirectLocation(context.url);
-    if (location && context.argument.useShortcutsJumpEnabled && isWatchnowRedirectUrl(context.url)) {
-        return {
-            type: "redirect",
-            location: buildShortcutsJumpLink(location),
-        };
-    }
-
     return location ? { type: "redirect", location } : { type: "passThrough" };
 }
 
