@@ -63,6 +63,14 @@ function mergeLinkIdsCacheEntry(currentEntry, nextEntry) {
         merged.country = current.country;
     }
 
+    const incomingTitle = String(incoming.title ?? "").trim();
+    const currentTitle = String(current.title ?? "").trim();
+    if (incomingTitle) {
+        merged.title = incomingTitle;
+    } else if (currentTitle) {
+        merged.title = currentTitle;
+    }
+
     return merged;
 }
 
@@ -111,6 +119,7 @@ function cacheMediaIdsFromDetailResponse(linkCache, mediaType, ref, data) {
             ids: normalizeIds(data.ids),
             language: data?.language ?? null,
             country: data?.country ?? null,
+            title: data?.title ?? null,
         });
     }
 
@@ -176,7 +185,7 @@ function hasRequiredFields(entry, requiredFields = []) {
         return false;
     }
 
-    return commonUtils.ensureArray(requiredFields).every((field) => commonUtils.isNonNullish(entry[field]));
+    return commonUtils.ensureArray(requiredFields).every((field) => String(entry[field] ?? "").trim());
 }
 
 async function ensureMediaIdsCacheEntry(fetchMediaDetail, saveLinkIdsCache, linkCache, mediaType, traktId, options = {}) {
@@ -195,6 +204,7 @@ async function ensureMediaIdsCacheEntry(fetchMediaDetail, saveLinkIdsCache, link
             ids: normalizeIds(payload.ids),
             language: payload?.language ?? null,
             country: payload?.country ?? null,
+            title: payload?.title ?? null,
         });
         saveLinkIdsCache(linkCache);
         entry = getLinkIdsCacheEntry(linkCache, traktId);

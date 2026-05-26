@@ -159,7 +159,7 @@ test("people detail 会通过 Google 翻译未命中的姓名和 biography 并�
         },
     });
 
-    const { result, persistentData } = await runResponseCase({
+    const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/people/42",
         body,
         httpPostMocks: {
@@ -170,6 +170,8 @@ test("people detail 会通过 Google 翻译未命中的姓名和 biography 并�
     const payload = JSON.parse(result.body);
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
+    const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["Tom Hanks", "An American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
@@ -355,7 +357,7 @@ test("people detail 翻译 biography 时会用 TMDb 中文名作为 Google 语�
             ),
         }),
         httpPostMocks: {
-            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["汤姆·汉克斯：一位美国演员和电影制作人。"]),
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Tom Hanks (汤姆·汉克斯)\n一位美国演员和电影制作人。"]),
         },
     });
 
@@ -363,14 +365,14 @@ test("people detail 翻译 biography 时会用 TMDb 中文名作为 Google 语�
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["汤姆·汉克斯：An American actor and filmmaker."]);
+    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["Tom Hanks (汤姆·汉克斯)\nAn American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.equal(cache["42"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
     assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
 });
 
-test("people detail 翻译 biography 时会删除返回文本第一个冒号以及之前的提示词", async () => {
+test("people detail 翻译 biography 时不会删除冒号格式语境前缀", async () => {
     const { result, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/people/tom-hanks?extended=full",
         body: readFixture("people-detail.json"),
@@ -389,15 +391,15 @@ test("people detail 翻译 biography 时会删除返回文本第一个冒号以�
             ),
         }),
         httpPostMocks: {
-            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["简介：一位美国演员和电影制作人。"]),
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Tom Hanks (汤姆·汉克斯)：一位美国演员和电影制作人。"]),
         },
     });
 
     const payload = JSON.parse(result.body);
-    assert.equal(payload.biography, "一位美国演员和电影制作人。");
+    assert.equal(payload.biography, "Tom Hanks (汤姆·汉克斯)：一位美国演员和电影制作人。");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42"].biography.translatedText, "Tom Hanks (汤姆·汉克斯)：一位美国演员和电影制作人。");
 });
 
 test("people detail 翻译 biography 时不会删除半角冒号前缀", async () => {
@@ -440,7 +442,7 @@ test("people detail 无 TMDb 姓名缓存时会先请求 TMDb 再用中文名翻
             }),
         },
         httpPostMocks: {
-            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["汤姆·汉克斯：一位美国演员和电影制作人。"]),
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Tom Hanks (汤姆·汉克斯)\n一位美国演员和电影制作人。"]),
         },
     });
 
@@ -449,11 +451,38 @@ test("people detail 无 TMDb 姓名缓存时会先请求 TMDb 再用中文名翻
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["汤姆·汉克斯：An American actor and filmmaker."]);
+    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["Tom Hanks (汤姆·汉克斯)\nAn American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
     assert.equal(cache["42"].name.source, "tmdb");
+    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+});
+
+test("people detail 获取不到 TMDb 中文名时 biography 不添加 Google 语境", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/people/tom-hanks?extended=full",
+        body: readFixture("people-detail.json"),
+        httpGetMocks: {
+            [TMDB_PERSON_URL]: JSON.stringify({
+                name: "Tom Hanks",
+            }),
+        },
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["汤姆·汉克斯", "一位美国演员和电影制作人。"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
+    assert.equal(payload.biography, "一位美国演员和电影制作人。");
+
+    const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["Tom Hanks", "An American actor and filmmaker."]);
+
+    const cache = parseUnifiedCache(persistentData).google.people;
+    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(cache["42"].name.source, "google");
     assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
 });
 
@@ -1317,7 +1346,7 @@ test("search person 列表翻译 biography 时会用 TMDb 中文名缓存作为 
             },
         }),
         httpPostMocks: {
-            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["巩俐：华裔新加坡女演员。"]),
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Gong Li (巩俐)\n华裔新加坡女演员。"]),
         },
     });
 
@@ -1325,7 +1354,7 @@ test("search person 列表翻译 biography 时会用 TMDb 中文名缓存作为 
     assert.equal(payload[0].person.name, "巩俐");
     assert.equal(payload[0].person.biography, "华裔新加坡女演员。");
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["巩俐：Chinese-born Singaporean actress."]);
+    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), ["Gong Li (巩俐)\nChinese-born Singaporean actress."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.deepEqual(cache["99"], {

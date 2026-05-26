@@ -277,12 +277,31 @@ test("cache utils: pruneUnifiedCacheToLimit can prune douban cache before link i
             imdb: "tt123",
         },
         language: "cn",
+        title: "Original Movie",
     };
 
     const pruned = pruneUnifiedCacheToLimit(env, cache, 9, 900);
 
     assert.equal(pruned.douban.credits["35517044"], undefined);
     assert.equal(pruned.trakt.linkIds["123"].ids.imdb, "tt123");
+    assert.equal(pruned.trakt.linkIds["123"].title, "Original Movie");
+});
+
+test("cache utils: normalizeUnifiedCache preserves link ids source title", () => {
+    const normalized = normalizeUnifiedCache({
+        trakt: {
+            linkIds: {
+                123: {
+                    ids: { trakt: 123, tmdb: 456 },
+                    language: "en",
+                    country: "US",
+                    title: "Original Movie",
+                },
+            },
+        },
+    });
+
+    assert.equal(normalized.trakt.linkIds["123"].title, "Original Movie");
 });
 
 test("cache utils: pruneUnifiedCacheToLimit caps oversized people translations even under total limit", () => {

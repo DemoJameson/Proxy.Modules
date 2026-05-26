@@ -1,3 +1,4 @@
+import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import * as googleTranslationPipeline from "../shared/google-translation-pipeline.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
@@ -297,6 +298,17 @@ function getSentimentTranslationCacheEntry(cache, mediaType, traktId) {
     return entry || null;
 }
 
+function buildSentimentGoogleContextLine(env, target) {
+    const traktId = String(target?.traktId ?? "").trim();
+    if (!traktId) {
+        return "";
+    }
+
+    const linkEntry = commonUtils.ensureObject(cacheUtils.loadLinkIdsCache(env)[traktId]);
+    const translationEntry = commonUtils.ensureObject(cacheUtils.loadCache(env)[buildSentimentCacheKey(target?.mediaType, traktId)]);
+    return googleTranslationContext.buildContextLine(linkEntry.title, translationEntry.translation?.title);
+}
+
 function storeSentimentTranslationCacheEntry(cache, mediaType, traktId, payload) {
     const cacheKey = buildSentimentCacheKey(mediaType, traktId);
     if (!cacheKey) {
@@ -324,14 +336,14 @@ function collectSentimentTranslationTargets(payload) {
         translationTargets.push({ target: item, field: "sentiment", text: String(item?.sentiment ?? "") });
     });
     commonUtils.ensureArray(payload.summary).forEach((item, index) => {
-        translationTargets.push({ target: payload.summary, field: index, text: String(item ?? "") });
+        translationTargets.push({ target: payload.summary, field: index, text: String(item ?? ""), useContext: true });
     });
-    translationTargets.push({ target: payload, field: "analysis", text: String(payload.analysis ?? "") });
-    translationTargets.push({ target: payload, field: "highlight", text: String(payload.highlight ?? "") });
+    translationTargets.push({ target: payload, field: "analysis", text: String(payload.analysis ?? ""), useContext: true });
+    translationTargets.push({ target: payload, field: "highlight", text: String(payload.highlight ?? ""), useContext: true });
     commonUtils.ensureArray(payload.items).forEach((item) => {
-        translationTargets.push({ target: item, field: "text", text: String(item?.text ?? "") });
+        translationTargets.push({ target: item, field: "text", text: String(item?.text ?? ""), useContext: true });
     });
-    translationTargets.push({ target: payload, field: "text", text: String(payload.text ?? "") });
+    translationTargets.push({ target: payload, field: "text", text: String(payload.text ?? ""), useContext: true });
 
     return translationTargets;
 }
@@ -341,15 +353,17 @@ function buildTranslationMetadataFieldName(prefix, field) {
     return `${prefix}${normalizedField.charAt(0).toUpperCase()}${normalizedField.slice(1)}`;
 }
 
-async function translateSentimentItems(items) {
+async function translateSentimentItems(items, options = {}) {
+    const contextLine = String(options.contextLine ?? "").trim();
     const translationTargets = commonUtils.ensureArray(items).map((item) => {
         const sourceText = String(item?.text ?? "").trim();
+        const useContext = !!item?.useContext && contextLine;
         return {
             sourceLanguage: "en",
-            sourceText,
+            sourceText: useContext ? googleTranslationContext.buildSourceText(sourceText, contextLine) : sourceText,
             applyTranslation(translatedText) {
                 item.sourceText = sourceText;
-                item.translatedText = translatedText;
+                item.translatedText = useContext ? googleTranslationContext.removeContextLine(translatedText) : translatedText;
                 return true;
             },
         };
@@ -374,6 +388,14 @@ function applyTranslatedCacheMetadata(items) {
     commonUtils.ensureArray(items).forEach((item) => {
         const translatedText = String(item?.translatedText ?? "").trim();
         if (!translatedText) {
+            return;
+        }
+
+        if (commonUtils.isArray(item.target) && Number.isInteger(Number(item.field))) {
+            item.target[Number(item.field)] = {
+                sourceText: item.text,
+                translatedText,
+            };
             return;
         }
 
@@ -412,14 +434,15 @@ async function handleSentiments() {
 
     const translatedData = cloneSentimentsPayload(data);
     const translationTargets = collectSentimentTranslationTargets(translatedData);
+    const contextLine = buildSentimentGoogleContextLine(context.env, target);
 
     try {
-        await translateSentimentItems(translationTargets);
+        await translateSentimentItems(translationTargets, { contextLine });
         applyTranslatedResponseValues(translationTargets);
 
         const cachePayload = cloneSentimentsPayload(data);
         const cacheTargets = collectSentimentTranslationTargets(cachePayload);
-        await translateSentimentItems(cacheTargets);
+        await translateSentimentItems(cacheTargets, { contextLine });
         applyTranslatedCacheMetadata(cacheTargets);
 
         storeSentimentTranslationCacheEntry(cache, target.mediaType, target.traktId, cachePayload);

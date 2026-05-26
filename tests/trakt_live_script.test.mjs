@@ -815,6 +815,8 @@ test("live script: response route coverage matrix covers all response phase rout
                 tagline: "覆盖直出中文标语",
             },
         }),
+    };
+    const personCreditsMovieTranslation = {
         [`movie:${personCreditsSample.movie.ids.trakt}`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖人物作品中文电影",
@@ -924,6 +926,34 @@ test("live script: response route coverage matrix covers all response phase rout
             assertPayload(payload) {
                 assert.match(payload[0].person.name, /^汤姆·汉克斯/);
                 assert.equal(payload[0].person.biography, "一位美国演员和电影制作人。");
+            },
+        },
+        {
+            url: "https://api.trakt.tv/search/movie,show?extended=cloud9,full&limit=100&page=1&query=live",
+            body: JSON.stringify([
+                {
+                    type: "movie",
+                    score: 1,
+                    movie: movieSample.movie,
+                },
+            ]),
+            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload[0].movie.title, "覆盖中文电影");
+            },
+        },
+        {
+            url: "https://api.trakt.tv/search/recent_by_id/global/movies,shows?extended=cloud9,full,images&limit=50",
+            body: JSON.stringify([
+                {
+                    type: "movie",
+                    score: 1,
+                    movie: movieSample.movie,
+                },
+            ]),
+            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload[0].movie.title, "覆盖中文电影");
             },
         },
         {
@@ -1061,6 +1091,16 @@ test("live script: response route coverage matrix covers all response phase rout
             },
         },
         {
+            url: "https://api.trakt.tv/users/me/watching",
+            body: JSON.stringify({
+                movie: movieSample.movie,
+            }),
+            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload.movie.title, "覆盖中文电影");
+            },
+        },
+        {
             url: "https://api.trakt.tv/users/me/collection/movies",
             body: JSON.stringify(wrappedMovieItems),
             persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
@@ -1095,7 +1135,7 @@ test("live script: response route coverage matrix covers all response phase rout
             headers: {
                 "user-agent": "Rippple/1.0",
             },
-            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            persistentData: createUnifiedPersistentData({ traktTranslation: personCreditsMovieTranslation }),
             assertPayload(payload) {
                 const movie = Array.isArray(payload.cast) ? payload.cast[0]?.movie : null;
                 assert.equal(movie?.title, "覆盖人物作品中文电影");

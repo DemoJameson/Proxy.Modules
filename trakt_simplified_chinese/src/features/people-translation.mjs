@@ -2,6 +2,7 @@ import * as doubanClientModule from "../outbound/douban-client.mjs";
 import * as googleTranslateClient from "../outbound/google-translate-client.mjs";
 import * as tmdbClientModule from "../outbound/tmdb-client.mjs";
 import * as traktApiClientModule from "../outbound/trakt-api-client.mjs";
+import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import * as googleTranslationPipeline from "../shared/google-translation-pipeline.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as traktLinkIds from "../shared/trakt-link-ids.mjs";
@@ -14,7 +15,6 @@ const PEOPLE_NAME_SOURCE = {
     GOOGLE: "google",
 };
 const PEOPLE_LIST_ORIGINAL_NAME_KEY = "__traktOriginalName";
-const BIOGRAPHY_CONTEXT_SEPARATOR = "：";
 const DOUBAN_CHARACTER_LANGUAGES = new Set(["zh", "ja", "ko"]);
 const DOUBAN_SEARCH_TARGET_TYPE = {
     MOVIE: "movie",
@@ -432,21 +432,19 @@ function getCachedTmdbPersonNameTranslation(entry, sourceText) {
     return getCachedPersonNameTranslation(entry, sourceText);
 }
 
-function buildBiographyGoogleSourceText(originalBiography, contextName) {
-    const biography = String(originalBiography ?? "").trim();
-    const name = String(contextName ?? "").trim();
-    return biography && name ? `${name}${BIOGRAPHY_CONTEXT_SEPARATOR}${biography}` : biography;
+function buildBiographyGoogleContextLine(originalName, translatedName) {
+    const sourceName = String(originalName ?? "").trim();
+    const localizedName = String(translatedName ?? "").trim();
+    return sourceName && localizedName ? googleTranslationContext.buildContextLine(sourceName, localizedName) : "";
 }
 
-function removeBiographyGoogleContext(translatedBiography, contextName) {
-    const biography = String(translatedBiography ?? "").trim();
-    const name = String(contextName ?? "").trim();
-    if (!biography || !name) {
-        return biography;
-    }
+function buildBiographyGoogleSourceText(originalBiography, originalName, translatedName) {
+    const biography = String(originalBiography ?? "").trim();
+    return googleTranslationContext.buildSourceText(biography, buildBiographyGoogleContextLine(originalName, translatedName));
+}
 
-    const contextSeparatorIndex = biography.indexOf(BIOGRAPHY_CONTEXT_SEPARATOR);
-    return contextSeparatorIndex >= 0 ? biography.slice(contextSeparatorIndex + 1).trim() : biography;
+function removeBiographyGoogleContext(translatedBiography) {
+    return googleTranslationContext.removeContextLine(translatedBiography);
 }
 
 function buildPersonNameDisplay(sourceText, translatedText) {
@@ -778,7 +776,7 @@ function applyPeopleCollectionCachedTranslations(data, cache) {
                 }
             } else if (!commonUtils.containsChineseCharacter(originalBiography) && personKeys.length > 0) {
                 const contextName = cacheEntries.map((entry) => getCachedTmdbPersonNameTranslation(entry, originalName)).find(Boolean) ?? "";
-                biographyTargets.push({ person, originalBiography, personKeys, contextName });
+                biographyTargets.push({ person, originalName, originalBiography, personKeys, contextName });
             }
         }
     });
@@ -842,15 +840,16 @@ async function applyPeopleCollectionGoogleBiographyTranslations(translationTarge
         commonUtils.ensureArray(translationTargets).map((target) => {
             const person = target?.person;
             const originalBiography = String(target?.originalBiography ?? "").trim();
+            const originalName = String(target?.originalName ?? "").trim();
             const contextName = String(target?.contextName ?? "").trim();
             return {
                 sourceLanguage: "en",
-                sourceText: buildBiographyGoogleSourceText(originalBiography, contextName),
+                sourceText: buildBiographyGoogleSourceText(originalBiography, originalName, contextName),
                 shouldAcceptTranslation(translatedBiography) {
-                    return commonUtils.isPlainObject(person) && originalBiography && removeBiographyGoogleContext(translatedBiography, contextName);
+                    return commonUtils.isPlainObject(person) && originalBiography && removeBiographyGoogleContext(translatedBiography);
                 },
                 setCachedTranslation(translatedBiography) {
-                    const normalizedBiography = removeBiographyGoogleContext(translatedBiography, contextName);
+                    const normalizedBiography = removeBiographyGoogleContext(translatedBiography);
                     let changed = false;
                     commonUtils.ensureArray(target?.personKeys).forEach((personKey) => {
                         changed =
@@ -864,7 +863,7 @@ async function applyPeopleCollectionGoogleBiographyTranslations(translationTarge
                     return changed;
                 },
                 applyTranslation(translatedBiography) {
-                    const normalizedBiography = removeBiographyGoogleContext(translatedBiography, contextName);
+                    const normalizedBiography = removeBiographyGoogleContext(translatedBiography);
                     if (!commonUtils.isPlainObject(person) || !normalizedBiography || person.biography === normalizedBiography) {
                         return false;
                     }
@@ -1233,7 +1232,7 @@ async function handlePeopleDetail() {
     if (shouldFetchGoogleBiography) {
         googleTranslationTargets.push({
             field: "biography",
-            sourceText: buildBiographyGoogleSourceText(originalBiography, biographyContextName),
+            sourceText: buildBiographyGoogleSourceText(originalBiography, originalName, biographyContextName),
         });
     }
     const googlePromise =
@@ -1263,7 +1262,7 @@ async function handlePeopleDetail() {
                 }
 
                 if (target.field === "biography") {
-                    const translatedBiography = removeBiographyGoogleContext(googleTranslations[index], biographyContextName);
+                    const translatedBiography = removeBiographyGoogleContext(googleTranslations[index]);
                     if (!cachedBiography && translatedBiography) {
                         data.biography = translatedBiography;
                         nextCacheEntry.biography = {

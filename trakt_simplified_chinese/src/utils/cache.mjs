@@ -231,6 +231,11 @@ function normalizeLinkIdsEntry(entry) {
         normalized.country = country;
     }
 
+    const title = String(source.title ?? "").trim();
+    if (title) {
+        normalized.title = title;
+    }
+
     return ids ? normalized : null;
 }
 
