@@ -710,6 +710,32 @@ test("handleWrapperMediaList 按 wrapper 路由分组生效", async (t) => {
             },
         },
         {
+            name: "users hidden dropped route",
+            url: "https://apiz.trakt.tv/users/hidden/dropped?extended=full,images&limit=15&page=1",
+            body: JSON.stringify([
+                {
+                    hidden_at: "2026-05-01T00:00:00.000Z",
+                    type: "show",
+                    section: "dropped",
+                    show: {
+                        title: "Original Show Title",
+                        overview: "Original Show Overview",
+                        first_aired: "2025-01-01T00:00:00.000Z",
+                        network: "HBO",
+                        tagline: "Original Show Tagline",
+                        ids: {
+                            trakt: 456,
+                        },
+                    },
+                },
+            ]),
+            persistentData: createShowPersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].show.title, "中文剧名");
+                assert.equal(payload[0].section, "dropped");
+            },
+        },
+        {
             name: "favorites mixed route",
             url: "https://api.trakt.tv/users/me/favorites/media/rank",
             body: createMixedMovieBody(),
@@ -1582,6 +1608,7 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["directMedia.related", "https://apiz.trakt.tv/movies/531178/related?extended=cloud9,full"],
         ["directMedia.related", "https://apiz.trakt.tv/shows/531178/related?extended=cloud9,full"],
         ["wrapperMedia.popularNext", "https://api.trakt.tv/media/popular/next"],
+        ["users.hidden.section", "https://apiz.trakt.tv/users/hidden/dropped?extended=full,images&limit=15&page=1"],
         ["users.history.mediaTyped", "https://api.trakt.tv/users/me/history/shows?extended=full&limit=50&page=2"],
         ["users.watching", "https://apiz.trakt.tv/users/me/watching?extended=cloud9,full"],
         ["search.media", "https://apiz.trakt.tv/search/movie,show?extended=cloud9,full&limit=100&page=1&query=%E5%AE%B6%E5%BC%91%E6%9C%8D%E5%8A%A1"],

@@ -1690,6 +1690,40 @@ test("live script: response route coverage matrix covers all response phase rout
             },
         },
         {
+            url: "https://apiz.trakt.tv/users/hidden/dropped?extended=full,images&limit=15&page=1",
+            body: JSON.stringify([
+                {
+                    hidden_at: "2026-05-01T00:00:00.000Z",
+                    type: "show",
+                    section: "dropped",
+                    show: {
+                        title: "Original Show Title",
+                        overview: "Original Show Overview",
+                        first_aired: "2025-01-01T00:00:00.000Z",
+                        network: "HBO",
+                        tagline: "Original Show Tagline",
+                        ids: {
+                            trakt: 456,
+                        },
+                    },
+                },
+            ]),
+            persistentData: createUnifiedPersistentData({
+                traktTranslation: {
+                    "show:456": createMediaTranslationEntry({
+                        translation: {
+                            title: "中文剧名",
+                            overview: "中文剧集简介",
+                            tagline: "中文剧集标语",
+                        },
+                    }),
+                },
+            }),
+            assertPayload(payload) {
+                assert.equal(payload[0].show.title, "中文剧名");
+            },
+        },
+        {
             url: "https://api.trakt.tv/shows/555/seasons",
             body: readFixture("season-list.json"),
             persistentData: createUnifiedPersistentData({
