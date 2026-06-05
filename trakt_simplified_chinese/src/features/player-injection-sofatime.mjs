@@ -111,6 +111,10 @@ function isStreamingAvailabilityCountriesRequest(url) {
     return String(url?.hostname ?? "").toLowerCase() === "streaming-availability.p.rapidapi.com" && /^countries\/[a-z]{2}$/i.test(commonUtils.normalizePathname(url?.pathname));
 }
 
+function isStreamingAvailabilityShowRequest(url) {
+    return String(url?.hostname ?? "").toLowerCase() === "streaming-availability.p.rapidapi.com" && /^shows\/tt\d+$/i.test(commonUtils.normalizePathname(url?.pathname));
+}
+
 function resolveStreamingAvailabilityTmdbTarget(payload, fallbackTarget) {
     const tmdbValue = payload?.tmdbId ? String(payload.tmdbId).trim() : "";
     const match = tmdbValue.match(/^(movie|tv)\/(\d+)$/i);
@@ -240,7 +244,7 @@ async function injectSofaTimeStreamingAvailabilityPayload(enabledPlayerTypes, pa
     const target = { imdbId };
     let streamingTarget;
 
-    if (statusCode === 404) {
+    if (statusCode >= 400) {
         streamingTarget = await resolveTmdbTargetByImdb(target);
     } else {
         streamingTarget = resolveStreamingAvailabilityTmdbTarget(payload, target);
@@ -329,6 +333,25 @@ async function handleTmdbProviderCatalog() {
     };
 }
 
+async function handleSofaTimeStreamingAvailabilityRequest() {
+    const context = globalThis.$ctx;
+    if (!isSofaTimeRequest() || !isStreamingAvailabilityShowRequest(context.url)) {
+        return { type: "passThrough" };
+    }
+
+    if (!context.url.searchParams.has("country")) {
+        return { type: "passThrough" };
+    }
+
+    const rewrittenUrl = new URL(context.env.request.url);
+    rewrittenUrl.searchParams.delete("country");
+
+    return {
+        type: "rewriteRequest",
+        url: rewrittenUrl.toString(),
+    };
+}
+
 async function handleSofaTimeCountries() {
     const context = globalThis.$ctx;
     if (!isSofaTimeRequest()) {
@@ -359,7 +382,7 @@ async function handleSofaTimeStreamingAvailability() {
         return { type: "passThrough" };
     }
 
-    if (statusCode === 404 && commonUtils.isNonNullish(result.payload.tmdbId)) {
+    if (statusCode >= 400 && commonUtils.isNonNullish(result.payload.tmdbId)) {
         return {
             type: "respond",
             status: 200,
@@ -373,4 +396,4 @@ async function handleSofaTimeStreamingAvailability() {
     };
 }
 
-export { handleSofaTimeCountries, handleSofaTimeStreamingAvailability, handleTmdbProviderCatalog };
+export { handleSofaTimeCountries, handleSofaTimeStreamingAvailability, handleSofaTimeStreamingAvailabilityRequest, handleTmdbProviderCatalog };

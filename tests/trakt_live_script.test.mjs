@@ -1935,6 +1935,15 @@ test("live script: request route coverage matrix covers all request phase routes
             },
         },
         {
+            url: "https://streaming-availability.p.rapidapi.com/shows/tt3029574?country=tw&id=tt3029574",
+            headers: {
+                "user-agent": "Sofa Time/1.0",
+            },
+            assertResult(result) {
+                assert.equal(result.url, "https://streaming-availability.p.rapidapi.com/shows/tt3029574?id=tt3029574");
+            },
+        },
+        {
             url: "https://api.trakt.tv/shows/123/seasons/2",
             assertResult(result) {
                 assert.equal(Object.keys(result).length, 0);

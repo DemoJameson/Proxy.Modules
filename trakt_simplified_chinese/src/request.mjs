@@ -1,5 +1,6 @@
 import * as historyEpisodesMergedByShowHandler from "./features/history-episodes-merged-by-show.mjs";
 import * as mediaTranslationHandler from "./features/media-translation.mjs";
+import * as playerInjectionSofaTimeHandler from "./features/player-injection-sofatime.mjs";
 import * as playerInjectionTraktHandler from "./features/player-injection-trakt.mjs";
 import * as routeUtils from "./shared/route.mjs";
 
@@ -25,6 +26,12 @@ function createRequestPhaseRoutes() {
             host: /^image\.tmdb\.org$/i,
             pattern: /^t\/p\/.+/,
             handler: playerInjectionTraktHandler.handleTmdbImageWebpRequest,
+        }),
+        createRoute({
+            id: "streamingAvailability.showByImdb.rewrite",
+            host: /^streaming-availability\.p\.rapidapi\.com$/i,
+            pattern: /^shows\/tt\d+$/i,
+            handler: playerInjectionSofaTimeHandler.handleSofaTimeStreamingAvailabilityRequest,
         }),
         createRoute({
             id: "media.currentSeason",

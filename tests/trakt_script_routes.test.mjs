@@ -391,6 +391,48 @@ test("Sofa streaming availability 在 404 时会反查 IMDb 到 TMDb 并返回�
     );
 });
 
+test("Sofa streaming availability 在 400 时会返回 200 并带注入结果", async () => {
+    const lookupUrl = "https://film-show-ratings.p.rapidapi.com/item/?id=tt3029574";
+    const { result } = await runResponseCase({
+        url: "https://streaming-availability.p.rapidapi.com/shows/tt3029574?country=tw&id=tt3029574",
+        body: readFixture("sofa-streaming-404.json"),
+        responseStatus: 400,
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+            "x-rapidapi-key": "test-key",
+        },
+        httpGetMocks: {
+            [lookupUrl]: JSON.stringify({
+                result: {
+                    type: "show",
+                    ids: {
+                        TMDB: 299167,
+                    },
+                },
+            }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(result.status, 200);
+    assert.equal(payload.tmdbId, "tv/299167");
+    assert.deepEqual(
+        payload.streamingOptions.us.map((item) => item.service.id),
+        ["eplayerx", "forward", "infuse"],
+    );
+});
+
+test("Sofa streaming availability request 会移除 country 参数", async () => {
+    const { result } = await runRequestCase({
+        url: "https://streaming-availability.p.rapidapi.com/shows/tt3029574?country=tw&id=tt3029574",
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+    });
+
+    assert.equal(result.url, "https://streaming-availability.p.rapidapi.com/shows/tt3029574?id=tt3029574");
+});
+
 test("handleList 按 direct list、wrapped list 与 prominent list 路由分组生效", async (t) => {
     const persistentData = createUnifiedPersistentData({
         googleList: JSON.parse(

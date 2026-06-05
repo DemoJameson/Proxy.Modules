@@ -124,6 +124,14 @@ const scriptRules = [
         argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
+        title: "SofaTime Streaming Availability Request",
+        comment: "仅拦截 SofaTime 的 streaming-availability shows 请求，移除 country 参数",
+        phase: "http-request",
+        pattern: String.raw`^https:\/\/streaming-availability\.p\.rapidapi\.com\/shows\/tt\d+(\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+    },
+    {
         title: "Trakt Sync History Episodes Request",
         comment: "拦截 sync/history/episodes 请求，放大 limit",
         phase: "http-request",
