@@ -8,7 +8,7 @@
 [Argument]
 posterImageMode = select,"原片语言","中文","原图",tag=海报语言,desc=原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图
 historyEpisodesMergedByShow = switch, "true", tag=历史剧集按电视剧合并, desc=启用后会将历史页面电视剧类别的观看记录按电视剧合并
-googleTranslationEnabled = switch, "true", tag=用谷歌翻译部分文本, desc=启用后会翻译评论、社区情绪、冷知识、演员、片单等谷歌翻译场景
+googleTranslationEnabled = switch, "true", tag=用 DeepLX 翻译部分文本, desc=启用后会翻译评论、社区情绪、冷知识、演员、片单等 DeepLX 翻译场景
 characterTranslationEnabled = switch, "true", tag=用豆瓣翻译角色名, desc=启用后会用豆瓣翻译角色名
 eplayerxEnabled = switch, "true", tag=EplayerX 跳转按钮, desc=启用后在 Trakt 和 SofaTime 中添加 EplayerX 跳转按钮
 forwardEnabled = switch, "true", tag=Forward 跳转按钮, desc=启用后在 Trakt 和 SofaTime 中添加 Forward 跳转按钮

@@ -16,7 +16,37 @@ function buildSourceText(sourceText, contextLine) {
     return text && context ? `${context}\n${text}` : text;
 }
 
-function removeContextLine(translatedText) {
+function extractLocalizedContextName(contextLine) {
+    const context = String(contextLine ?? "").trim();
+    const match = context.match(/\(([^()]+)\)$/);
+    return String(match?.[1] ?? "").trim();
+}
+
+function hasLikelyLeadingTitleCloseQuote(text) {
+    const closeQuoteIndex = text.indexOf("》");
+    if (closeQuoteIndex <= 0 || closeQuoteIndex > 40 || text.startsWith("《")) {
+        return false;
+    }
+
+    const leadingTitle = text.slice(0, closeQuoteIndex);
+    return !/[《》\r\n,，.。!！?？:：;；()[\]{}]/.test(leadingTitle);
+}
+
+function repairLeadingTitleQuote(text, contextLine) {
+    const normalizedText = String(text ?? "").trim();
+    const localizedName = extractLocalizedContextName(contextLine);
+    if (localizedName && !localizedName.startsWith("《") && normalizedText.startsWith(`${localizedName}》`)) {
+        return `《${normalizedText}`;
+    }
+
+    return hasLikelyLeadingTitleCloseQuote(normalizedText) ? `《${normalizedText}` : normalizedText;
+}
+
+function repairTranslatedText(text) {
+    return repairLeadingTitleQuote(text, "");
+}
+
+function removeContextLine(translatedText, contextLine = "") {
     const text = String(translatedText ?? "").trim();
     if (!text) {
         return text;
@@ -24,10 +54,10 @@ function removeContextLine(translatedText) {
 
     const newlineMatch = text.match(/\r?\n/);
     if (newlineMatch?.index >= 0) {
-        return text.slice(newlineMatch.index + newlineMatch[0].length).trim();
+        return repairLeadingTitleQuote(text.slice(newlineMatch.index + newlineMatch[0].length), contextLine);
     }
 
-    return text;
+    return repairLeadingTitleQuote(text, contextLine);
 }
 
-export { buildContextLine, buildSourceText, removeContextLine };
+export { buildContextLine, buildSourceText, removeContextLine, repairTranslatedText };

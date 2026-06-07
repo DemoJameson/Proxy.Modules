@@ -57,10 +57,10 @@
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.googleTranslationEnabled",
-                    "name": "用谷歌翻译部分文本",
+                    "name": "用 DeepLX 翻译部分文本",
                     "val": true,
                     "type": "boolean",
-                    "desc": "启用后会翻译评论、社区情绪、冷知识、演员、片单等谷歌翻译场景"
+                    "desc": "启用后会翻译评论、社区情绪、冷知识、演员、片单等 DeepLX 翻译场景"
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.characterTranslationEnabled",

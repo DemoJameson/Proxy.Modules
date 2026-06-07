@@ -4,7 +4,7 @@
 #!homepage=https://github.com/DemoJameson/Proxy.Modules
 #!author=DemoJameson
 #!arguments=posterImageMode:"原片语言", historyEpisodesMergedByShow:"true", googleTranslationEnabled:"true", characterTranslationEnabled:"true", eplayerxEnabled:"true", forwardEnabled:"true", infuseEnabled:"true", backendBaseUrl:"https://proxy-modules.demojameson.de5.net", debugEnabled:"false"
-#!arguments-desc=posterImageMode: 原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图\nhistoryEpisodesMergedByShow: 启用后会将历史页面电视剧类别的观看记录按电视剧合并\ngoogleTranslationEnabled: 启用后会翻译评论、社区情绪、冷知识、演员、片单等谷歌翻译场景\ncharacterTranslationEnabled: 启用后会用豆瓣翻译角色名\neplayerxEnabled: 启用后在 Trakt 和 SofaTime 中添加 EplayerX 跳转按钮\nforwardEnabled: 启用后在 Trakt 和 SofaTime 中添加 Forward 跳转按钮\ninfuseEnabled: 启用后在 Trakt 和 SofaTime 中添加 Infuse 跳转按钮\nbackendBaseUrl: 用于批量获取 Trakt 的中文翻译，一般留空即可\ndebugEnabled: 启用后每次都会刷新 translation-overrides 覆盖数据
+#!arguments-desc=posterImageMode: 原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图\nhistoryEpisodesMergedByShow: 启用后会将历史页面电视剧类别的观看记录按电视剧合并\ngoogleTranslationEnabled: 启用后会翻译评论、社区情绪、冷知识、演员、片单等 DeepLX 翻译场景\ncharacterTranslationEnabled: 启用后会用豆瓣翻译角色名\neplayerxEnabled: 启用后在 Trakt 和 SofaTime 中添加 EplayerX 跳转按钮\nforwardEnabled: 启用后在 Trakt 和 SofaTime 中添加 Forward 跳转按钮\ninfuseEnabled: 启用后在 Trakt 和 SofaTime 中添加 Infuse 跳转按钮\nbackendBaseUrl: 用于批量获取 Trakt 的中文翻译，一般留空即可\ndebugEnabled: 启用后每次都会刷新 translation-overrides 覆盖数据
 
 [Script]
 # 处理播放器 DeepLink 跳转

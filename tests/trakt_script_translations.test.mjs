@@ -18,6 +18,7 @@ import {
     createSentimentTranslationCache,
     createTmdbImagesResponse,
     createUnifiedPersistentData,
+    extractDeepLxRequestTexts,
     parseUnifiedCache,
     readFixture,
     runRequestCase,
@@ -26,7 +27,7 @@ import {
     UNIFIED_CACHE_SCHEMA_VERSION,
 } from "./helpers/trakt-test-helpers.mjs";
 
-const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
+const GOOGLE_TRANSLATE_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
 const TEST_BACKEND_BASE_URL = "https://backend.example";
 const TEST_BACKEND_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translations`;
 const TEST_BACKEND_IMAGES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/images`;
@@ -2621,7 +2622,7 @@ test("comments 在部分翻译结果为空时只更新成功项并保留其他�
         url: "https://api.trakt.tv/comments/123/replies",
         body,
         httpPostMocks: {
-            "https://translation.googleapis.com/language/translate/v2": createGoogleTranslateResponse(["很棒的电影"]),
+            "https://translation.googleapis.com/language/translate/v2": createGoogleTranslateResponse(["很棒的电影", ""]),
         },
     });
 
@@ -2884,7 +2885,7 @@ test("list descriptions 在部分翻译结果为空时只更新成功项并保�
         url: "https://api.trakt.tv/movies/123/lists/popular",
         body,
         httpPostMocks: {
-            "https://translation.googleapis.com/language/translate/v2": createGoogleTranslateResponse(["收藏夹", "一个不错的列表"]),
+            "https://translation.googleapis.com/language/translate/v2": createGoogleTranslateResponse(["收藏夹", "一个不错的列表", "", ""]),
         },
     });
 
@@ -3041,7 +3042,7 @@ test("sentiments 会用双语片名语境翻译未命中的叙述内容并写回
     assert.equal(payload.analysis, "详细分析");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(new URLSearchParams(googleRequestBody).getAll("q"), [
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), [
         "Story",
         "Pacing",
         "Great cast",
@@ -3060,12 +3061,56 @@ test("sentiments 会用双语片名语境翻译未命中的叙述内容并写回
     assert.equal(cache["movie:123"].translation.text.translatedText, "观众文本");
 });
 
+test("sentiments 移除片名语境后会修复正文开头残缺书名号", async () => {
+    const translatedSentiments = [
+        "剧情",
+        "节奏",
+        "演员阵容出色",
+        "结尾较弱",
+        "The Housemaid (家弑服务)\n整体观感不错",
+        "The Housemaid (家弑服务)\n家弑服务》是一部心理惊悚片。",
+        "The Housemaid (家弑服务)\n高光时刻",
+        "The Housemaid (家弑服务)\n难忘场景",
+        "The Housemaid (家弑服务)\n观众文本",
+    ];
+    const { result, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/sentiments",
+        body: readFixture("sentiments.json"),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: { trakt: 123 },
+                    title: "The Housemaid",
+                },
+            },
+            traktTranslation: {
+                "movie:123": createMediaTranslationEntry({
+                    translation: {
+                        title: "家弑服务",
+                        overview: "中文简介",
+                        tagline: "中文标语",
+                    },
+                }),
+            },
+        }),
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: [createGoogleTranslateResponse(translatedSentiments), createGoogleTranslateResponse(translatedSentiments)],
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.analysis, "《家弑服务》是一部心理惊悚片。");
+
+    const cache = parseUnifiedCache(persistentData).google.sentiments;
+    assert.equal(cache["movie:123"].translation.analysis.translatedText, "《家弑服务》是一部心理惊悚片。");
+});
+
 test("sentiments 在部分翻译结果为空时只更新成功项并保留其他原文", async () => {
     const { result, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/sentiments",
         body: readFixture("sentiments.json"),
         httpPostMocks: {
-            "https://translation.googleapis.com/language/translate/v2": createGoogleTranslateResponse(["剧情", "", "演员阵容出色"]),
+            "https://translation.googleapis.com/language/translate/v2": createGoogleTranslateResponse(["剧情", "", "演员阵容出色", "", "", "", "", "", ""]),
         },
     });
 

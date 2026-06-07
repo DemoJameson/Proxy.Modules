@@ -363,7 +363,7 @@ async function translateSentimentItems(items, options = {}) {
             sourceText: useContext ? googleTranslationContext.buildSourceText(sourceText, contextLine) : sourceText,
             applyTranslation(translatedText) {
                 item.sourceText = sourceText;
-                item.translatedText = useContext ? googleTranslationContext.removeContextLine(translatedText) : translatedText;
+                item.translatedText = useContext ? googleTranslationContext.removeContextLine(translatedText, contextLine) : translatedText;
                 return true;
             },
         };

@@ -88,7 +88,7 @@ npm run test:trakt:live
 - `TRAKT_OAUTH_TOKEN`
   用于 `/users/me/...`、`/users/settings`、真实 `watchnow` 等登录态接口；留空时相关 live case 会自动跳过
 - `LIVE_TEST_ALLOW_GOOGLE_TRANSLATE`
-  设为 `true` 时，live harness 才允许脚本真实访问 Google 翻译接口
+  设为 `true` 时，live harness 才允许脚本真实访问 DeepLX 翻译接口
 
 ## 登录态测试
 

@@ -196,12 +196,23 @@ function createWatchnowIdsCache(entries = {}) {
     });
 }
 
+function joinDeepLxTranslatedTexts(translatedTexts) {
+    return translatedTexts.map((translatedText, index) => (index === 0 ? translatedText : `\n¶${index}¶\n${translatedText}`)).join("");
+}
+
 function createGoogleTranslateResponse(translatedTexts) {
     return JSON.stringify({
-        data: {
-            translations: translatedTexts.map((translatedText) => ({ translatedText })),
-        },
+        data: joinDeepLxTranslatedTexts(translatedTexts),
     });
+}
+
+function extractDeepLxRequestTexts(body) {
+    const payload = JSON.parse(String(body ?? "{}"));
+    const text = String(payload.text ?? "");
+    if (!text) {
+        return [];
+    }
+    return text.split(/\n¶\d+¶\n/g);
 }
 
 function createHttpErrorMock(message) {
@@ -293,6 +304,7 @@ export {
     createWatchnowIdsCache,
     createWatchnowIdsEntry,
     createWrappedMovieBody,
+    extractDeepLxRequestTexts,
     parseUnifiedCache,
     readFixture,
     runRequestCase,

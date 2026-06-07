@@ -6,6 +6,8 @@ import vm from "node:vm";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, "..", "..", "trakt_simplified_chinese", "trakt_simplified_chinese.js");
 const scriptContent = fs.readFileSync(scriptPath, "utf8");
+const DEEPLX_TRANSLATE_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
+const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
 
 function createTestConsole(verboseLogs) {
     if (verboseLogs) {
@@ -79,6 +81,10 @@ function resolveHttpMock(mocks, url) {
 
     if (Object.hasOwn(mocks, url)) {
         return consumeMockValue(mocks[url]);
+    }
+
+    if (url === DEEPLX_TRANSLATE_URL && Object.hasOwn(mocks, GOOGLE_TRANSLATE_URL)) {
+        return consumeMockValue(mocks[GOOGLE_TRANSLATE_URL]);
     }
 
     const entries = Object.entries(mocks);
@@ -175,8 +181,8 @@ function runScript({
                         return;
                     }
 
-                    if (String(options.url ?? "") === "https://translation.googleapis.com/language/translate/v2") {
-                        callback(null, { status: 200, statusCode: 200, body: '{"data":{"translations":[]}}' }, '{"data":{"translations":[]}}');
+                    if (String(options.url ?? "") === DEEPLX_TRANSLATE_URL) {
+                        callback(null, { status: 200, statusCode: 200, body: '{"data":""}' }, '{"data":""}');
                         return;
                     }
 

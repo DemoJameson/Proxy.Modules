@@ -42,8 +42,8 @@ const argumentFields = [
         key: "googleTranslationEnabled",
         defaultValue: true,
         type: "boolean",
-        tag: "用谷歌翻译部分文本",
-        desc: "启用后会翻译评论、社区情绪、冷知识、演员、片单等谷歌翻译场景",
+        tag: "用 DeepLX 翻译部分文本",
+        desc: "启用后会翻译评论、社区情绪、冷知识、演员、片单等 DeepLX 翻译场景",
     },
     {
         key: "characterTranslationEnabled",

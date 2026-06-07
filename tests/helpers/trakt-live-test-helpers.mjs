@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { runScriptLive } from "./run-script-live.mjs";
 
 const TRAKT_BASE_URL = "https://api.trakt.tv";
-const GOOGLE_TRANSLATE_HOST = "translation.googleapis.com";
+const GOOGLE_TRANSLATE_HOST = "api.deeplx.org";
 const LIVE_HTTP_USER_AGENT = "TraktLiveTestHarness/1.0";
 const LIVE_REQUEST_BATCH_SIZE = 10;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));

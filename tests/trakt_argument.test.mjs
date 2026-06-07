@@ -6,6 +6,8 @@ import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/
 
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
+const DEEPLX_TRANSLATE_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
+
 test("字符串参数第一位解析为 posterImageMode，不兼容旧顺序", () => {
     const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false,false]"));
 
@@ -87,7 +89,7 @@ test("googleTranslationEnabled=false 时 comments 不触发 Google 翻译且保�
     assert.equal(payload[0].comment, "Great movie");
     assert.deepEqual(parseUnifiedCache(persistentData).google.comments, {});
     assert.equal(
-        httpLogs.some((entry) => entry.method === "POST" && entry.url === "https://translation.googleapis.com/language/translate/v2"),
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === DEEPLX_TRANSLATE_URL),
         false,
     );
 });
@@ -100,11 +102,7 @@ test("googleTranslationEnabled=true 时 comments 会请求 Google 翻译并写�
             googleTranslationEnabled: true,
         },
         httpPostMocks: {
-            "https://translation.googleapis.com/language/translate/v2": JSON.stringify({
-                data: {
-                    translations: [{ translatedText: "很棒的电影" }],
-                },
-            }),
+            [DEEPLX_TRANSLATE_URL]: JSON.stringify({ data: "很棒的电影" }),
         },
     });
 
@@ -112,7 +110,7 @@ test("googleTranslationEnabled=true 时 comments 会请求 Google 翻译并写�
     assert.equal(payload[0].comment, "很棒的电影");
     assert.equal(parseUnifiedCache(persistentData).google.comments["9001"].comment.translatedText, "很棒的电影");
     assert.equal(
-        httpLogs.some((entry) => entry.method === "POST" && entry.url === "https://translation.googleapis.com/language/translate/v2"),
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === DEEPLX_TRANSLATE_URL),
         true,
     );
 });
