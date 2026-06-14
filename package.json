@@ -16,7 +16,7 @@
     "devDependencies": {
         "@biomejs/biome": "^2.4.14",
         "@nsnanocat/url": "^1.2.5",
-        "esbuild": "^0.25.12",
+        "esbuild": "^0.28.1",
         "opencc-js": "^1.3.0"
     }
 }
