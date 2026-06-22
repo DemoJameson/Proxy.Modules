@@ -240,17 +240,22 @@ function createTranslationItem(text, index = 0) {
     };
 }
 
+function buildItemRequestText(item) {
+    return item.context ? googleTranslationContext.buildSourceText(item.requestText, item.context) : String(item.requestText ?? "");
+}
+
 function buildRequestText(items) {
     const normalizedItems = ensureArray(items);
-    const contextHeader = googleTranslationContext.buildContextHeader(normalizedItems.map((item) => item.context));
-    const bodyText = normalizedItems.map((item, index) => (index === 0 ? item.requestText : `${buildBatchSeparator(index)}${item.requestText}`)).join("");
-    return `${contextHeader}${bodyText}`;
+    return normalizedItems.map((item, index) => (index === 0 ? buildItemRequestText(item) : `${buildBatchSeparator(index)}${buildItemRequestText(item)}`)).join("");
+}
+
+function getItemContextCharacterOverhead(item) {
+    return item.context ? googleTranslationContext.buildSourceText("x", item.context).length - 1 : 0;
 }
 
 async function translateOversizedText(text, sourceLanguage) {
     const item = createTranslationItem(text);
-    const contextHeader = googleTranslationContext.buildContextHeader([item.context]);
-    const segmentMaxCharacters = DEEPLX_MAX_TEXT_CHARACTERS - contextHeader.length;
+    const segmentMaxCharacters = DEEPLX_MAX_TEXT_CHARACTERS - getItemContextCharacterOverhead(item);
     const segments = splitTextByLimit(item.requestText, segmentMaxCharacters);
     if (segments.length === 0) {
         return "";
@@ -323,7 +328,7 @@ function splitJoinedTranslation(translatedText, items) {
 
     const separatorPattern = new RegExp(DEEPLX_BATCH_SEPARATOR_PATTERN, "g");
     const parts = normalizedText.split(separatorPattern);
-    return parts.length === itemCount ? parts.map((part) => googleTranslationContext.stripKnownContextHeader(part, getItemContexts(normalizedItems))) : null;
+    return parts.length === itemCount ? parts.map((part, index) => googleTranslationContext.stripKnownContextHeader(part, [normalizedItems[index]?.context])) : null;
 }
 
 function buildGoogleCompatiblePayload(translatedTexts) {

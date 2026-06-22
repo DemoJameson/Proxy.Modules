@@ -61,6 +61,14 @@ function stripContextHeader(text) {
     return parsed ? parsed.text : value;
 }
 
+function stripLeadingContextBoundary(text) {
+    let value = String(text ?? "").trim();
+    while (value.startsWith(CONTEXT_BOUNDARY)) {
+        value = value.slice(CONTEXT_BOUNDARY.length).trim();
+    }
+    return value;
+}
+
 function normalizeContextList(contexts) {
     const uniqueContexts = [];
     ensureArrayLike(contexts).forEach((context) => {
@@ -82,6 +90,8 @@ function stripKnownContextHeader(text, contexts) {
     if (!value || knownContexts.length === 0) {
         return value;
     }
+
+    value = stripLeadingContextBoundary(value);
 
     while (value) {
         const newlineMatch = value.match(/\r?\n/);
@@ -122,7 +132,7 @@ function hasLikelyLeadingTitleCloseQuote(text) {
     }
 
     const leadingTitle = text.slice(0, closeQuoteIndex);
-    return !/[《》\r\n,，.。!！?？:：;；()[\]{}]/.test(leadingTitle);
+    return !/[《》\r\n,，.。!！?？;；()[\]{}]/.test(leadingTitle);
 }
 
 function repairLeadingTitleQuote(text, contextLine) {
