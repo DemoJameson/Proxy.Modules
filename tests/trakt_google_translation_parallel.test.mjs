@@ -4,7 +4,7 @@ import test from "node:test";
 import { translateTextsWithGoogle } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
 import { translateTextFieldTargets } from "../trakt_simplified_chinese/src/shared/google-translation-pipeline.mjs";
 
-const DEEPLX_TRANSLATE_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
+const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
 
 function createDeferred() {
     let resolve;
@@ -31,7 +31,7 @@ function getRequestTexts(body) {
     return String(payload.text ?? "").split(/\n¶\d+¶\n/g);
 }
 
-test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求", async () => {
+test("DeepLX 兼容层超过 5000 字符上限时最多并行 20 个分批请求", async () => {
     const originalContext = globalThis.$ctx;
     const deferredResponses = [];
     const posts = [];
@@ -56,7 +56,7 @@ test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求
     };
 
     try {
-        const texts = Array.from({ length: 500 }, (_, index) => `${String(index).padStart(3, "0")}-${"x".repeat(80)}`);
+        const texts = Array.from({ length: 1500 }, (_, index) => `${String(index).padStart(4, "0")}-${"x".repeat(80)}`);
         const translationPromise = translateTextsWithGoogle(texts, "en");
         await Promise.resolve();
 
@@ -68,7 +68,7 @@ test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求
             const post = posts[resolvedCount];
             assert.equal(post.url, DEEPLX_TRANSLATE_URL);
             const payload = JSON.parse(post.body);
-            assert.ok(String(payload.text ?? "").length <= 1500);
+            assert.ok(String(payload.text ?? "").length <= 5000);
             deferredResponses[resolvedCount].resolve({ status: 200, body: createDeepLxPayload(getRequestTexts(post.body)) });
             resolvedCount += 1;
             await Promise.resolve();
@@ -77,9 +77,9 @@ test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求
         assert.equal(maxActiveRequests, 20);
 
         const translatedTexts = await translationPromise;
-        assert.equal(translatedTexts.length, 500);
+        assert.equal(translatedTexts.length, 1500);
         assert.equal(translatedTexts[0], `译:${texts[0]}`);
-        assert.equal(translatedTexts[499], `译:${texts[499]}`);
+        assert.equal(translatedTexts[1499], `译:${texts[1499]}`);
     } finally {
         globalThis.$ctx = originalContext;
     }
@@ -134,7 +134,7 @@ test("DeepLX 兼容层会切分超长单条文本并拼回结果", async () => {
         const longText = `${"A".repeat(3700)}.${"B".repeat(3700)}.`;
         const translatedTexts = await translateTextsWithGoogle([longText], "en");
         const requestLengths = posts.map((post) => getRequestTexts(post.body)[0].length);
-        assert.deepEqual(requestLengths, [1500, 1500, 1500, 1500, 1402]);
+        assert.deepEqual(requestLengths, [3701, 3701]);
         assert.equal(translatedTexts[0], requestLengths.map((length) => `[${length}]`).join(""));
     } finally {
         globalThis.$ctx = originalContext;
@@ -158,12 +158,12 @@ test("DeepLX 兼容层切分多行长文本时会尽量合并到接近上限", a
     };
 
     try {
-        const longListText = Array.from({ length: 80 }, (_, index) => `${String(index + 1).padStart(2, "0")} - Miss You, Love You`).join("\r\n");
+        const longListText = Array.from({ length: 300 }, (_, index) => `${String(index + 1).padStart(3, "0")} - Miss You, Love You`).join("\r\n");
         const translatedTexts = await translateTextsWithGoogle([longListText], "en");
         const requestLengths = posts.map((post) => getRequestTexts(post.body)[0].length);
         assert.equal(posts.length, 2);
-        assert.ok(requestLengths.every((length) => length <= 1500));
-        assert.ok(requestLengths.every((length) => length >= 750));
+        assert.ok(requestLengths.every((length) => length <= 5000));
+        assert.ok(requestLengths.every((length) => length >= 2500));
         assert.equal(translatedTexts[0], requestLengths.map((length) => `[${length}]`).join(""));
     } finally {
         globalThis.$ctx = originalContext;

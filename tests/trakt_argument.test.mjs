@@ -6,7 +6,7 @@ import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/
 
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
-const DEEPLX_TRANSLATE_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
+const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
 
 test("字符串参数第一位解析为 posterImageMode，不兼容旧顺序", () => {
     const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false,false]"));

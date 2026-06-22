@@ -27,7 +27,7 @@ import {
     UNIFIED_CACHE_SCHEMA_VERSION,
 } from "./helpers/trakt-test-helpers.mjs";
 
-const GOOGLE_TRANSLATE_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
+const GOOGLE_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
 const TEST_BACKEND_BASE_URL = "https://backend.example";
 const TEST_BACKEND_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translations`;
 const TEST_BACKEND_IMAGES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/images`;

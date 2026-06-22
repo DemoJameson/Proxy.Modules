@@ -2,17 +2,16 @@ import * as googleTranslationContext from "../shared/google-translation-context.
 import { ensureArray } from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
 
-const DEEPLX_TRANSLATE_API_URL = "https://api.deeplx.org/HtVldmSMyMKSMN6hHzvY4_qhPERIuErzMZrYu_LoOcE/translate";
+const DEEPLX_TRANSLATE_API_URL = "https://deeplx.demojameson.de5.net/google";
 const DEEPLX_TARGET_LANGUAGE = "ZH";
 const DEEPLX_BATCH_SEPARATOR_PATTERN = "\\n¶\\d+¶\\n";
-const DEEPLX_MAX_BATCH_CHARACTERS = 1500;
+const DEEPLX_MAX_TEXT_CHARACTERS = 5000;
 const DEEPLX_MAX_REQUEST_BYTES = 96 * 1024;
 const DEEPLX_MAX_CONCURRENT_BATCHES = 20;
 const DEEPLX_MAX_RETRIES = 2;
 const DEEPLX_RETRY_DELAY_MS = 120;
 const DEEPLX_RETRY_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
-const LONG_TEXT_SEGMENT_MAX_CHARACTERS = 1500;
-const LONG_TEXT_MIN_TRAILING_CHARACTERS = Math.floor(LONG_TEXT_SEGMENT_MAX_CHARACTERS / 2);
+const LONG_TEXT_MIN_TRAILING_CHARACTERS = Math.floor(DEEPLX_MAX_TEXT_CHARACTERS / 2);
 const LONG_TEXT_SPLIT_BOUNDARY_PATTERN = /[\n。！？.!?;；]/;
 const LONG_TEXT_SPLIT_SEARCH_WINDOW = 250;
 
@@ -221,7 +220,7 @@ function splitTextByLimit(text, maxCharacters) {
 }
 
 async function translateOversizedText(text, sourceLanguage) {
-    const segments = splitTextByLimit(text, LONG_TEXT_SEGMENT_MAX_CHARACTERS);
+    const segments = splitTextByLimit(text, DEEPLX_MAX_TEXT_CHARACTERS);
     if (segments.length === 0) {
         return "";
     }
@@ -244,7 +243,7 @@ async function translateOversizedText(text, sourceLanguage) {
 function canAddTextToBatch(currentText, nextText, sourceLanguage, itemIndex) {
     const separator = currentText ? buildBatchSeparator(itemIndex) : "";
     const candidate = `${currentText}${separator}${nextText}`;
-    return candidate.length <= DEEPLX_MAX_BATCH_CHARACTERS && estimateDeepLxRequestBytes(candidate, sourceLanguage) <= DEEPLX_MAX_REQUEST_BYTES;
+    return candidate.length <= DEEPLX_MAX_TEXT_CHARACTERS && estimateDeepLxRequestBytes(candidate, sourceLanguage) <= DEEPLX_MAX_REQUEST_BYTES;
 }
 
 function createDeepLxBatches(texts, sourceLanguage) {
@@ -254,7 +253,7 @@ function createDeepLxBatches(texts, sourceLanguage) {
 
     texts.forEach((text, index) => {
         const normalizedText = String(text ?? "");
-        const isOversized = normalizedText.length > DEEPLX_MAX_BATCH_CHARACTERS || estimateDeepLxRequestBytes(normalizedText, sourceLanguage) > DEEPLX_MAX_REQUEST_BYTES;
+        const isOversized = normalizedText.length > DEEPLX_MAX_TEXT_CHARACTERS || estimateDeepLxRequestBytes(normalizedText, sourceLanguage) > DEEPLX_MAX_REQUEST_BYTES;
         if (isOversized) {
             if (currentBatch.length > 0) {
                 batches.push({ type: "batch", items: currentBatch });
