@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { translateTextsWithGoogle } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import * as googleTranslationContext from "../trakt_simplified_chinese/src/shared/google-translation-context.mjs";
 import { translateTextFieldTargets } from "../trakt_simplified_chinese/src/shared/google-translation-pipeline.mjs";
 
 const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
@@ -29,6 +30,11 @@ function createDeepLxPayload(texts) {
 function getRequestTexts(body) {
     const payload = JSON.parse(String(body ?? "{}"));
     return String(payload.text ?? "").split(/\n¶\d+¶\n/g);
+}
+
+function getRequestText(body) {
+    const payload = JSON.parse(String(body ?? "{}"));
+    return String(payload.text ?? "");
 }
 
 test("DeepLX 兼容层超过 5000 字符上限时最多并行 20 个分批请求", async () => {
@@ -141,6 +147,32 @@ test("DeepLX 兼容层会切分超长单条文本并拼回结果", async () => {
     }
 });
 
+test("DeepLX 兼容层切分带上下文的超长单条文本时会把上下文头计入 5000 字符限制", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    return Promise.resolve({ status: 200, body: JSON.stringify({ data: `[${getRequestText(options.body).length}]` }) });
+                },
+            },
+        },
+    };
+
+    try {
+        const contextLine = `${"Context ".repeat(80)}(中文片名)`;
+        const translatedTexts = await translateTextsWithGoogle([googleTranslationContext.buildSourceText("A".repeat(9000), contextLine)], "en");
+        assert.ok(posts.length > 1);
+        assert.ok(posts.every((post) => getRequestText(post.body).length <= 5000));
+        assert.equal(translatedTexts[0], posts.map((post) => `[${getRequestText(post.body).length}]`).join(""));
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
 test("DeepLX 兼容层切分多行长文本时会尽量合并到接近上限", async () => {
     const originalContext = globalThis.$ctx;
     const posts = [];
@@ -192,6 +224,136 @@ test("DeepLX 兼容层遇到临时失败时会重试", async () => {
         const translatedTexts = await translateTextsWithGoogle(["hello"], "en");
         assert.deepEqual(translatedTexts, ["译:hello"]);
         assert.equal(posts.length, 2);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层会把相同上下文去重到请求头", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    return Promise.resolve({
+                        status: 200,
+                        body: JSON.stringify({
+                            data: "§原片 (中文片)§整体观感不错\n¶1¶\n详细分析",
+                        }),
+                    });
+                },
+            },
+        },
+    };
+
+    try {
+        const contextLine = "Original Movie (中文电影)";
+        const translatedTexts = await translateTextsWithGoogle(
+            [googleTranslationContext.buildSourceText("Overall enjoyable", contextLine), googleTranslationContext.buildSourceText("Detailed analysis", contextLine)],
+            "en",
+        );
+        assert.equal(posts.length, 1);
+        assert.equal(getRequestText(posts[0].body), "§Original Movie (中文电影)§Overall enjoyable\n¶1¶\nDetailed analysis");
+        assert.deepEqual(translatedTexts, ["整体观感不错", "详细分析"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层会把不同上下文放入同一个请求头且保持正文顺序", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    return Promise.resolve({
+                        status: 200,
+                        body: JSON.stringify({
+                            data: "整体观感不错\n¶1¶\n节奏较慢\n¶2¶\n详细分析",
+                        }),
+                    });
+                },
+            },
+        },
+    };
+
+    try {
+        const translatedTexts = await translateTextsWithGoogle(
+            [
+                googleTranslationContext.buildSourceText("Overall enjoyable", "The Housemaid (家弑服务)"),
+                googleTranslationContext.buildSourceText("Slow pacing", "Another Movie (另一部电影)"),
+                googleTranslationContext.buildSourceText("Detailed analysis", "The Housemaid (家弑服务)"),
+            ],
+            "en",
+        );
+        assert.equal(posts.length, 1);
+        assert.equal(getRequestText(posts[0].body), "§The Housemaid (家弑服务)\nAnother Movie (另一部电影)§Overall enjoyable\n¶1¶\nSlow pacing\n¶2¶\nDetailed analysis");
+        assert.deepEqual(translatedTexts, ["整体观感不错", "节奏较慢", "详细分析"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层会清理统一上下文头被去掉边界符后的裸上下文残留", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    return Promise.resolve({
+                        status: 200,
+                        body: JSON.stringify({
+                            data: "Original Movie (中文电影)\n剧情\n¶1¶\n整体观感不错",
+                        }),
+                    });
+                },
+            },
+        },
+    };
+
+    try {
+        const translatedTexts = await translateTextsWithGoogle(["Story", googleTranslationContext.buildSourceText("Overall enjoyable", "Original Movie (中文电影)")], "en");
+        assert.equal(posts.length, 1);
+        assert.equal(getRequestText(posts[0].body), "§Original Movie (中文电影)§Story\n¶1¶\nOverall enjoyable");
+        assert.deepEqual(translatedTexts, ["剧情", "整体观感不错"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层计算 5000 字符限制时包含上下文头", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    return Promise.resolve({ status: 200, body: createDeepLxPayload(getRequestTexts(options.body)) });
+                },
+            },
+        },
+    };
+
+    try {
+        const contextLine = `${"Context ".repeat(120)}(中文片名)`;
+        const translatedTexts = await translateTextsWithGoogle(
+            [googleTranslationContext.buildSourceText("A".repeat(2300), contextLine), googleTranslationContext.buildSourceText("B".repeat(2300), contextLine)],
+            "en",
+        );
+        assert.equal(posts.length, 2);
+        assert.ok(posts.every((post) => getRequestText(post.body).length <= 5000));
+        assert.equal(translatedTexts.length, 2);
     } finally {
         globalThis.$ctx = originalContext;
     }

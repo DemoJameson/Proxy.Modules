@@ -366,7 +366,7 @@ test("people detail 翻译 biography 时会用 TMDb 中文名作为 Google 语�
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Tom Hanks (汤姆·汉克斯)\nAn American actor and filmmaker."]);
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Tom Hanks (汤姆·汉克斯)§An American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.equal(cache["42"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
@@ -452,7 +452,7 @@ test("people detail 无 TMDb 姓名缓存时会先请求 TMDb 再用中文名翻
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Tom Hanks (汤姆·汉克斯)\nAn American actor and filmmaker."]);
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Tom Hanks (汤姆·汉克斯)§An American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
@@ -1355,7 +1355,7 @@ test("search person 列表翻译 biography 时会用 TMDb 中文名缓存作为 
     assert.equal(payload[0].person.name, "巩俐");
     assert.equal(payload[0].person.biography, "华裔新加坡女演员。");
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Gong Li (巩俐)\nChinese-born Singaporean actress."]);
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Gong Li (巩俐)§Chinese-born Singaporean actress."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
     assert.deepEqual(cache["99"], {

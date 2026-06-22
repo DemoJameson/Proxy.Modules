@@ -11,7 +11,6 @@ const DEEPLX_MAX_CONCURRENT_BATCHES = 20;
 const DEEPLX_MAX_RETRIES = 2;
 const DEEPLX_RETRY_DELAY_MS = 120;
 const DEEPLX_RETRY_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
-const LONG_TEXT_MIN_TRAILING_CHARACTERS = Math.floor(DEEPLX_MAX_TEXT_CHARACTERS / 2);
 const LONG_TEXT_SPLIT_BOUNDARY_PATTERN = /[\n。！？.!?;；]/;
 const LONG_TEXT_SPLIT_SEARCH_WINDOW = 250;
 
@@ -140,9 +139,13 @@ async function postDeepLxPayloadWithRetry(payload) {
     throw lastError;
 }
 
-async function translateDeepLxText(text, sourceLanguage) {
+function getItemContexts(items) {
+    return ensureArray(items).map((item) => item.context);
+}
+
+async function translateDeepLxText(text, sourceLanguage, contexts = []) {
     const payload = await postDeepLxPayloadWithRetry(buildDeepLxPayload(text, sourceLanguage));
-    return extractDeepLxTranslatedText(payload);
+    return googleTranslationContext.stripKnownContextHeader(extractDeepLxTranslatedText(payload), contexts);
 }
 
 function findSplitIndexNear(text, preferredEndIndex, minEndIndex, maxEndIndex) {
@@ -163,13 +166,21 @@ function findSplitIndexNear(text, preferredEndIndex, minEndIndex, maxEndIndex) {
     return preferredEndIndex;
 }
 
+function getLongTextMinTrailingCharacters(maxCharacters) {
+    return Math.max(1, Math.floor(Number(maxCharacters) / 2));
+}
+
 function splitTextGreedilyByLimit(text, maxCharacters) {
     const normalizedText = String(text ?? "");
+    if (maxCharacters <= 0) {
+        return [];
+    }
     if (normalizedText.length <= maxCharacters) {
         return [normalizedText];
     }
 
     const chunks = [];
+    const minTrailingCharacters = getLongTextMinTrailingCharacters(maxCharacters);
     let startIndex = 0;
     while (startIndex < normalizedText.length) {
         const hardEndIndex = Math.min(startIndex + maxCharacters, normalizedText.length);
@@ -178,7 +189,7 @@ function splitTextGreedilyByLimit(text, maxCharacters) {
             break;
         }
 
-        const minEndIndex = Math.min(hardEndIndex, startIndex + LONG_TEXT_MIN_TRAILING_CHARACTERS);
+        const minEndIndex = Math.min(hardEndIndex, startIndex + minTrailingCharacters);
         const splitIndex = findSplitIndexNear(normalizedText, hardEndIndex, minEndIndex, hardEndIndex);
 
         chunks.push(normalizedText.slice(startIndex, splitIndex));
@@ -212,26 +223,46 @@ function splitTextEvenlyByLimit(text, maxCharacters, chunkCount) {
 function splitTextByLimit(text, maxCharacters) {
     const chunks = splitTextGreedilyByLimit(text, maxCharacters);
     const lastChunk = chunks[chunks.length - 1] ?? "";
-    if (chunks.length <= 1 || lastChunk.length >= LONG_TEXT_MIN_TRAILING_CHARACTERS) {
+    if (chunks.length <= 1 || lastChunk.length >= getLongTextMinTrailingCharacters(maxCharacters)) {
         return chunks;
     }
 
     return splitTextEvenlyByLimit(String(text ?? ""), maxCharacters, chunks.length);
 }
 
+function createTranslationItem(text, index = 0) {
+    const parsed = googleTranslationContext.parseSourceText(text);
+    return {
+        index,
+        text: String(text ?? ""),
+        context: parsed.context,
+        requestText: parsed.text,
+    };
+}
+
+function buildRequestText(items) {
+    const normalizedItems = ensureArray(items);
+    const contextHeader = googleTranslationContext.buildContextHeader(normalizedItems.map((item) => item.context));
+    const bodyText = normalizedItems.map((item, index) => (index === 0 ? item.requestText : `${buildBatchSeparator(index)}${item.requestText}`)).join("");
+    return `${contextHeader}${bodyText}`;
+}
+
 async function translateOversizedText(text, sourceLanguage) {
-    const segments = splitTextByLimit(text, DEEPLX_MAX_TEXT_CHARACTERS);
+    const item = createTranslationItem(text);
+    const contextHeader = googleTranslationContext.buildContextHeader([item.context]);
+    const segmentMaxCharacters = DEEPLX_MAX_TEXT_CHARACTERS - contextHeader.length;
+    const segments = splitTextByLimit(item.requestText, segmentMaxCharacters);
     if (segments.length === 0) {
         return "";
     }
 
     const translatedSegments = await Promise.all(
         segments.map(async (segment) => {
-            const payloadText = String(segment ?? "");
-            if (!payloadText || estimateDeepLxRequestBytes(payloadText, sourceLanguage) > DEEPLX_MAX_REQUEST_BYTES) {
+            const payloadText = buildRequestText([{ ...item, requestText: String(segment ?? "") }]);
+            if (!payloadText || payloadText.length > DEEPLX_MAX_TEXT_CHARACTERS || estimateDeepLxRequestBytes(payloadText, sourceLanguage) > DEEPLX_MAX_REQUEST_BYTES) {
                 return "";
             }
-            return translateDeepLxText(payloadText, sourceLanguage);
+            return translateDeepLxText(payloadText, sourceLanguage, [item.context]);
         }),
     );
     if (translatedSegments.some((translatedText) => !translatedText)) {
@@ -240,39 +271,35 @@ async function translateOversizedText(text, sourceLanguage) {
     return translatedSegments.join("");
 }
 
-function canAddTextToBatch(currentText, nextText, sourceLanguage, itemIndex) {
-    const separator = currentText ? buildBatchSeparator(itemIndex) : "";
-    const candidate = `${currentText}${separator}${nextText}`;
+function canAddTextToBatch(currentText, nextText, sourceLanguage) {
+    const currentItems = ensureArray(currentText);
+    const candidate = buildRequestText(currentItems.concat(nextText));
     return candidate.length <= DEEPLX_MAX_TEXT_CHARACTERS && estimateDeepLxRequestBytes(candidate, sourceLanguage) <= DEEPLX_MAX_REQUEST_BYTES;
 }
 
 function createDeepLxBatches(texts, sourceLanguage) {
     const batches = [];
     let currentBatch = [];
-    let currentText = "";
 
     texts.forEach((text, index) => {
-        const normalizedText = String(text ?? "");
-        const isOversized = normalizedText.length > DEEPLX_MAX_TEXT_CHARACTERS || estimateDeepLxRequestBytes(normalizedText, sourceLanguage) > DEEPLX_MAX_REQUEST_BYTES;
+        const item = createTranslationItem(text, index);
+        const singleRequestText = buildRequestText([item]);
+        const isOversized = singleRequestText.length > DEEPLX_MAX_TEXT_CHARACTERS || estimateDeepLxRequestBytes(singleRequestText, sourceLanguage) > DEEPLX_MAX_REQUEST_BYTES;
         if (isOversized) {
             if (currentBatch.length > 0) {
                 batches.push({ type: "batch", items: currentBatch });
                 currentBatch = [];
-                currentText = "";
             }
-            batches.push({ type: "oversized", items: [{ index, text: normalizedText }] });
+            batches.push({ type: "oversized", items: [item] });
             return;
         }
 
-        if (currentBatch.length > 0 && !canAddTextToBatch(currentText, normalizedText, sourceLanguage, currentBatch.length)) {
+        if (currentBatch.length > 0 && !canAddTextToBatch(currentBatch, item, sourceLanguage)) {
             batches.push({ type: "batch", items: currentBatch });
             currentBatch = [];
-            currentText = "";
         }
 
-        const separator = currentBatch.length > 0 ? buildBatchSeparator(currentBatch.length) : "";
-        currentText = `${currentText}${separator}${normalizedText}`;
-        currentBatch.push({ index, text: normalizedText });
+        currentBatch.push(item);
     });
 
     if (currentBatch.length > 0) {
@@ -283,18 +310,20 @@ function createDeepLxBatches(texts, sourceLanguage) {
 }
 
 function buildJoinedBatchText(items) {
-    return items.map((item, index) => (index === 0 ? item.text : `${buildBatchSeparator(index)}${item.text}`)).join("");
+    return buildRequestText(items);
 }
 
-function splitJoinedTranslation(translatedText, itemCount) {
+function splitJoinedTranslation(translatedText, items) {
     const normalizedText = String(translatedText ?? "");
+    const normalizedItems = ensureArray(items);
+    const itemCount = normalizedItems.length;
     if (itemCount <= 1) {
-        return [normalizedText];
+        return [googleTranslationContext.stripKnownContextHeader(normalizedText, getItemContexts(normalizedItems))];
     }
 
     const separatorPattern = new RegExp(DEEPLX_BATCH_SEPARATOR_PATTERN, "g");
     const parts = normalizedText.split(separatorPattern);
-    return parts.length === itemCount ? parts.map((part) => part.trim()) : null;
+    return parts.length === itemCount ? parts.map((part) => googleTranslationContext.stripKnownContextHeader(part, getItemContexts(normalizedItems))) : null;
 }
 
 function buildGoogleCompatiblePayload(translatedTexts) {
@@ -313,18 +342,18 @@ async function translateBatchItemsWithFallback(items, sourceLanguage) {
     }
 
     if (items.length === 1) {
-        return [await translateDeepLxText(items[0].text, sourceLanguage)];
+        return [await translateDeepLxText(buildJoinedBatchText(items), sourceLanguage, getItemContexts(items))];
     }
 
     const joinedText = buildJoinedBatchText(items);
     const payload = await postDeepLxPayloadWithRetry(buildDeepLxPayload(joinedText, sourceLanguage));
     const translatedText = extractDeepLxTranslatedText(payload);
-    const splitTranslations = splitJoinedTranslation(translatedText, items.length);
+    const splitTranslations = splitJoinedTranslation(translatedText, items);
     if (splitTranslations) {
         return splitTranslations;
     }
 
-    return Promise.all(items.map((item) => translateDeepLxText(item.text, sourceLanguage)));
+    return Promise.all(items.map((item) => translateDeepLxText(buildJoinedBatchText([item]), sourceLanguage, [item.context])));
 }
 
 async function translateDeepLxBatch(batch, sourceLanguage) {

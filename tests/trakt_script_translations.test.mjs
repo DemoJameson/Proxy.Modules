@@ -3042,16 +3042,18 @@ test("sentiments 会用双语片名语境翻译未命中的叙述内容并写回
     assert.equal(payload.analysis, "详细分析");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    const googleRequestText = JSON.parse(googleRequestBody).text;
+    assert.equal(googleRequestText.match(/Original Movie \(中文电影\)/g)?.length, 1);
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), [
-        "Story",
+        "§Original Movie (中文电影)§Story",
         "Pacing",
         "Great cast",
         "Weak ending",
-        "Original Movie (中文电影)\nOverall enjoyable",
-        "Original Movie (中文电影)\nDetailed analysis",
-        "Original Movie (中文电影)\nBest moment",
-        "Original Movie (中文电影)\nMemorable scene",
-        "Original Movie (中文电影)\nAudience text",
+        "Overall enjoyable",
+        "Detailed analysis",
+        "Best moment",
+        "Memorable scene",
+        "Audience text",
     ]);
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;
