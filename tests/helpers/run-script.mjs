@@ -6,7 +6,7 @@ import vm from "node:vm";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, "..", "..", "trakt_simplified_chinese", "trakt_simplified_chinese.js");
 const scriptContent = fs.readFileSync(scriptPath, "utf8");
-const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
+const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
 
 function createTestConsole(verboseLogs) {

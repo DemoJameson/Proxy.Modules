@@ -2,7 +2,7 @@ import * as googleTranslationContext from "../shared/google-translation-context.
 import { ensureArray } from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
 
-const DEEPLX_TRANSLATE_API_URL = "https://deeplx.demojameson.de5.net/google";
+const DEEPLX_TRANSLATE_API_URL = "https://deeplx.demojameson.de5.net/deepl";
 const DEEPLX_TARGET_LANGUAGE = "ZH";
 const DEEPLX_BATCH_SEPARATOR_PATTERN = "\\n¶\\d+¶\\n";
 const DEEPLX_MAX_TEXT_CHARACTERS = 5000;

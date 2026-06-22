@@ -27,7 +27,7 @@ import {
     UNIFIED_CACHE_SCHEMA_VERSION,
 } from "./helpers/trakt-test-helpers.mjs";
 
-const GOOGLE_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
+const GOOGLE_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 const TEST_BACKEND_BASE_URL = "https://backend.example";
 const TEST_BACKEND_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translations`;
 const TEST_BACKEND_IMAGES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/images`;
@@ -2526,7 +2526,7 @@ test("googleTranslationEnabled=false 时 comments 不触发 Google 翻译，但�
 });
 
 test("comments 列表会翻译未命中的评论并写回缓存", async () => {
-    const { result, persistentData } = await runResponseCase({
+    const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/comments/123/replies",
         body: readFixture("comments.json"),
         httpPostMocks: {
@@ -2536,6 +2536,107 @@ test("comments 列表会翻译未命中的评论并写回缓存", async () => {
 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].comment, "很棒的电影");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "GET"),
+        false,
+    );
+});
+
+test("movie comments 会用双语片名上下文翻译未命中的评论", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/comments/newest",
+        body: readFixture("comments.json"),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: { trakt: 123 },
+                    title: "Original Movie",
+                },
+            },
+            traktTranslation: {
+                "movie:123": createMediaTranslationEntry(),
+            },
+        }),
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Original Movie (中文电影)\n很棒的电影"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Original Movie (中文电影)§Great movie"]);
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+});
+
+test("movie comments 缺少中文片名时不会添加单语片名上下文", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/comments/newest",
+        body: readFixture("comments.json"),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                123: {
+                    ids: { trakt: 123 },
+                    title: "Original Movie",
+                },
+            },
+        }),
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["很棒的电影"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Great movie"]);
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+});
+
+test("episode comments 会用单集标题上下文翻译未命中的评论", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/555/seasons/1/episodes/12/comments/newest",
+        body: readFixture("comments.json"),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: {
+                808: {
+                    ids: { trakt: 808 },
+                    showIds: { trakt: 555 },
+                    seasonNumber: 1,
+                    episodeNumber: 12,
+                    title: "Episode 12",
+                },
+            },
+            traktTranslation: {
+                "episode:555:1:12": createMediaTranslationEntry({
+                    translation: {
+                        title: "第十二集",
+                    },
+                }),
+            },
+        }),
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Episode 12 (第十二集)\n很棒的电影"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Episode 12 (第十二集)§Great movie"]);
 
     const cache = parseUnifiedCache(persistentData).google.comments;
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
@@ -2707,6 +2808,30 @@ test("recent comments 列表会同时应用媒体翻译和评论翻译", async (
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].movie.title, "中文电影");
     assert.equal(payload[0].comment.comment, "很棒的电影");
+});
+
+test("recent comments 未命中评论缓存时会用媒体标题上下文翻译评论", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/comments/recent/movies/weekly",
+        body: readFixture("recent-comments.json"),
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMediaTranslationCache()),
+        }),
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["Original Movie (中文电影)\n很棒的电影"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文电影");
+    assert.equal(payload[0].comment.comment, "很棒的电影");
+
+    const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Original Movie (中文电影)§Great movie"]);
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
 });
 
 test("list descriptions 会应用缓存中的描述翻译", async () => {

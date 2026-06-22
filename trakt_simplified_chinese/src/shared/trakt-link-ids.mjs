@@ -24,6 +24,26 @@ function getLinkIdsCacheEntry(cache, traktId) {
     return commonUtils.isPlainObject(entry) ? entry : null;
 }
 
+function getEpisodeLinkIdsCacheEntry(cache, showId, seasonNumber, episodeNumber) {
+    if (!cache || commonUtils.isNullish(showId) || commonUtils.isNullish(seasonNumber) || commonUtils.isNullish(episodeNumber)) {
+        return null;
+    }
+
+    const normalizedShowId = String(showId);
+    const normalizedSeasonNumber = Number(seasonNumber);
+    const normalizedEpisodeNumber = Number(episodeNumber);
+    return (
+        Object.values(commonUtils.ensureObject(cache)).find((entry) => {
+            return (
+                commonUtils.isPlainObject(entry) &&
+                String(entry.showIds?.trakt ?? "") === normalizedShowId &&
+                Number(entry.seasonNumber) === normalizedSeasonNumber &&
+                Number(entry.episodeNumber) === normalizedEpisodeNumber
+            );
+        }) ?? null
+    );
+}
+
 function mergeLinkIdsCacheEntry(currentEntry, nextEntry) {
     const current = commonUtils.ensureObject(currentEntry);
     const incoming = commonUtils.ensureObject(nextEntry);
@@ -134,6 +154,7 @@ function cacheMediaIdsFromDetailResponse(linkCache, mediaType, ref, data) {
             showIds: buildFallbackShowIds(ref?.showId, linkCache),
             seasonNumber: commonUtils.isNonNullish(data.season) ? data.season : ref?.seasonNumber,
             episodeNumber: commonUtils.isNonNullish(data.number) ? data.number : ref?.episodeNumber,
+            title: data?.title ?? null,
         });
     }
 
@@ -162,6 +183,7 @@ function cacheEpisodeIdsFromSeasonList(linkCache, showId, seasons) {
                     showIds: commonUtils.cloneObject(showIds),
                     seasonNumber: episode?.season ?? null,
                     episodeNumber: episode?.number ?? null,
+                    title: episode?.title ?? null,
                 })
             ) {
                 changed = true;
@@ -234,4 +256,12 @@ async function ensureEpisodeShowIds(fetchMediaDetail, saveLinkIdsCache, linkCach
     return showEntry.ids;
 }
 
-export { cacheEpisodeIdsFromSeasonList, cacheMediaIdsFromDetailResponse, ensureEpisodeShowIds, ensureMediaIdsCacheEntry, getLinkIdsCacheEntry, setLinkIdsCacheEntry };
+export {
+    cacheEpisodeIdsFromSeasonList,
+    cacheMediaIdsFromDetailResponse,
+    ensureEpisodeShowIds,
+    ensureMediaIdsCacheEntry,
+    getEpisodeLinkIdsCacheEntry,
+    getLinkIdsCacheEntry,
+    setLinkIdsCacheEntry,
+};

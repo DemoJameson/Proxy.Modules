@@ -5,7 +5,7 @@ import { translateTextsWithGoogle } from "../trakt_simplified_chinese/src/outbou
 import * as googleTranslationContext from "../trakt_simplified_chinese/src/shared/google-translation-context.mjs";
 import { translateTextFieldTargets } from "../trakt_simplified_chinese/src/shared/google-translation-pipeline.mjs";
 
-const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/google";
+const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 
 function createDeferred() {
     let resolve;
