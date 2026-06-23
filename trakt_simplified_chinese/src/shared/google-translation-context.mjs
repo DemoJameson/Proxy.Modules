@@ -1,5 +1,3 @@
-const CONTEXT_BOUNDARY = "§";
-
 function buildContextLine(sourceName, localizedName) {
     const source = String(sourceName ?? "").trim();
     const localized = String(localizedName ?? "").trim();
@@ -15,26 +13,10 @@ function buildContextLine(sourceName, localizedName) {
 function buildSourceText(sourceText, contextLine) {
     const text = String(sourceText ?? "").trim();
     const context = String(contextLine ?? "").trim();
-    return text && context ? `${CONTEXT_BOUNDARY}${context}${CONTEXT_BOUNDARY}${text}` : text;
+    return text && context ? `${context}\n${text}` : text;
 }
 
-function parseMarkedSourceText(text) {
-    const value = String(text ?? "").trim();
-    if (!value.startsWith(CONTEXT_BOUNDARY)) {
-        return null;
-    }
-
-    const endIndex = value.indexOf(CONTEXT_BOUNDARY, CONTEXT_BOUNDARY.length);
-    if (endIndex <= CONTEXT_BOUNDARY.length) {
-        return null;
-    }
-
-    const context = value.slice(CONTEXT_BOUNDARY.length, endIndex).trim();
-    const body = value.slice(endIndex + CONTEXT_BOUNDARY.length).trim();
-    return context && body ? { context, text: body } : null;
-}
-
-function parseLegacySourceText(text) {
+function parseContextSourceText(text) {
     const value = String(text ?? "").trim();
     const newlineMatch = value.match(/\r?\n/);
     if (!newlineMatch?.index) {
@@ -52,21 +34,11 @@ function parseLegacySourceText(text) {
 
 function parseSourceText(text) {
     const value = String(text ?? "").trim();
-    return parseMarkedSourceText(value) || parseLegacySourceText(value) || { context: "", text: value };
+    return parseContextSourceText(value) || { context: "", text: value };
 }
 
 function stripContextHeader(text) {
-    const value = String(text ?? "").trim();
-    const parsed = parseMarkedSourceText(value);
-    return parsed ? parsed.text : value;
-}
-
-function stripLeadingContextBoundary(text) {
-    let value = String(text ?? "").trim();
-    while (value.startsWith(CONTEXT_BOUNDARY)) {
-        value = value.slice(CONTEXT_BOUNDARY.length).trim();
-    }
-    return value;
+    return String(text ?? "").trim();
 }
 
 function normalizeContextList(contexts) {
@@ -91,8 +63,6 @@ function stripKnownContextHeader(text, contexts) {
         return value;
     }
 
-    value = stripLeadingContextBoundary(value);
-
     while (value) {
         const newlineMatch = value.match(/\r?\n/);
         if (!newlineMatch) {
@@ -108,11 +78,6 @@ function stripKnownContextHeader(text, contexts) {
     }
 
     return value;
-}
-
-function buildContextHeader(contexts) {
-    const uniqueContexts = normalizeContextList(contexts);
-    return uniqueContexts.length > 0 ? `${CONTEXT_BOUNDARY}${uniqueContexts.join("\n")}${CONTEXT_BOUNDARY}` : "";
 }
 
 function ensureArrayLike(value) {
@@ -163,4 +128,4 @@ function removeContextLine(translatedText, contextLine = "") {
     return repairLeadingTitleQuote(text, contextLine);
 }
 
-export { buildContextHeader, buildContextLine, buildSourceText, parseSourceText, removeContextLine, repairTranslatedText, stripContextHeader, stripKnownContextHeader };
+export { buildContextLine, buildSourceText, parseSourceText, removeContextLine, repairTranslatedText, stripContextHeader, stripKnownContextHeader };

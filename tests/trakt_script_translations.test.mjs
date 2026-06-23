@@ -2570,7 +2570,7 @@ test("movie comments 会用双语片名上下文翻译未命中的评论", async
     assert.equal(payload[0].comment, "很棒的电影");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Original Movie (中文电影)§Great movie"]);
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Original Movie (中文电影)\nGreat movie"]);
 
     const cache = parseUnifiedCache(persistentData).google.comments;
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
@@ -2636,7 +2636,7 @@ test("episode comments 会用单集标题上下文翻译未命中的评论", asy
     assert.equal(payload[0].comment, "很棒的电影");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Episode 12 (第十二集)§Great movie"]);
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Episode 12 (第十二集)\nGreat movie"]);
 
     const cache = parseUnifiedCache(persistentData).google.comments;
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
@@ -2827,7 +2827,7 @@ test("recent comments 未命中评论缓存时会用媒体标题上下文翻译�
     assert.equal(payload[0].comment.comment, "很棒的电影");
 
     const googleRequestBody = httpLogs.find((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL)?.body ?? "";
-    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["§Original Movie (中文电影)§Great movie"]);
+    assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Original Movie (中文电影)\nGreat movie"]);
 
     const cache = parseUnifiedCache(persistentData).google.comments;
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
@@ -3174,11 +3174,11 @@ test("sentiments 会用双语片名语境翻译未命中的叙述内容并写回
         "Pacing",
         "Great cast",
         "Weak ending",
-        "§Original Movie (中文电影)§Overall enjoyable",
-        "§Original Movie (中文电影)§Detailed analysis",
-        "§Original Movie (中文电影)§Best moment",
-        "§Original Movie (中文电影)§Memorable scene",
-        "§Original Movie (中文电影)§Audience text",
+        "Original Movie (中文电影)\nOverall enjoyable",
+        "Original Movie (中文电影)\nDetailed analysis",
+        "Original Movie (中文电影)\nBest moment",
+        "Original Movie (中文电影)\nMemorable scene",
+        "Original Movie (中文电影)\nAudience text",
     ]);
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;

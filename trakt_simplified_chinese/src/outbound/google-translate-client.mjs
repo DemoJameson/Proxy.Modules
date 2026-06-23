@@ -5,7 +5,7 @@ import * as httpUtils from "../utils/http.mjs";
 const DEEPLX_TRANSLATE_API_URL = "https://deeplx.demojameson.de5.net/deepl";
 const DEEPLX_TARGET_LANGUAGE = "ZH";
 const DEEPLX_BATCH_SEPARATOR_PATTERN = "\\n¶\\d+¶\\n";
-const DEEPLX_MAX_TEXT_CHARACTERS = 5000;
+const DEEPLX_MAX_TEXT_CHARACTERS = 3000;
 const DEEPLX_MAX_REQUEST_BYTES = 96 * 1024;
 const DEEPLX_MAX_CONCURRENT_BATCHES = 20;
 const DEEPLX_MAX_RETRIES = 2;
