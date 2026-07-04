@@ -37,7 +37,7 @@ function createResponsePhaseRoutes() {
             handler: mediaTranslationHandler.handleWrapperMediaList,
         }),
         createRoute({ pattern: /^users\/hidden\/[^/]+$/i, id: "users.hidden.section", handler: mediaTranslationHandler.handleWrapperMediaList }),
-        createRoute({ pattern: /^users\/[^/]+\/history\/(shows|movies)$/i, id: "users.history.mediaTyped", handler: mediaTranslationHandler.handleWrapperMediaList }),
+        createRoute({ pattern: /^users\/[^/]+\/history\/(shows|movies)(\/\d+)?$/i, id: "users.history.mediaTyped", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^sync\/history\/(movies|shows)$/i, id: "sync.history.media", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^sync\/history$/i, id: "sync.history.all", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^sync\/watched\/(shows|movies)$/i, id: "sync.watched.media", handler: mediaTranslationHandler.handleWrapperMediaList }),
