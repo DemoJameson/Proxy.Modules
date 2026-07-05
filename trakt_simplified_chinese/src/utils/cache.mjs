@@ -4,8 +4,8 @@ import * as commonUtils from "../utils/common.mjs";
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
 const UNIFIED_CACHE_SCHEMA_VERSION = 9;
-const UNIFIED_CACHE_MAX_BYTES = 2 * 1024 * 1024;
-const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 512 * 1024;
+const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
+const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
 const PRUNE_PRIORITY = {
