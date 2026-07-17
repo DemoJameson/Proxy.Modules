@@ -99,32 +99,100 @@ function buildRecentCommentContextLine(comment, item, originalTitles) {
     return buildBilingualContextLine(originalTitles?.get(comment) ?? mediaTarget.title, mediaTarget.title);
 }
 
-function buildRequestCommentContextLine(requestTarget, linkCache, mediaCache) {
+function readRequestCommentMediaEntries(requestTarget, linkCache, mediaCache) {
     if (!requestTarget) {
-        return "";
+        return null;
     }
 
     if (requestTarget.mediaType === mediaTypes.MEDIA_TYPE.MOVIE || requestTarget.mediaType === mediaTypes.MEDIA_TYPE.SHOW) {
         const linkEntry = traktLinkIds.getLinkIdsCacheEntry(linkCache, requestTarget.traktId);
         const translationEntry = mediaTranslationHelper.getCachedTranslation(mediaCache, requestTarget.mediaType, requestTarget);
-        return buildBilingualContextLine(linkEntry?.title, translationEntry?.translation?.title);
+        return { linkEntry, translationEntry };
     }
 
     if (requestTarget.mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
         const linkEntry = traktLinkIds.getEpisodeLinkIdsCacheEntry(linkCache, requestTarget.showId, requestTarget.seasonNumber, requestTarget.episodeNumber);
         const translationEntry = mediaTranslationHelper.getCachedTranslation(mediaCache, mediaTypes.MEDIA_TYPE.EPISODE, requestTarget);
-        return buildBilingualContextLine(linkEntry?.title, translationEntry?.translation?.title);
+        return { linkEntry, translationEntry };
     }
 
-    return "";
+    return null;
 }
 
-function createCommentContextResolver(options = {}) {
+function resolveMissingOriginalTitleFetch(requestTarget, linkEntry) {
+    if (String(linkEntry?.title ?? "").trim()) {
+        return null;
+    }
+    if (requestTarget.mediaType === mediaTypes.MEDIA_TYPE.MOVIE || requestTarget.mediaType === mediaTypes.MEDIA_TYPE.SHOW) {
+        return mediaTranslationHelper.fetchMediaDetail(requestTarget.mediaType, requestTarget.traktId);
+    }
+    if (requestTarget.mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
+        return mediaTranslationHelper.fetchEpisodeDetail(requestTarget);
+    }
+    return null;
+}
+
+function resolveMissingTranslationFetch(requestTarget, translationEntry) {
+    return String(translationEntry?.translation?.title ?? "").trim() ? null : mediaTranslationHelper.fetchDirectTranslation(requestTarget.mediaType, requestTarget);
+}
+
+async function hydrateMissingCommentMediaNames(requestTarget, linkCache, mediaCache, entries) {
+    const { linkEntry, translationEntry } = entries;
+    const originalTitlePromise = resolveMissingOriginalTitleFetch(requestTarget, linkEntry);
+    const translationPromise = resolveMissingTranslationFetch(requestTarget, translationEntry);
+
+    const tasks = [];
+    if (originalTitlePromise) {
+        tasks.push(
+            (async () => {
+                try {
+                    const payload = await originalTitlePromise;
+                    if (commonUtils.isPlainObject(payload)) {
+                        traktLinkIds.cacheMediaIdsFromDetailResponse(linkCache, requestTarget.mediaType, requestTarget, payload);
+                        cacheUtils.saveLinkIdsCache(globalThis.$ctx.env, linkCache);
+                    }
+                } catch (error) {
+                    globalThis.$ctx.env.log(`Trakt comment context media detail failed for mediaType=${requestTarget.mediaType}: ${error}`);
+                }
+            })(),
+        );
+    }
+    if (translationPromise) {
+        tasks.push(
+            (async () => {
+                try {
+                    const merged = await translationPromise;
+                    mediaTranslationHelper.storeTranslationEntry(mediaCache, requestTarget.mediaType, requestTarget, merged);
+                    cacheUtils.saveCache(globalThis.$ctx.env, mediaCache);
+                } catch (error) {
+                    globalThis.$ctx.env.log(`Trakt comment context translation fetch failed for mediaType=${requestTarget.mediaType}: ${error}`);
+                }
+            })(),
+        );
+    }
+    if (tasks.length > 0) {
+        await Promise.all(tasks);
+    }
+}
+
+async function createCommentContextResolver(options = {}) {
     const requestTarget = resolveCommentRequestTarget();
     const hasRequestContext = !!requestTarget;
+    const googleTranslationEnabled = globalThis.$ctx.argument?.googleTranslationEnabled !== false;
     const linkCache = hasRequestContext ? cacheUtils.loadLinkIdsCache(globalThis.$ctx.env) : {};
     const mediaCache = hasRequestContext ? cacheUtils.loadCache(globalThis.$ctx.env) : {};
-    const requestContextLine = buildRequestCommentContextLine(requestTarget, linkCache, mediaCache);
+    let requestContextLine = "";
+
+    if (hasRequestContext) {
+        const entries = readRequestCommentMediaEntries(requestTarget, linkCache, mediaCache);
+        if (entries && googleTranslationEnabled) {
+            await hydrateMissingCommentMediaNames(requestTarget, linkCache, mediaCache, entries);
+            const refreshed = readRequestCommentMediaEntries(requestTarget, linkCache, mediaCache);
+            requestContextLine = buildBilingualContextLine(refreshed?.linkEntry?.title, refreshed?.translationEntry?.translation?.title);
+        } else if (entries) {
+            requestContextLine = buildBilingualContextLine(entries.linkEntry?.title, entries.translationEntry?.translation?.title);
+        }
+    }
 
     return (entry) => {
         const recentContextLine = buildRecentCommentContextLine(entry.comment, entry.item, options.originalTitles);
@@ -140,7 +208,7 @@ async function translateCommentsInPlace(payload, options = {}) {
     }
 
     const cache = cacheUtils.loadCommentTranslationCache(context.env);
-    const resolveContextLine = createCommentContextResolver(options);
+    const resolveContextLine = await createCommentContextResolver(options);
     const targets = commonUtils
         .ensureArray(commentEntries)
         .filter((entry) => shouldTranslateComment(entry.comment))

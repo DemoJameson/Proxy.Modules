@@ -1097,6 +1097,10 @@ function fetchMediaDetail(mediaType, traktId) {
     return traktApiClientModule.fetchMediaDetail(mediaType, traktId);
 }
 
+function fetchEpisodeDetail(ref) {
+    return traktApiClientModule.fetchEpisodeDetail(ref);
+}
+
 function resolveTranslationRequestTarget(url) {
     const path = url.shortPathname;
     let match = path.match(/^shows\/(\d+)\/translations\/zh$/);
@@ -1439,6 +1443,8 @@ export {
     createBackendState,
     fetchAndPersistMissing,
     fetchAndPersistMissingImages,
+    fetchDirectTranslation,
+    fetchEpisodeDetail,
     fetchMediaDetail,
     flushBackendWrites,
     getCachedTranslation,
