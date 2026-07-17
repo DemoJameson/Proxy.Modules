@@ -13,6 +13,13 @@ const DEEPLX_RETRY_DELAY_MS = 120;
 const DEEPLX_RETRY_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const LONG_TEXT_SPLIT_BOUNDARY_PATTERN = /[\n。！？.!?;；]/;
 const LONG_TEXT_SPLIT_SEARCH_WINDOW = 250;
+const CJK_FOREIGN_NAME_SEPARATOR_PATTERN = /[\u4e00-\u9fa5](?:-[\u4e00-\u9fa5])+/g;
+
+// DeepLX 译音名习惯用半角 - 分隔音节（如 汤姆-汉克斯），改为中文间隔号 · 以符合中文译名规范。
+// 只替换前后均为 CJK 汉字的 -，保留英文连字符、日期、数字范围等。
+function localizeForeignNameSeparator(text) {
+    return String(text ?? "").replace(CJK_FOREIGN_NAME_SEPARATOR_PATTERN, (match) => match.replace(/-/g, "·"));
+}
 
 function createConcurrencyLimiter(concurrency) {
     let activeCount = 0;
@@ -389,7 +396,7 @@ async function translateTextsWithGoogle(texts, sourceLanguage) {
     const batchResults = await Promise.all(batches.map((batch) => translateDeepLxBatch(batch, sourceLanguage)));
     const translatedTexts = new Array(normalizedTexts.length).fill("");
     batchResults.flat().forEach((item) => {
-        translatedTexts[item.index] = item.translatedText;
+        translatedTexts[item.index] = localizeForeignNameSeparator(item.translatedText);
     });
 
     return extractTranslatedTexts(buildGoogleCompatiblePayload(translatedTexts), normalizedTexts);

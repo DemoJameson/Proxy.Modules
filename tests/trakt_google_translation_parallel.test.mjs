@@ -438,7 +438,7 @@ test("DeepLX 兼容层会修复带冒号标题开头残缺书名号", async () =
 
     try {
         const translatedTexts = await translateTextsWithGoogle(["Michael Jackson: Journey of a Superstar chronicles his artistic career."], "en");
-        assert.deepEqual(translatedTexts, ["《迈克尔-杰克逊：巨星之路》讲述了他的艺术生涯。"]);
+        assert.deepEqual(translatedTexts, ["《迈克尔·杰克逊：巨星之路》讲述了他的艺术生涯。"]);
     } finally {
         globalThis.$ctx = originalContext;
     }
@@ -485,4 +485,71 @@ test("Google 翻译 pipeline 对不同源语言分组并行请求", async () => 
     const result = await resultPromise;
     assert.deepEqual(appliedTranslations, ["en:hello", "fr:bonjour"]);
     assert.equal(result.translatedCount, 2);
+});
+
+test("DeepLX 兼容层会把中文译音名分隔符 - 替换为 ·", async () => {
+    const originalContext = globalThis.$ctx;
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post() {
+                    return Promise.resolve({ status: 200, body: JSON.stringify({ data: "汤姆-汉克斯 是 well-known 演员" }) });
+                },
+            },
+        },
+    };
+
+    try {
+        const translatedTexts = await translateTextsWithGoogle(["Tom Hanks is a well-known actor"], "en");
+        assert.deepEqual(translatedTexts, ["汤姆·汉克斯 是 well-known 演员"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层会替换多段连续中文译音名分隔符", async () => {
+    const originalContext = globalThis.$ctx;
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post() {
+                    return Promise.resolve({ status: 200, body: JSON.stringify({ data: "让-克洛德-范-达姆 于 2020-01-01 出演作品 1-3 部" }) });
+                },
+            },
+        },
+    };
+
+    try {
+        const translatedTexts = await translateTextsWithGoogle(["Jean-Claude Van Damme starred in works 1-3 released on 2020-01-01"], "en");
+        assert.deepEqual(translatedTexts, ["让·克洛德·范·达姆 于 2020-01-01 出演作品 1-3 部"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层在批量翻译路径下替换多个人名分隔符", async () => {
+    const originalContext = globalThis.$ctx;
+    const queue = ["汤姆-汉克斯", "摩根-弗里曼"];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    const payload = JSON.parse(String(options?.body ?? "{}"));
+                    const requestTexts = String(payload.text ?? "").split(/\n¶\d+¶\n/g);
+                    const translatedTexts = requestTexts.map((text) => `译:${text}`);
+                    return Promise.resolve({ status: 200, body: JSON.stringify({ data: joinDeepLxTranslatedTexts(translatedTexts) }) });
+                },
+            },
+        },
+    };
+
+    try {
+        const translatedTexts = await translateTextsWithGoogle(queue, "en");
+        assert.deepEqual(translatedTexts, ["译:汤姆·汉克斯", "译:摩根·弗里曼"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
 });
