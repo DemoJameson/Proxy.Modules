@@ -29,8 +29,9 @@ const MEDIA_CONFIG = {
 };
 
 const REQUEST_BATCH_SIZE = 10;
-const SEASON_EPISODE_TRANSLATION_LIMIT = 100;
+const SEASON_EPISODE_TRANSLATION_LIMIT = 200;
 const TRAKT_DIRECT_TRANSLATION_MAX_REFS = 200;
+const TRAKT_BULK_TRANSLATION_MAX_REFS = 1000;
 const PREFERRED_TRANSLATION_LANGUAGE = "zh-CN";
 const BACKEND_FETCH_MIN_REFS = 3;
 const BACKEND_WRITE_BATCH_SIZE = 50;
@@ -1469,7 +1470,7 @@ async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) 
             authorization: authorizationHeader,
         };
 
-        let remainingBudget = TRAKT_DIRECT_TRANSLATION_MAX_REFS;
+        let remainingBudget = TRAKT_BULK_TRANSLATION_MAX_REFS;
         const chunksByType = {};
         let maxChunks = 0;
 
@@ -1595,7 +1596,7 @@ async function translateMediaItemsInPlace(items, bodyOverride) {
     const bulkResult = await fetchBulkTranslationsForMissing(cache, refsByType, backendState);
     cacheChanged = bulkResult.cacheChanged || cacheChanged;
 
-    let remainingDirectTranslationBudget = TRAKT_DIRECT_TRANSLATION_MAX_REFS - bulkResult.processedCount;
+    let remainingDirectTranslationBudget = TRAKT_DIRECT_TRANSLATION_MAX_REFS;
     for (const mediaType of Object.keys(MEDIA_CONFIG)) {
         if (remainingDirectTranslationBudget <= 0) {
             break;
