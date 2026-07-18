@@ -228,8 +228,8 @@ async function translateCommentsInPlace(payload, options = {}) {
                 setCachedTranslation(translatedText) {
                     return cacheUtils.setHashedFieldTranslation(cache, comment.id, "comment", sourceText, normalizeTranslatedComment(translatedText));
                 },
-                applyTranslation(translatedText) {
-                    comment.comment = normalizeTranslatedComment(translatedText);
+                applyTranslation(translatedText, options = {}) {
+                    comment.comment = options.source === "cache" ? String(translatedText ?? "").trim() : normalizeTranslatedComment(translatedText);
                     return true;
                 },
             };

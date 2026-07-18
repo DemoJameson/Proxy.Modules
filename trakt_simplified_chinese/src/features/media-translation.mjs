@@ -204,6 +204,7 @@ async function handleSeasonEpisodesList() {
                 showId: target.showId,
                 seasonNumber: episode?.season ?? null,
                 episodeNumber: episode?.number ?? null,
+                episodeTraktId: episode?.ids?.trakt ?? null,
                 backendLookupKey: traktTranslationHelper.buildEpisodeCompositeKey(target.showId, episode?.season ?? null, episode?.number ?? null),
                 sourceTitle: episode?.title ?? null,
                 availableTranslations: commonUtils.isArray(episode?.available_translations) ? episode.available_translations : null,
@@ -239,7 +240,10 @@ async function handleSeasonEpisodesList() {
         .map((item) => item.ref)
         .slice(0, traktTranslationHelper.SEASON_EPISODE_TRANSLATION_LIMIT);
 
-    cacheChanged = (await traktTranslationHelper.fetchAndPersistMissing(cache, mediaTypes.MEDIA_TYPE.EPISODE, prioritizedEpisodeRefs, backendState)) || cacheChanged;
+    const bulkResult = await traktTranslationHelper.fetchBulkTranslationsForMissing(cache, { show: [], movie: [], episode: prioritizedEpisodeRefs }, backendState);
+    cacheChanged = bulkResult.cacheChanged || cacheChanged;
+    const remainingEpisodeRefs = traktTranslationHelper.getMissingRefs(cache, mediaTypes.MEDIA_TYPE.EPISODE, prioritizedEpisodeRefs);
+    cacheChanged = (await traktTranslationHelper.fetchAndPersistMissing(cache, mediaTypes.MEDIA_TYPE.EPISODE, remainingEpisodeRefs, backendState)) || cacheChanged;
     if (cacheChanged) {
         cacheUtils.saveCache(context.env, cache);
     }

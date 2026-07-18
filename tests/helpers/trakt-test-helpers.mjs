@@ -74,6 +74,7 @@ function createUnifiedCache(overrides = {}) {
                 movies: {},
                 episodes: {},
             },
+            authTokens: overrides.authTokens ?? {},
         },
     });
 }

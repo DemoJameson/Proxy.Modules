@@ -1,14 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
+import { containsChineseText } from "../trakt_simplified_chinese/src/shared/translation-cache.mjs";
 import {
     createEmptyUnifiedCache,
     GOOGLE_PEOPLE_CACHE_MAX_BYTES,
+    getAuthToken,
     getHashedFieldTranslation,
     loadCache,
     loadUnifiedCache,
     normalizeUnifiedCache,
     pruneUnifiedCacheToLimit,
+    saveAuthToken,
     saveCache,
     saveCommentTranslationCache,
     setHashedFieldTranslation,
@@ -512,4 +514,149 @@ test("cache utils: body rev 领先于 sidecar rev 时会修复 sidecar", () => {
 
     assert.equal(unifiedCache.rev, 101);
     assert.equal(JSON.parse(String(env.data[UNIFIED_CACHE_REV_KEY])), 101);
+});
+
+test("containsChineseText: 纯中文标题返回 true", () => {
+    assert.equal(containsChineseText("中文电影"), true);
+});
+
+test("containsChineseText: 纯英文标题返回 false", () => {
+    assert.equal(containsChineseText("Original Movie"), false);
+});
+
+test("containsChineseText: 中英混合标题返回 true", () => {
+    assert.equal(containsChineseText("Movie 中文标题"), true);
+});
+
+test("containsChineseText: 空字符串与 null 返回 false", () => {
+    assert.equal(containsChineseText(""), false);
+    assert.equal(containsChineseText(null), false);
+    assert.equal(containsChineseText(undefined), false);
+    assert.equal(containsChineseText("   "), false);
+});
+
+test("containsChineseText: 繁体中文标题返回 true", () => {
+    assert.equal(containsChineseText("賣房子的女人"), true);
+});
+
+test("cache utils: getAuthToken 在无 apiKey 时返回空字符串", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    assert.equal(getAuthToken(env, ""), "");
+    assert.equal(getAuthToken(env, null), "");
+    assert.equal(getAuthToken(env, undefined), "");
+});
+
+test("cache utils: getAuthToken 在缓存无对应 apiKey 时返回空字符串", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    assert.equal(getAuthToken(env, "missing-api-key"), "");
+});
+
+test("cache utils: saveAuthToken 写入后 getAuthToken 可读出同一 token", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    saveAuthToken(env, "app-key-1", "Bearer token-1");
+
+    assert.equal(getAuthToken(env, "app-key-1"), "Bearer token-1");
+    assert.equal(readStoredUnifiedCache(env).persistent.authTokens["app-key-1"], "Bearer token-1");
+});
+
+test("cache utils: saveAuthToken 按 apiKey 区分不同 app 的 token", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    saveAuthToken(env, "app-key-1", "Bearer token-1");
+    saveAuthToken(env, "app-key-2", "Bearer token-2");
+
+    assert.equal(getAuthToken(env, "app-key-1"), "Bearer token-1");
+    assert.equal(getAuthToken(env, "app-key-2"), "Bearer token-2");
+
+    const stored = readStoredUnifiedCache(env).persistent.authTokens;
+    assert.equal(stored["app-key-1"], "Bearer token-1");
+    assert.equal(stored["app-key-2"], "Bearer token-2");
+});
+
+test("cache utils: saveAuthToken 覆盖同一 apiKey 的旧 token", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    saveAuthToken(env, "app-key-1", "Bearer old-token");
+    saveAuthToken(env, "app-key-1", "Bearer new-token");
+
+    assert.equal(getAuthToken(env, "app-key-1"), "Bearer new-token");
+});
+
+test("cache utils: saveAuthToken 在 apiKey 或 authorization 为空时跳过写入", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    saveAuthToken(env, "", "Bearer token-1");
+    saveAuthToken(env, "app-key-1", "");
+    saveAuthToken(env, null, "Bearer token-1");
+
+    assert.deepEqual(readStoredUnifiedCache(env).persistent.authTokens, {});
+});
+
+test("cache utils: saveAuthToken 在 token 未变化时不重复写入", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    saveAuthToken(env, "app-key-1", "Bearer same-token");
+    const firstRev = readStoredUnifiedCache(env).rev;
+    saveAuthToken(env, "app-key-1", "Bearer same-token");
+    const secondRev = readStoredUnifiedCache(env).rev;
+
+    assert.equal(secondRev, firstRev);
+});
+
+test("cache utils: normalizeUnifiedCache 保留已有的 authTokens", () => {
+    const normalized = normalizeUnifiedCache({
+        version: 11,
+        persistent: {
+            authTokens: {
+                "app-key-1": "Bearer token-1",
+                "app-key-2": "Bearer token-2",
+            },
+        },
+    });
+
+    assert.equal(normalized.persistent.authTokens["app-key-1"], "Bearer token-1");
+    assert.equal(normalized.persistent.authTokens["app-key-2"], "Bearer token-2");
+});
+
+test("cache utils: normalizeUnifiedCache 过滤 authTokens 中的非法条目", () => {
+    const normalized = normalizeUnifiedCache({
+        version: 11,
+        persistent: {
+            authTokens: {
+                "app-key-1": "Bearer token-1",
+                "": "Bearer empty-key",
+                "app-key-empty": "",
+                invalid: 123,
+            },
+        },
+    });
+
+    assert.equal(normalized.persistent.authTokens["app-key-1"], "Bearer token-1");
+    assert.equal(normalized.persistent.authTokens[""], undefined);
+    assert.equal(normalized.persistent.authTokens["app-key-empty"], undefined);
+    assert.equal(normalized.persistent.authTokens.invalid, undefined);
 });

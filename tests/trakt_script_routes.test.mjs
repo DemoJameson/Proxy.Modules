@@ -1715,21 +1715,18 @@ test(`media list 向 Trakt 批量补翻译时最多只请求 ${TRAKT_DIRECT_TRAN
         }),
     );
 
-    const translationBody = JSON.stringify([
-        {
-            language: "zh",
-            country: "cn",
-            title: "中文电影",
-            overview: "中文简介",
-            tagline: "中文标语",
-        },
-    ]);
+    const bulkMovieMap = {};
+    for (let index = 0; index < TRAKT_DIRECT_TRANSLATION_MAX_REFS; index += 1) {
+        bulkMovieMap[String(1000 + index)] = { title: "中文电影" };
+    }
+    const bulkResponseBody = JSON.stringify({ movie: bulkMovieMap });
 
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/users/me/watchlist/movies?page=1&limit=501",
         body,
+        headers: { authorization: "Bearer test-token" },
         httpGetMocks: {
-            "regex:^https://api\\.trakt\\.tv/movies/\\d+/translations/zh\\?extended=all$": translationBody,
+            "regex:^https://api\\.trakt\\.tv/v3/intl/bulk\\?": bulkResponseBody,
         },
     });
 

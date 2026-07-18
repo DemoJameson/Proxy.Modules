@@ -52,6 +52,53 @@ function buildEpisodeDetailUrl(ref) {
     return `${traktApiBaseUrl}/shows/${ref.showId}/seasons/${ref.seasonNumber}/episodes/${ref.episodeNumber}?extended=cloud9,full,watchnow`;
 }
 
+function buildBulkTranslationUrl(idsByType, country) {
+    const traktApiBaseUrl = resolveTraktApiBaseUrl();
+    if (!traktApiBaseUrl) {
+        return "";
+    }
+    const params = [`language=zh`, `country=${String(country).toUpperCase()}`];
+    const showIds = commonUtils.ensureArray(idsByType?.show);
+    if (showIds.length > 0) {
+        params.push(`s=${showIds.join(",")}`);
+    }
+    const episodeIds = commonUtils.ensureArray(idsByType?.episode);
+    if (episodeIds.length > 0) {
+        params.push(`e=${episodeIds.join(",")}`);
+    }
+    const movieIds = commonUtils.ensureArray(idsByType?.movie);
+    if (movieIds.length > 0) {
+        params.push(`m=${movieIds.join(",")}`);
+    }
+    return `${traktApiBaseUrl}/v3/intl/bulk?${params.join("&")}`;
+}
+
+async function fetchBulkTranslations(idsByType, country, extraHeaders) {
+    const url = buildBulkTranslationUrl(idsByType, country);
+    if (!url) {
+        return null;
+    }
+    const payload = await httpUtils.get({
+        url,
+        headers: httpUtils.buildRequestHeaders(extraHeaders),
+    });
+    const statusCode = httpUtils.getResponseStatusCode(payload);
+    if (statusCode < 200 || statusCode >= 300) {
+        throw new Error(`HTTP ${statusCode} for ${url}`);
+    }
+
+    const responseBody = commonUtils.isNullish(payload?.body) ? "" : String(payload.body);
+    if (!responseBody.trim()) {
+        return null;
+    }
+
+    try {
+        return JSON.parse(responseBody);
+    } catch (e) {
+        throw new Error(`JSON parse failed for ${url}: ${e}`);
+    }
+}
+
 async function fetchTranslationPayload(mediaType, ref, extraHeaders) {
     const url = buildTranslationUrl(mediaType, ref);
     const payload = await httpUtils.get({
@@ -85,4 +132,4 @@ function fetchEpisodeDetail(ref) {
     return url ? httpUtils.fetchJson(url) : Promise.resolve(null);
 }
 
-export { fetchEpisodeDetail, fetchMediaDetail, fetchTranslationPayload };
+export { fetchBulkTranslations, fetchEpisodeDetail, fetchMediaDetail, fetchTranslationPayload };

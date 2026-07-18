@@ -3,7 +3,7 @@ import * as commonUtils from "../utils/common.mjs";
 
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
-const UNIFIED_CACHE_SCHEMA_VERSION = 10;
+const UNIFIED_CACHE_SCHEMA_VERSION = 11;
 const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
@@ -316,6 +316,7 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
                 movies: {},
                 episodes: {},
             },
+            authTokens: {},
         },
     };
 }
@@ -337,6 +338,17 @@ function normalizeTranslationOverrides(cache) {
         movies: normalizeGroup(source.movies),
         episodes: normalizeGroup(source.episodes),
     };
+}
+
+function normalizeAuthTokens(cache) {
+    const source = commonUtils.ensureObject(cache);
+    const result = {};
+    Object.entries(source).forEach(([apiKey, token]) => {
+        if (typeof apiKey === "string" && apiKey.trim() && typeof token === "string" && token.trim()) {
+            result[apiKey] = token;
+        }
+    });
+    return result;
 }
 
 function normalizeRevlessEntryMap(cache) {
@@ -387,6 +399,7 @@ function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VE
     nextCache.persistent.currentSeason = commonUtils.isPlainObject(persistentCache.currentSeason) ? persistentCache.currentSeason : null;
     nextCache.persistent.historyShows = normalizeEntryMap(persistentCache.historyShows, normalizeHistoryShowsEntry);
     nextCache.persistent.translationOverrides = normalizeTranslationOverrides(persistentCache.translationOverrides);
+    nextCache.persistent.authTokens = normalizeAuthTokens(persistentCache.authTokens);
 
     return nextCache;
 }
@@ -995,11 +1008,45 @@ function getCurrentSeason(env, showId) {
     }
 }
 
+function getAuthToken(env, apiKey) {
+    if (!apiKey) {
+        return "";
+    }
+    try {
+        const authTokens = loadUnifiedCache(env).persistent.authTokens;
+        return String(authTokens?.[apiKey] ?? "");
+    } catch (error) {
+        env.log(`Trakt auth token cache load failed: ${error}`);
+        return "";
+    }
+}
+
+function saveAuthToken(env, apiKey, authorization) {
+    if (!apiKey || !authorization) {
+        return;
+    }
+    if (getAuthToken(env, apiKey) === authorization) {
+        return;
+    }
+    const unifiedCache = loadUnifiedCache(env);
+    unifiedCache.persistent.authTokens = {
+        ...commonUtils.ensureObject(unifiedCache.persistent.authTokens),
+        [apiKey]: authorization,
+    };
+    saveUnifiedCache(env, unifiedCache, UNIFIED_CACHE_KEY, UNIFIED_CACHE_SCHEMA_VERSION, UNIFIED_CACHE_MAX_BYTES, {
+        owner: {
+            path: ["persistent", "authTokens"],
+            value: unifiedCache.persistent.authTokens,
+        },
+    });
+}
+
 export {
     buildFieldTranslationCacheKey,
     clearCurrentSeason,
     createEmptyUnifiedCache,
     GOOGLE_PEOPLE_CACHE_MAX_BYTES,
+    getAuthToken,
     getCurrentSeason,
     getHashedFieldTranslation,
     loadCache,
@@ -1018,6 +1065,7 @@ export {
     normalizeTranslationOverrides,
     normalizeUnifiedCache,
     pruneUnifiedCacheToLimit,
+    saveAuthToken,
     saveCache,
     saveCommentTranslationCache,
     saveDoubanCache,

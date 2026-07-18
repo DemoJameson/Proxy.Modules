@@ -29,7 +29,7 @@ const MEDIA_CONFIG = {
 };
 
 const REQUEST_BATCH_SIZE = 10;
-const SEASON_EPISODE_TRANSLATION_LIMIT = 10;
+const SEASON_EPISODE_TRANSLATION_LIMIT = 100;
 const TRAKT_DIRECT_TRANSLATION_MAX_REFS = 200;
 const PREFERRED_TRANSLATION_LANGUAGE = "zh-CN";
 const BACKEND_FETCH_MIN_REFS = 3;
@@ -38,6 +38,9 @@ const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS_DEBUG = 0;
 const IMAGE_PARTIAL_FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const IMAGE_NOT_FOUND_TTL_MS = 5 * 24 * 60 * 60 * 1000;
+const BULK_API_MAX_IDS_PER_CATEGORY = 100;
+const BULK_API_MIN_REFS = 10;
+const BULK_API_COUNTRIES = ["cn", "sg", "tw", "hk"];
 
 const DIRECT_MEDIA_TYPE_SHOW_STATUSES = ["returning series", "ended", "canceled"];
 
@@ -1176,6 +1179,7 @@ function buildEpisodeRef(item, episode) {
         showId,
         seasonNumber,
         episodeNumber,
+        episodeTraktId: episode?.ids?.trakt ?? null,
         backendLookupKey: buildEpisodeCompositeKey(showId, seasonNumber, episodeNumber),
         sourceTitle: episode?.title ?? null,
         availableTranslations: commonUtils.isArray(episode.available_translations) ? episode.available_translations : null,
@@ -1355,6 +1359,210 @@ async function fetchAndPersistMissing(cache, mediaType, refs, vercelBackendClien
     return cacheChanged;
 }
 
+function getBulkApiIdForRef(mediaType, ref) {
+    if (!ref) {
+        return null;
+    }
+    if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
+        return commonUtils.isNonNullish(ref.episodeTraktId) ? String(ref.episodeTraktId) : null;
+    }
+    return commonUtils.isNonNullish(ref.traktId) ? String(ref.traktId) : null;
+}
+
+function chunkArray(arr, size) {
+    const chunkSize = Number(size) > 0 ? Number(size) : 1;
+    const result = [];
+    const source = commonUtils.ensureArray(arr);
+    for (let i = 0; i < source.length; i += chunkSize) {
+        result.push(source.slice(i, i + chunkSize));
+    }
+    return result;
+}
+
+function mergeBulkResultsByRegion(resultsByRegion) {
+    const merged = {};
+    const regionMap = commonUtils.ensureObject(resultsByRegion);
+    Object.keys(regionMap).forEach((region) => {
+        const response = regionMap[region];
+        if (!commonUtils.isPlainObject(response)) {
+            return;
+        }
+        Object.keys(mediaTypes.MEDIA_TYPE).forEach((typeKey) => {
+            const mediaType = mediaTypes.MEDIA_TYPE[typeKey];
+            const entries = commonUtils.ensureObject(response[mediaType]);
+            Object.keys(entries).forEach((id) => {
+                const title = entries[id]?.title;
+                if (commonUtils.isNonNullish(title)) {
+                    const entryKey = `${mediaType}:${id}`;
+                    if (!commonUtils.isPlainObject(merged[entryKey])) {
+                        merged[entryKey] = {};
+                    }
+                    merged[entryKey][region] = title;
+                }
+            });
+        });
+    });
+    return merged;
+}
+
+function pickBestBulkTitle(titlesByRegion) {
+    if (!commonUtils.isPlainObject(titlesByRegion)) {
+        return null;
+    }
+    for (const region of BULK_API_COUNTRIES) {
+        const title = titlesByRegion[region];
+        if (translationCache.containsChineseText(title)) {
+            return translationCache.normalizeTranslationFieldValue("title", title);
+        }
+    }
+    return null;
+}
+
+async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) {
+    let cacheChanged = false;
+    let processedCount = 0;
+    try {
+        const context = globalThis.$ctx;
+        const mediaConfig = backendState?.mediaConfig ?? MEDIA_CONFIG;
+        const idToRefByType = {};
+        const bulkableByType = {};
+        let totalBulkable = 0;
+
+        Object.keys(mediaConfig).forEach((mediaType) => {
+            const missingRefs = getMissingRefs(cache, mediaType, commonUtils.ensureArray(refsByType?.[mediaType]));
+            const idToRef = {};
+            const bulkableRefs = [];
+            missingRefs.forEach((ref) => {
+                const bulkId = getBulkApiIdForRef(mediaType, ref);
+                if (bulkId) {
+                    idToRef[bulkId] = ref;
+                    bulkableRefs.push(ref);
+                }
+            });
+            idToRefByType[mediaType] = idToRef;
+            bulkableByType[mediaType] = bulkableRefs;
+            totalBulkable += bulkableRefs.length;
+        });
+
+        if (totalBulkable === 0 || totalBulkable <= BULK_API_MIN_REFS) {
+            return { cacheChanged, processedCount };
+        }
+
+        // bulk 接口 (/v3/intl/bulk) 需要 OAuth，公开接口的源请求可能不带 Authorization
+        // 此时从 authTokens 缓存读取对应 apiKey 的 token；若仍无则回退到 per-item /translations/zh（仅需 api-key）
+        const apiKey = String(httpUtils.getRequestHeaderValue("trakt-api-key") ?? "").trim();
+        let authorizationHeader = String(httpUtils.getRequestHeaderValue("authorization") ?? "").trim();
+        if (!authorizationHeader && apiKey) {
+            try {
+                authorizationHeader = cacheUtils.getAuthToken(context.env, apiKey);
+            } catch (error) {
+                context.env.log(`Trakt auth token cache load failed: ${error}`);
+            }
+        }
+        if (!authorizationHeader) {
+            context.env.log("Trakt bulk translation skipped: no Authorization header and no cached token");
+            return { cacheChanged, processedCount };
+        }
+
+        const extraHeaders = {
+            [SCRIPT_TRANSLATION_REQUEST_HEADER]: SCRIPT_TRANSLATION_REQUEST_VALUE,
+            authorization: authorizationHeader,
+        };
+
+        let remainingBudget = TRAKT_DIRECT_TRANSLATION_MAX_REFS;
+        const chunksByType = {};
+        let maxChunks = 0;
+
+        Object.keys(mediaConfig).forEach((mediaType) => {
+            const bulkableRefs = bulkableByType[mediaType];
+            if (remainingBudget <= 0 || bulkableRefs.length === 0) {
+                chunksByType[mediaType] = [];
+                return;
+            }
+            const budgetForType = Math.min(bulkableRefs.length, remainingBudget);
+            remainingBudget -= budgetForType;
+            processedCount += budgetForType;
+            const ids = bulkableRefs
+                .slice(0, budgetForType)
+                .map((ref) => getBulkApiIdForRef(mediaType, ref))
+                .map((id) => Number(id))
+                .sort((a, b) => a - b)
+                .map((id) => String(id));
+            const chunks = chunkArray(ids, BULK_API_MAX_IDS_PER_CATEGORY);
+            chunksByType[mediaType] = chunks;
+            if (chunks.length > maxChunks) {
+                maxChunks = chunks.length;
+            }
+        });
+
+        const processChunk = async (chunkIndex) => {
+            const idsByType = {};
+            const refsInChunkByType = {};
+            Object.keys(mediaConfig).forEach((mediaType) => {
+                const chunks = chunksByType[mediaType];
+                const chunk = chunks[chunkIndex];
+                if (!chunk || chunk.length === 0) {
+                    return;
+                }
+                idsByType[mediaType] = chunk;
+                refsInChunkByType[mediaType] = chunk.map((id) => idToRefByType[mediaType][id]).filter(Boolean);
+            });
+
+            const hasAnyIds = Object.keys(idsByType).some((mediaType) => commonUtils.ensureArray(idsByType[mediaType]).length > 0);
+            if (!hasAnyIds) {
+                return;
+            }
+
+            const resultsByRegion = {};
+            await Promise.all(
+                BULK_API_COUNTRIES.map(async (country) => {
+                    try {
+                        const response = await traktApiClientModule.fetchBulkTranslations(idsByType, country, extraHeaders);
+                        resultsByRegion[country] = response;
+                    } catch (error) {
+                        context.env.log(`Trakt bulk translation fetch failed for country=${country}: ${error}`);
+                        resultsByRegion[country] = null;
+                    }
+                }),
+            );
+
+            const merged = mergeBulkResultsByRegion(resultsByRegion);
+            Object.keys(mediaConfig).forEach((mediaType) => {
+                commonUtils.ensureArray(refsInChunkByType[mediaType]).forEach((ref) => {
+                    const bulkId = getBulkApiIdForRef(mediaType, ref);
+                    if (!bulkId) {
+                        return;
+                    }
+                    const titlesByRegion = merged[`${mediaType}:${bulkId}`];
+                    const bestTitle = pickBestBulkTitle(titlesByRegion);
+                    const entry = bestTitle
+                        ? {
+                              status: translationCache.CACHE_STATUS.PARTIAL_FOUND,
+                              translation: { title: bestTitle },
+                          }
+                        : {
+                              status: translationCache.CACHE_STATUS.NOT_FOUND,
+                          };
+                    if (storeTranslationEntry(cache, mediaType, ref, entry)) {
+                        cacheChanged = true;
+                    }
+                    queueBackendWrite(backendState, mediaType, ref, entry);
+                });
+            });
+        };
+
+        const chunkIndices = Array.from({ length: maxChunks }, (_, index) => index);
+        const BULK_CHUNK_CONCURRENCY = 2;
+        for (let startIndex = 0; startIndex < chunkIndices.length; startIndex += BULK_CHUNK_CONCURRENCY) {
+            const batch = chunkIndices.slice(startIndex, startIndex + BULK_CHUNK_CONCURRENCY);
+            await Promise.all(batch.map((chunkIndex) => processChunk(chunkIndex)));
+        }
+    } catch (error) {
+        globalThis.$ctx.env.log(`Trakt bulk translation fetch failed: ${error}`);
+    }
+    return { cacheChanged, processedCount };
+}
+
 async function translateMediaItemsInPlace(items, bodyOverride) {
     void bodyOverride;
     if (commonUtils.isNotArray(items) || items.length === 0) {
@@ -1384,7 +1592,10 @@ async function translateMediaItemsInPlace(items, bodyOverride) {
 
     let cacheChanged = await hydrateFromBackend(cache, refsByType, MEDIA_CONFIG, backendState);
 
-    let remainingDirectTranslationBudget = TRAKT_DIRECT_TRANSLATION_MAX_REFS;
+    const bulkResult = await fetchBulkTranslationsForMissing(cache, refsByType, backendState);
+    cacheChanged = bulkResult.cacheChanged || cacheChanged;
+
+    let remainingDirectTranslationBudget = TRAKT_DIRECT_TRANSLATION_MAX_REFS - bulkResult.processedCount;
     for (const mediaType of Object.keys(MEDIA_CONFIG)) {
         if (remainingDirectTranslationBudget <= 0) {
             break;
@@ -1443,6 +1654,7 @@ export {
     createBackendState,
     fetchAndPersistMissing,
     fetchAndPersistMissingImages,
+    fetchBulkTranslationsForMissing,
     fetchDirectTranslation,
     fetchEpisodeDetail,
     fetchMediaDetail,

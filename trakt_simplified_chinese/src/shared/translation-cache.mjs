@@ -6,6 +6,7 @@ const TRANSLATION_FIELDS = ["title", "overview", "tagline"];
 const TRANSLATION_FALLBACK_REGIONS = ["sg", "tw", "hk"];
 const EPISODE_PLACEHOLDER_TITLE_RE = /^\s*episode\s+0*(\d+)\s*$/i;
 const OVERVIEW_FULL_WIDTH_SPACE_BREAK_RE = /\u3000{2,}/g;
+const CJK_CHARACTER_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
 
 const CACHE_STATUS = {
     FOUND: 1,
@@ -24,6 +25,11 @@ function normalizeTranslationText(value) {
 
     const normalized = String(value).trim();
     return normalized || null;
+}
+
+function containsChineseText(value) {
+    const text = normalizeTranslationText(value);
+    return text !== null && CJK_CHARACTER_RE.test(text);
 }
 
 function normalizeTranslationFieldValue(field, value) {
@@ -209,6 +215,7 @@ function areTranslationsEqual(left, right) {
 export {
     areTranslationsEqual,
     CACHE_STATUS,
+    containsChineseText,
     extractEpisodePlaceholderNumber,
     extractNormalizedTranslation,
     findTranslationByRegion,

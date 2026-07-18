@@ -4,6 +4,7 @@ import * as argumentConfig from "./argument.mjs";
 import { TRAKT_SCRIPT_TITLE } from "./module-manifest.mjs";
 import * as requestPhase from "./request.mjs";
 import * as responsePhase from "./response.mjs";
+import * as cacheUtils from "./utils/cache.mjs";
 import * as commonUtils from "./utils/common.mjs";
 
 function isRequestPhase(env) {
@@ -65,6 +66,16 @@ async function runTraktScript() {
         responseBody: typeof env.response?.body === "string" ? env.response.body : "",
         argument,
     };
+
+    try {
+        const apiKey = String(env.request.headers["trakt-api-key"] ?? "").trim();
+        const authorization = String(env.request.headers.authorization ?? "").trim();
+        if (apiKey && authorization) {
+            cacheUtils.saveAuthToken(env, apiKey, authorization);
+        }
+    } catch (error) {
+        env.log(`Trakt auth token cache save failed: ${error}`);
+    }
 
     try {
         const result = isRequestPhase(env) ? await requestPhase.handleRequest() : await responsePhase.handleResponse();

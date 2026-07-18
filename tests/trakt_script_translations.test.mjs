@@ -3447,3 +3447,279 @@ test("sentiments 在 Google 返回空翻译结果时会保留原文并按原文�
     assert.equal(cache["movie:123"].translation.aspect.pros[0].translatedText, "Story");
     assert.equal(cache["movie:123"].translation.good[0].translatedText, "Great cast");
 });
+
+// ===== 批量翻译接口（/v3/intl/bulk）测试 =====
+
+const BULK_API_BASE_REGEX = "regex:^https://api\\.trakt\\.tv/v3/intl/bulk\\?";
+const BULK_API_COUNTRY_REGEX = (country) => `regex:^https://api\\.trakt\\.tv/v3/intl/bulk\\?.*country=${country}(?:&|$)`;
+
+function createBulkMovieListBody(count, startId = 1000) {
+    return JSON.stringify(
+        Array.from({ length: count }, (_, index) => {
+            const traktId = startId + index;
+            return {
+                movie: {
+                    title: `Original Movie ${traktId}`,
+                    overview: `Original Overview ${traktId}`,
+                    tagline: `Original Tagline ${traktId}`,
+                    ids: { trakt: traktId },
+                    available_translations: ["zh"],
+                },
+            };
+        }),
+    );
+}
+
+function createBulkMovieResponse(count, title, startId = 1000) {
+    const movieMap = {};
+    for (let index = 0; index < count; index += 1) {
+        movieMap[String(startId + index)] = { title };
+    }
+    return JSON.stringify({ movie: movieMap });
+}
+
+function createPerItemMovieTranslationUrl(traktId) {
+    return `https://api.trakt.tv/movies/${traktId}/translations/zh?extended=all`;
+}
+
+function createPerItemMovieTranslationBody(title, overview = "中文简介", tagline = "中文标语") {
+    return JSON.stringify([{ language: "zh", country: "cn", title, overview, tagline }]);
+}
+
+function createBulkEpisodeListBody(count, showId = 555, season = 1) {
+    return JSON.stringify(
+        Array.from({ length: count }, (_, index) => {
+            const number = index + 1;
+            return {
+                show: {
+                    title: "Original Show",
+                    ids: { trakt: showId },
+                    available_translations: ["en"],
+                },
+                episode: {
+                    title: `Original Episode ${number}`,
+                    overview: `Original Episode Overview ${number}`,
+                    season,
+                    number,
+                    first_aired: "2025-01-01T00:00:00.000Z",
+                    available_translations: ["zh"],
+                },
+            };
+        }),
+    );
+}
+
+function createPerItemEpisodeTranslationUrl(showId, season, number) {
+    return `https://api.trakt.tv/shows/${showId}/seasons/${season}/episodes/${number}/translations/zh?extended=all`;
+}
+
+function createPerItemEpisodeTranslationBody(title) {
+    return JSON.stringify([{ language: "zh", country: "cn", title, overview: "中文剧集简介", tagline: "中文剧集标语" }]);
+}
+
+function countHttpLogsByUrl(httpLogs, urlSubstring) {
+    return httpLogs.filter((log) => log.url.includes(urlSubstring)).length;
+}
+
+test("批量翻译在 backend hydrate 后触发，4 区并发，CN 优先写入 PARTIAL_FOUND", async () => {
+    const movieCount = 11;
+    const httpPostMocks = createPendingBackendPostMocks();
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { authorization: "Bearer test-token" },
+        httpGetMocks: {
+            [BULK_API_COUNTRY_REGEX("CN")]: createBulkMovieResponse(movieCount, "中文标题"),
+            [BULK_API_COUNTRY_REGEX("SG")]: createBulkMovieResponse(movieCount, "English SG"),
+            [BULK_API_COUNTRY_REGEX("TW")]: createBulkMovieResponse(movieCount, "賣房子"),
+            [BULK_API_COUNTRY_REGEX("HK")]: createBulkMovieResponse(movieCount, "English HK"),
+        },
+        httpPostMocks,
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文标题");
+    assert.equal(payload[10].movie.title, "中文标题");
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    assert.ok(bulkLogs.some((log) => log.url.includes("country=CN")));
+    assert.ok(bulkLogs.some((log) => log.url.includes("country=SG")));
+    assert.ok(bulkLogs.some((log) => log.url.includes("country=TW")));
+    assert.ok(bulkLogs.some((log) => log.url.includes("country=HK")));
+
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
+    assert.equal(httpPostMocks[TEST_BACKEND_TRANSLATIONS_URL].length, 0);
+});
+
+test("四区均返回英文时标记 NOT_FOUND 且不触发 per-item", async () => {
+    const movieCount = 11;
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { authorization: "Bearer test-token" },
+        httpGetMocks: {
+            [BULK_API_BASE_REGEX]: createBulkMovieResponse(movieCount, "English Title"),
+        },
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "Original Movie 1000");
+    assert.equal(payload[10].movie.title, "Original Movie 1010");
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
+});
+
+test("未命中 ref 总数 ≤ 10 时不触发批量，走 per-item 拿全字段", async () => {
+    const movieCount = 5;
+    const httpGetMocks = {};
+    for (let index = 0; index < movieCount; index += 1) {
+        const traktId = 1000 + index;
+        httpGetMocks[createPerItemMovieTranslationUrl(traktId)] = createPerItemMovieTranslationBody(`中文电影 ${traktId}`);
+    }
+
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        httpGetMocks,
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文电影 1000");
+    assert.equal(payload[0].movie.overview, "中文简介");
+    assert.equal(payload[0].movie.tagline, "中文标语");
+
+    assert.equal(countHttpLogsByUrl(httpLogs, "/v3/intl/bulk"), 0);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), movieCount);
+});
+
+test("episode 无 episodeTraktId 时走 per-item 回退", async () => {
+    const episodeCount = 11;
+    const httpGetMocks = {};
+    for (let index = 0; index < episodeCount; index += 1) {
+        const number = index + 1;
+        httpGetMocks[createPerItemEpisodeTranslationUrl(555, 1, number)] = createPerItemEpisodeTranslationBody(`中文剧集 ${number}`);
+    }
+
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/media/trending",
+        body: createBulkEpisodeListBody(episodeCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        httpGetMocks,
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].episode.title, "中文剧集 1");
+    assert.equal(payload[10].episode.title, "中文剧集 11");
+
+    assert.equal(countHttpLogsByUrl(httpLogs, "/v3/intl/bulk"), 0);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), episodeCount);
+});
+
+test("批量翻译结果会写回后端", async () => {
+    const movieCount = 11;
+    const httpPostMocks = createPendingBackendPostMocks();
+    const { httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { authorization: "Bearer test-token" },
+        httpGetMocks: {
+            [BULK_API_COUNTRY_REGEX("CN")]: createBulkMovieResponse(movieCount, "中文标题"),
+            [BULK_API_COUNTRY_REGEX("SG")]: createBulkMovieResponse(movieCount, "English SG"),
+            [BULK_API_COUNTRY_REGEX("TW")]: createBulkMovieResponse(movieCount, "賣房子"),
+            [BULK_API_COUNTRY_REGEX("HK")]: createBulkMovieResponse(movieCount, "English HK"),
+        },
+        httpPostMocks,
+    });
+
+    const backendPostLogs = httpLogs.filter((log) => log.method === "POST" && log.url.includes("/api/trakt/translations"));
+    assert.ok(backendPostLogs.length >= 1, "expected at least one backend POST");
+    assert.ok(
+        backendPostLogs.some((log) => log.body.includes("中文标题")),
+        "expected POST body to contain translated title",
+    );
+});
+
+test("源请求无 Authorization 时跳过 bulk，走 per-item 拿全字段", async () => {
+    const movieCount = 11;
+    const httpGetMocks = {};
+    for (let index = 0; index < movieCount; index += 1) {
+        const traktId = 1000 + index;
+        httpGetMocks[createPerItemMovieTranslationUrl(traktId)] = createPerItemMovieTranslationBody(`中文电影 ${traktId}`);
+    }
+
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        // 故意不传 authorization 和 trakt-api-key，模拟无任何认证的公开接口请求
+        httpGetMocks,
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文电影 1000");
+    assert.equal(payload[0].movie.overview, "中文简介");
+    assert.equal(payload[0].movie.tagline, "中文标语");
+
+    assert.equal(countHttpLogsByUrl(httpLogs, "/v3/intl/bulk"), 0);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), movieCount);
+});
+
+test("源请求无 Authorization 但缓存有对应 apiKey 的 token 时走 bulk", async () => {
+    const movieCount = 11;
+    const cachedApiKey = "cached-api-key-123";
+    const cachedToken = "Bearer cached-token-abc";
+    const httpPostMocks = createPendingBackendPostMocks();
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { "trakt-api-key": cachedApiKey },
+        persistentData: createUnifiedPersistentData({
+            authTokens: { [cachedApiKey]: cachedToken },
+        }),
+        httpGetMocks: {
+            [BULK_API_COUNTRY_REGEX("CN")]: createBulkMovieResponse(movieCount, "中文标题"),
+            [BULK_API_COUNTRY_REGEX("SG")]: createBulkMovieResponse(movieCount, "English SG"),
+            [BULK_API_COUNTRY_REGEX("TW")]: createBulkMovieResponse(movieCount, "賣房子"),
+            [BULK_API_COUNTRY_REGEX("HK")]: createBulkMovieResponse(movieCount, "English HK"),
+        },
+        httpPostMocks,
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文标题");
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
+});
+
+test("源请求带 Authorization 时会写入 authTokens 缓存", async () => {
+    const movieCount = 11;
+    const apiKey = "test-api-key-save";
+    const authorization = "Bearer test-token-save";
+    const { persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { "trakt-api-key": apiKey, authorization },
+        httpGetMocks: {
+            [BULK_API_BASE_REGEX]: createBulkMovieResponse(movieCount, "English Title"),
+        },
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const cache = JSON.parse(String(persistentData[UNIFIED_CACHE_KEY]));
+    assert.equal(cache.persistent.authTokens[apiKey], authorization);
+});
