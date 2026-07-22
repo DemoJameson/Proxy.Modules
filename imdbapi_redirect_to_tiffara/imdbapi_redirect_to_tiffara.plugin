@@ -1,0 +1,13 @@
+#!name=修复imdbapi.dev
+#!desc=将 imdbapi.dev 及其所有子域名的请求重定向到 tiffara.com，保留子域名、路径和查询参数
+#!icon=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/imdbapi_redirect_to_tiffara/imdb.png
+#!homepage=https://github.com/DemoJameson/Proxy.Modules
+#!author=DemoJameson
+
+[Url Rewrite]
+# 仅替换主域名 imdbapi.dev -> tiffara.com，子域名、路径、查询参数原样保留
+# Loon 语法：pattern replacement flag（无 url 关键字）
+^https:\/\/([^/]*\.)?imdbapi\.dev(.*)$ https://$1tiffara.com$2 header
+
+[MITM]
+hostname = *.imdbapi.dev, imdbapi.dev

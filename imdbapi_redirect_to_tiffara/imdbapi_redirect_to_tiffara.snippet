@@ -1,0 +1,13 @@
+#!name=修复imdbapi.dev
+#!desc=将 imdbapi.dev 及其所有子域名的请求重定向到 tiffara.com，保留子域名、路径和查询参数
+#!homepage=https://github.com/DemoJameson/Proxy.Modules
+#!author=DemoJameson
+
+# 无参数配置，仅通过原生 URL Rewrite 实现重定向
+# 仅替换主域名 imdbapi.dev -> tiffara.com，子域名、路径、查询参数原样保留
+
+# [rewrite_local]
+^https:\/\/([^/]*\.)?imdbapi\.dev(.*)$ url 302 https://$1tiffara.com$2
+
+# [mitm]
+hostname = *.imdbapi.dev, imdbapi.dev
