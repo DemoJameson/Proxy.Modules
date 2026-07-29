@@ -2546,6 +2546,31 @@ test("comments 列表会翻译未命中的评论并写回缓存", async () => {
     );
 });
 
+test("comments 详情会翻译单个评论对象并写回缓存", async () => {
+    const body = JSON.stringify({
+        id: 453514,
+        comment: "The story feels forced just to include retro actors.",
+        spoiler: true,
+        review: false,
+        parent_id: 0,
+        language: "en",
+    });
+    const { result, persistentData } = await runResponseCase({
+        url: "https://apiz.trakt.tv/comments/453514?extended=reactions",
+        body,
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["故事感觉很牵强，只是为了加入复古演员。"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.comment, "故事感觉很牵强，只是为了加入复古演员。");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["453514"].comment.translatedText, "故事感觉很牵强，只是为了加入复古演员。");
+    assert.equal(cache["453514"].comment.sourceTextHash, computeStringHash("The story feels forced just to include retro actors."));
+});
+
 test("movie comments 会用双语片名上下文翻译未命中的评论", async () => {
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/comments/newest",

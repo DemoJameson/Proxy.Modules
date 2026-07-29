@@ -18,6 +18,10 @@ function shouldTranslateComment(comment) {
 }
 
 function collectCommentTargets(payload) {
+    if (commonUtils.isPlainObject(payload) && commonUtils.isNonNullish(payload.id) && typeof payload.comment === "string") {
+        return [{ comment: payload, item: null }];
+    }
+
     if (commonUtils.isNotArray(payload) || payload.length === 0) {
         return [];
     }
@@ -251,7 +255,10 @@ async function translateCommentsInPlace(payload, options = {}) {
 
 async function handleComments() {
     const comments = JSON.parse(globalThis.$ctx.responseBody);
-    if (commonUtils.isNotArray(comments) || comments.length === 0) {
+    const hasCommentPayload =
+        (commonUtils.isArray(comments) && comments.length > 0) ||
+        (commonUtils.isPlainObject(comments) && commonUtils.isNonNullish(comments.id) && typeof comments.comment === "string");
+    if (!hasCommentPayload) {
         return { type: "passThrough" };
     }
 

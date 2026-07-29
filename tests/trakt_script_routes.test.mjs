@@ -992,18 +992,20 @@ test("handleComments 覆盖 media comments、episode comments 与 replies 路由
         "https://api.trakt.tv/movies/123/comments/newest",
         "https://api.trakt.tv/shows/555/seasons/1/episodes/2/comments/newest",
         "https://api.trakt.tv/comments/123/replies",
+        "https://apiz.trakt.tv/comments/453514?extended=reactions",
     ];
 
     for (const url of cases) {
         await t.test(url, async () => {
+            const isDetail = /\/comments\/\d+(\?|$)/i.test(url);
             const { result } = await runResponseCase({
                 url,
-                body: readFixture("comments.json"),
+                body: isDetail ? JSON.stringify(JSON.parse(readFixture("comments.json"))[0]) : readFixture("comments.json"),
                 persistentData: createEpisodeCommentPersistentData(),
             });
 
             const payload = JSON.parse(result.body);
-            assert.equal(payload[0].comment, "很棒的电影");
+            assert.equal(isDetail ? payload.comment : payload[0].comment, "很棒的电影");
         });
     }
 });
@@ -1670,6 +1672,7 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["media.comments", "https://api.trakt.tv/shows/123/comments/newest"],
         ["shows.episode.comments", "https://api.trakt.tv/shows/123/seasons/1/episodes/2/comments/newest"],
         ["comments.replies", "https://api.trakt.tv/comments/123/replies"],
+        ["comments.detail", "https://apiz.trakt.tv/comments/453514?extended=reactions"],
         ["media.translations.zh", "https://api.trakt.tv/movies/123/translations/zh?extended=all"],
         ["media.translations.zh", "https://api.trakt.tv/shows/123/translations/zh?extended=all"],
         ["shows.episode.translations.zh", "https://api.trakt.tv/shows/123/seasons/1/episodes/2/translations/zh?extended=all"],

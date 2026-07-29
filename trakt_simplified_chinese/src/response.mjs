@@ -148,6 +148,7 @@ function createResponsePhaseRoutes() {
             handler: commentsTranslationHandler.handleComments,
         }),
         createRoute({ pattern: /^comments\/\d+\/replies$/i, id: "comments.replies", handler: commentsTranslationHandler.handleComments }),
+        createRoute({ pattern: /^comments\/\d+$/i, id: "comments.detail", handler: commentsTranslationHandler.handleComments }),
 
         createRoute({ pattern: /^(movies|shows)\/\d+\/translations\/zh$/i, id: "media.translations.zh", handler: mediaTranslationHandler.handleTranslations }),
         createRoute({
