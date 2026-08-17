@@ -80,7 +80,7 @@ function resolveWatchnowRegion(watchnow) {
     return country || WATCHNOW_DEFAULT_REGION;
 }
 
-function injectWatchnowFavoriteSources(items, regionCode) {
+function injectWatchnowFavoriteSources(items, regionCode, orderedPlayerTypes) {
     const favorites = commonUtils.ensureArray(items).slice();
     const resolvedRegionCode = String(regionCode || WATCHNOW_DEFAULT_REGION)
         .trim()
@@ -92,13 +92,8 @@ function injectWatchnowFavoriteSources(items, regionCode) {
         });
     });
 
-    Object.values(playerDefinitions.PLAYER_TYPE)
-        .slice()
-        .reverse()
-        .forEach((source) => {
-            filtered.unshift(buildWatchnowFavoriteSource(source, resolvedRegionCode));
-        });
-    return filtered;
+    const playerFavorites = commonUtils.ensureArray(orderedPlayerTypes).map((source) => buildWatchnowFavoriteSource(source, resolvedRegionCode));
+    return [...playerFavorites, ...filtered];
 }
 
 function filterOutCustomSources(items) {
@@ -108,10 +103,9 @@ function filterOutCustomSources(items) {
     });
 }
 
-function injectCustomSourcesIntoList(items) {
-    return Object.values(playerDefinitions.PLAYER_TYPE)
-        .slice()
-        .reverse()
+function injectCustomSourcesIntoList(items, orderedPlayerTypes) {
+    return commonUtils
+        .ensureArray(orderedPlayerTypes)
         .map((source) => {
             const definition = playerDefinitions.PLAYER_DEFINITIONS[source];
             return createSourceDefinition(definition.type, definition.name, definition.color);
@@ -137,7 +131,7 @@ function ensureWatchnowSourcesDefaultRegion(payload) {
     return payload;
 }
 
-function injectWatchnowSourcesPayload(payload) {
+function injectWatchnowSourcesPayload(payload, orderedPlayerTypes) {
     payload = ensureWatchnowSourcesDefaultRegion(payload);
 
     if (commonUtils.isArray(payload)) {
@@ -151,7 +145,7 @@ function injectWatchnowSourcesPayload(payload) {
                     return;
                 }
 
-                item[regionCode] = injectCustomSourcesIntoList(item[regionCode]);
+                item[regionCode] = injectCustomSourcesIntoList(item[regionCode], orderedPlayerTypes);
             });
         });
 
@@ -167,7 +161,7 @@ function injectWatchnowSourcesPayload(payload) {
             return;
         }
 
-        payload[regionCode] = injectCustomSourcesIntoList(payload[regionCode]);
+        payload[regionCode] = injectCustomSourcesIntoList(payload[regionCode], orderedPlayerTypes);
     });
 
     return payload;
@@ -299,7 +293,7 @@ async function resolveWatchnowContext(target, linkCache) {
     return null;
 }
 
-function injectUserSettingsPayload(data) {
+function injectUserSettingsPayload(data, orderedPlayerTypes) {
     if (!data || typeof data !== "object") {
         return data;
     }
@@ -310,7 +304,7 @@ function injectUserSettingsPayload(data) {
     data.account.display_ads = false;
     data.browsing = commonUtils.ensureObject(data.browsing);
     data.browsing.watchnow = commonUtils.ensureObject(data.browsing.watchnow);
-    data.browsing.watchnow.favorites = injectWatchnowFavoriteSources(data.browsing.watchnow.favorites, resolveWatchnowRegion(data.browsing.watchnow));
+    data.browsing.watchnow.favorites = injectWatchnowFavoriteSources(data.browsing.watchnow.favorites, resolveWatchnowRegion(data.browsing.watchnow), orderedPlayerTypes);
     return data;
 }
 
@@ -358,15 +352,17 @@ async function handleWatchnow() {
 
 async function handleWatchnowSources() {
     const payload = JSON.parse(globalThis.$ctx.responseBody);
+    const orderedPlayerTypes = globalThis.$ctx.argument?.orderedPlayerTypes;
     return {
         type: "respond",
-        body: JSON.stringify(injectWatchnowSourcesPayload(payload)),
+        body: JSON.stringify(injectWatchnowSourcesPayload(payload, orderedPlayerTypes)),
     };
 }
 
 async function handleUserSettings() {
     const data = JSON.parse(globalThis.$ctx.responseBody);
-    const nextData = injectUserSettingsPayload(data);
+    const orderedPlayerTypes = globalThis.$ctx.argument?.orderedPlayerTypes;
+    const nextData = injectUserSettingsPayload(data, orderedPlayerTypes);
     if (!nextData || typeof nextData !== "object") {
         return { type: "passThrough" };
     }

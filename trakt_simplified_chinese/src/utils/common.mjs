@@ -48,6 +48,21 @@ function parseBooleanArgument(value, fallbackValue) {
     return fallbackValue;
 }
 
+function parseNumberArgument(value, fallbackValue) {
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? Math.trunc(value) : fallbackValue;
+    }
+
+    if (typeof value === "string") {
+        const num = Number(value.trim());
+        if (Number.isFinite(num)) {
+            return Math.trunc(num);
+        }
+    }
+
+    return fallbackValue;
+}
+
 function readTextArgument(value, fallbackValue) {
     if (typeof value !== "string") {
         return fallbackValue;
@@ -60,6 +75,10 @@ function readTextArgument(value, fallbackValue) {
 function parseArgumentValue(value, fallbackValue) {
     if (typeof fallbackValue === "boolean") {
         return parseBooleanArgument(value, fallbackValue);
+    }
+
+    if (typeof fallbackValue === "number") {
+        return parseNumberArgument(value, fallbackValue);
     }
 
     if (typeof fallbackValue === "string") {
@@ -167,6 +186,7 @@ export {
     normalizePathname,
     parseArgumentValue,
     parseBooleanArgument,
+    parseNumberArgument,
     parseQueryParams,
     parseUrlParts,
     readTextArgument,

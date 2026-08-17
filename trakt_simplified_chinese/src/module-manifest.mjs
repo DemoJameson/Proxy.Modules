@@ -53,25 +53,31 @@ const argumentFields = [
         desc: "启用后会用豆瓣翻译角色名",
     },
     {
-        key: "eplayerxEnabled",
-        defaultValue: true,
-        type: "boolean",
+        key: "eplayerxOrder",
+        defaultValue: 1,
+        type: "select",
+        options: ["0", "1", "2", "3"],
+        optionValues: [0, 1, 2, 3],
         tag: "EplayerX 跳转按钮",
-        desc: "启用后在 Trakt 和 SofaTime 中添加 EplayerX 跳转按钮",
+        desc: "序号代表在 Trakt 中的排序位置，0 不显示，默认 1",
     },
     {
-        key: "forwardEnabled",
-        defaultValue: true,
-        type: "boolean",
+        key: "forwardOrder",
+        defaultValue: 2,
+        type: "select",
+        options: ["0", "1", "2", "3"],
+        optionValues: [0, 1, 2, 3],
         tag: "Forward 跳转按钮",
-        desc: "启用后在 Trakt 和 SofaTime 中添加 Forward 跳转按钮",
+        desc: "序号代表在 Trakt 中的排序位置，0 不显示，默认 2",
     },
     {
-        key: "infuseEnabled",
-        defaultValue: true,
-        type: "boolean",
+        key: "infuseOrder",
+        defaultValue: 3,
+        type: "select",
+        options: ["0", "1", "2", "3"],
+        optionValues: [0, 1, 2, 3],
         tag: "Infuse 跳转按钮",
-        desc: "启用后在 Trakt 和 SofaTime 中添加 Infuse 跳转按钮",
+        desc: "序号代表在 Trakt 中的排序位置，0 不显示，默认 3",
     },
     {
         key: "backendBaseUrl",
@@ -90,9 +96,7 @@ const argumentFields = [
 ];
 
 const ALL_ARGUMENT_KEYS = argumentFields.map((field) => field.key);
-const PLAYER_ARGUMENT_KEYS = ["eplayerxEnabled", "forwardEnabled", "infuseEnabled"];
 const CORE_ARGUMENT_KEYS = ["posterImageMode", "historyEpisodesMergedByShow", "googleTranslationEnabled", "characterTranslationEnabled", "backendBaseUrl", "debugEnabled"];
-const CORE_WITH_PLAYER_ARGUMENT_KEYS = [...CORE_ARGUMENT_KEYS, ...PLAYER_ARGUMENT_KEYS];
 
 const scriptRules = [
     {
@@ -178,7 +182,7 @@ const scriptRules = [
         timeout: 60,
         requiresBody: true,
         maxSize: 0,
-        argumentKeys: CORE_ARGUMENT_KEYS,
+        argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
         title: "SofaTime Streaming Availability",
@@ -189,7 +193,7 @@ const scriptRules = [
         timeout: 60,
         requiresBody: true,
         maxSize: 0,
-        argumentKeys: CORE_WITH_PLAYER_ARGUMENT_KEYS,
+        argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
         title: "SofaTime Country Services",
@@ -200,7 +204,7 @@ const scriptRules = [
         timeout: 60,
         requiresBody: true,
         maxSize: 0,
-        argumentKeys: CORE_ARGUMENT_KEYS,
+        argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
         kind: "cron",

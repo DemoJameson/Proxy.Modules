@@ -14,9 +14,9 @@
                 "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
                 "@dj_trakt_boxjs_configs.googleTranslationEnabled",
                 "@dj_trakt_boxjs_configs.characterTranslationEnabled",
-                "@dj_trakt_boxjs_configs.eplayerxEnabled",
-                "@dj_trakt_boxjs_configs.forwardEnabled",
-                "@dj_trakt_boxjs_configs.infuseEnabled",
+                "@dj_trakt_boxjs_configs.eplayerxOrder",
+                "@dj_trakt_boxjs_configs.forwardOrder",
+                "@dj_trakt_boxjs_configs.infuseOrder",
                 "@dj_trakt_boxjs_configs.backendBaseUrl",
                 "@dj_trakt_boxjs_configs.debugEnabled"
             ],
@@ -70,25 +70,79 @@
                     "desc": "启用后会用豆瓣翻译角色名"
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.eplayerxEnabled",
+                    "id": "@dj_trakt_boxjs_configs.eplayerxOrder",
                     "name": "EplayerX 跳转按钮",
-                    "val": true,
-                    "type": "boolean",
-                    "desc": "启用后在 Trakt 和 SofaTime 中添加 EplayerX 跳转按钮"
+                    "val": 1,
+                    "type": "select",
+                    "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 1",
+                    "items": [
+                        {
+                            "key": 0,
+                            "label": "0"
+                        },
+                        {
+                            "key": 1,
+                            "label": "1"
+                        },
+                        {
+                            "key": 2,
+                            "label": "2"
+                        },
+                        {
+                            "key": 3,
+                            "label": "3"
+                        }
+                    ]
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.forwardEnabled",
+                    "id": "@dj_trakt_boxjs_configs.forwardOrder",
                     "name": "Forward 跳转按钮",
-                    "val": true,
-                    "type": "boolean",
-                    "desc": "启用后在 Trakt 和 SofaTime 中添加 Forward 跳转按钮"
+                    "val": 2,
+                    "type": "select",
+                    "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 2",
+                    "items": [
+                        {
+                            "key": 0,
+                            "label": "0"
+                        },
+                        {
+                            "key": 1,
+                            "label": "1"
+                        },
+                        {
+                            "key": 2,
+                            "label": "2"
+                        },
+                        {
+                            "key": 3,
+                            "label": "3"
+                        }
+                    ]
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.infuseEnabled",
+                    "id": "@dj_trakt_boxjs_configs.infuseOrder",
                     "name": "Infuse 跳转按钮",
-                    "val": true,
-                    "type": "boolean",
-                    "desc": "启用后在 Trakt 和 SofaTime 中添加 Infuse 跳转按钮"
+                    "val": 3,
+                    "type": "select",
+                    "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 3",
+                    "items": [
+                        {
+                            "key": 0,
+                            "label": "0"
+                        },
+                        {
+                            "key": 1,
+                            "label": "1"
+                        },
+                        {
+                            "key": 2,
+                            "label": "2"
+                        },
+                        {
+                            "key": 3,
+                            "label": "3"
+                        }
+                    ]
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.backendBaseUrl",

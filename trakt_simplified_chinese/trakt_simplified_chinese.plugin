@@ -10,9 +10,9 @@ posterImageMode = select,"原片语言","中文","原图",tag=海报语言,desc=
 historyEpisodesMergedByShow = switch, "true", tag=历史剧集按电视剧合并, desc=启用后会将历史页面电视剧类别的观看记录按电视剧合并
 googleTranslationEnabled = switch, "true", tag=用 DeepLX 翻译部分文本, desc=启用后会翻译评论、社区情绪、冷知识、演员、片单等 DeepLX 翻译场景
 characterTranslationEnabled = switch, "true", tag=用豆瓣翻译角色名, desc=启用后会用豆瓣翻译角色名
-eplayerxEnabled = switch, "true", tag=EplayerX 跳转按钮, desc=启用后在 Trakt 和 SofaTime 中添加 EplayerX 跳转按钮
-forwardEnabled = switch, "true", tag=Forward 跳转按钮, desc=启用后在 Trakt 和 SofaTime 中添加 Forward 跳转按钮
-infuseEnabled = switch, "true", tag=Infuse 跳转按钮, desc=启用后在 Trakt 和 SofaTime 中添加 Infuse 跳转按钮
+eplayerxOrder = select,"0","1","2","3",tag=EplayerX 跳转按钮,desc=序号代表在 Trakt 中的排序位置，0 不显示，默认 1
+forwardOrder = select,"0","1","2","3",tag=Forward 跳转按钮,desc=序号代表在 Trakt 中的排序位置，0 不显示，默认 2
+infuseOrder = select,"0","1","2","3",tag=Infuse 跳转按钮,desc=序号代表在 Trakt 中的排序位置，0 不显示，默认 3
 backendBaseUrl = input, "https://proxy-modules.demojameson.de5.net", tag=翻译缓存接口, desc=用于批量获取 Trakt 的中文翻译，一般留空即可
 debugEnabled = switch, "false", tag=调试模式, desc=启用后每次都会刷新 translation-overrides 覆盖数据
 
@@ -20,9 +20,9 @@ debugEnabled = switch, "false", tag=调试模式, desc=启用后每次都会刷�
 # 手动清理本地缓存脚本
 cron "0 0 1 1 1" script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js, timeout=10, enable=false, tag=手动清理本地缓存脚本
 # 处理播放器 DeepLink 跳转
-http-request ^https:\/\/loon-plugins\.demojameson\.de5\.net\/api\/redirect\?.*$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxEnabled},{forwardEnabled},{infuseEnabled},{backendBaseUrl},{debugEnabled}], tag=Direct Redirect
+http-request ^https:\/\/loon-plugins\.demojameson\.de5\.net\/api\/redirect\?.*$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxOrder},{forwardOrder},{infuseOrder},{backendBaseUrl},{debugEnabled}], tag=Direct Redirect
 # SofaTime 中自定义播放器 Logo
-http-request ^https:\/\/image\.tmdb\.org\/t\/p\/w342\/[a-z0-9_-]+_logo\.webp(?:\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxEnabled},{forwardEnabled},{infuseEnabled},{backendBaseUrl},{debugEnabled}], tag=TMDB Logo Redirect
+http-request ^https:\/\/image\.tmdb\.org\/t\/p\/w342\/[a-z0-9_-]+_logo\.webp(?:\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxOrder},{forwardOrder},{infuseOrder},{backendBaseUrl},{debugEnabled}], tag=TMDB Logo Redirect
 # 仅拦截 SofaTime 的 streaming-availability shows 请求，移除 country 参数
 http-request ^https:\/\/streaming-availability\.p\.rapidapi\.com\/shows\/tt\d+(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, tag=SofaTime Streaming Availability Request
 # 拦截 sync/history/episodes 请求，放大 limit
@@ -32,13 +32,13 @@ http-request ^https:\/\/apiz?\.trakt\.tv\/users\/[^\/]+?\/history\/episodes\/?(\
 # 拦截带季号的请求，记录当前浏览季
 http-request ^https:\/\/apiz?\.trakt\.tv\/shows\/[^\/]+\/seasons\/\d+(?:\/.*|\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{backendBaseUrl},{debugEnabled}], tag=Trakt Current Season Request
 # 统一拦截 Trakt 响应，由脚本内部分流处理
-http-response ^https:\/\/apiz?\.trakt\.tv\/.*$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxEnabled},{forwardEnabled},{infuseEnabled},{backendBaseUrl},{debugEnabled}], tag=Trakt Response Router
+http-response ^https:\/\/apiz?\.trakt\.tv\/.*$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxOrder},{forwardOrder},{infuseOrder},{backendBaseUrl},{debugEnabled}], tag=Trakt Response Router
 # 仅拦截 SofaTime 的 TMDB provider 列表，注入播放器
-http-response ^https:\/\/api\.themoviedb\.org\/3\/watch\/providers\/(?:movie|tv)(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{backendBaseUrl},{debugEnabled}], tag=TMDB Provider Catalog
+http-response ^https:\/\/api\.themoviedb\.org\/3\/watch\/providers\/(?:movie|tv)(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxOrder},{forwardOrder},{infuseOrder},{backendBaseUrl},{debugEnabled}], tag=TMDB Provider Catalog
 # 仅拦截 SofaTime 的 streaming-availability shows 详情，注入播放器
-http-response ^https:\/\/streaming-availability\.p\.rapidapi\.com\/shows\/tt\d+(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{backendBaseUrl},{debugEnabled},{eplayerxEnabled},{forwardEnabled},{infuseEnabled}], tag=SofaTime Streaming Availability
+http-response ^https:\/\/streaming-availability\.p\.rapidapi\.com\/shows\/tt\d+(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxOrder},{forwardOrder},{infuseOrder},{backendBaseUrl},{debugEnabled}], tag=SofaTime Streaming Availability
 # 仅拦截 SofaTime 的 streaming-availability 国家服务列表，注入播放器
-http-response ^https:\/\/streaming-availability\.p\.rapidapi\.com\/countries\/[a-z]{2}(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{backendBaseUrl},{debugEnabled}], tag=SofaTime Country Services
+http-response ^https:\/\/streaming-availability\.p\.rapidapi\.com\/countries\/[a-z]{2}(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{posterImageMode},{historyEpisodesMergedByShow},{googleTranslationEnabled},{characterTranslationEnabled},{eplayerxOrder},{forwardOrder},{infuseOrder},{backendBaseUrl},{debugEnabled}], tag=SofaTime Country Services
 # 缓存压力测试脚本
 cron "0 0 1 1 1" script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js, timeout=10, enable=false, tag=缓存压力测试脚本
 

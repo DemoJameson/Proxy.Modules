@@ -44,7 +44,7 @@ test("/users/settings 会注入 vip 标记、广告标记和 watchnow favorites"
     assert.deepEqual(payload.browsing.watchnow.favorites.slice(0, 3), ["sg-eplayerx", "sg-forward", "sg-infuse"]);
 });
 
-test("/watchnow/sources 会注入自定义 source 定义", async () => {
+test("/watchnow/sources 会按序号注入自定义 source 定义（默认正向 eplayerx→forward→infuse）", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/watchnow/sources",
         body: readFixture("watchnow-sources.json"),
@@ -53,25 +53,43 @@ test("/watchnow/sources 会注入自定义 source 定义", async () => {
     const payload = JSON.parse(result.body);
     assert.deepEqual(
         payload[0].sg.slice(0, 3).map((item) => item.source),
-        ["infuse", "forward", "eplayerx"],
+        ["eplayerx", "forward", "infuse"],
     );
 });
 
-test("/watchnow/sources 在关闭全部 player button 时仍会保留自定义 source 定义", async () => {
+test("/watchnow/sources 在自定义序号下会按序号升序重排 source 定义", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/watchnow/sources",
         body: readFixture("watchnow-sources.json"),
         argument: {
-            eplayerxEnabled: false,
-            infuseEnabled: false,
-            forwardEnabled: false,
+            eplayerxOrder: 3,
+            forwardOrder: 1,
+            infuseOrder: 2,
         },
     });
 
     const payload = JSON.parse(result.body);
     assert.deepEqual(
         payload[0].sg.slice(0, 3).map((item) => item.source),
-        ["infuse", "forward", "eplayerx"],
+        ["forward", "infuse", "eplayerx"],
+    );
+});
+
+test("/watchnow/sources 在全部序号为 0 时仍会保留自定义 source 定义（按声明顺序）", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/watchnow/sources",
+        body: readFixture("watchnow-sources.json"),
+        argument: {
+            eplayerxOrder: 0,
+            infuseOrder: 0,
+            forwardOrder: 0,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload[0].sg.slice(0, 3).map((item) => item.source),
+        ["eplayerx", "forward", "infuse"],
     );
 });
 
@@ -194,14 +212,14 @@ test("/episodes/:id/watchnow 默认使用 Forward Universal Link 并追加季集
     assert.equal(entry.link, "https://fwds.cc/tmdb?type=tv&id=250307&season=2&episode=3");
 });
 
-test("/movies/:id/watchnow 在禁用部分 player button 时只注入启用的播放器", async () => {
+test("/movies/:id/watchnow 在部分序号为 0 时只注入序号非 0 的播放器", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/watchnow",
         body: readFixture("movie-watchnow.json"),
         argument: {
-            eplayerxEnabled: false,
-            infuseEnabled: false,
-            forwardEnabled: true,
+            eplayerxOrder: 0,
+            infuseOrder: 0,
+            forwardOrder: 1,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(
@@ -232,14 +250,14 @@ test("/movies/:id/watchnow 在禁用部分 player button 时只注入启用的�
     );
 });
 
-test("/movies/:id/watchnow 在禁用全部 player button 时会保留原始 watchnow 响应", async () => {
+test("/movies/:id/watchnow 在全部序号为 0 时会保留原始 watchnow 响应", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/watchnow",
         body: readFixture("movie-watchnow.json"),
         argument: {
-            eplayerxEnabled: false,
-            infuseEnabled: false,
-            forwardEnabled: false,
+            eplayerxOrder: 0,
+            infuseOrder: 0,
+            forwardOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(

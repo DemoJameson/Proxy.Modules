@@ -277,7 +277,7 @@ async function injectSofaTimeStreamingAvailabilityPayload(enabledPlayerTypes, pa
     };
 }
 
-function injectSofaTimeCountryServices(payload) {
+function injectSofaTimeCountryServices(payload, orderedPlayerTypes) {
     if (!commonUtils.isPlainObject(payload)) {
         return payload;
     }
@@ -288,17 +288,12 @@ function injectSofaTimeCountryServices(payload) {
         return !Object.values(playerDefinitions.PLAYER_TYPE).includes(id);
     });
 
-    Object.values(playerDefinitions.PLAYER_TYPE)
-        .slice()
-        .reverse()
-        .forEach((source) => {
-            filteredServices.unshift(createSofaTimeCountryService(playerDefinitions.PLAYER_DEFINITIONS[source]));
-        });
-    payload.services = filteredServices;
+    const playerServices = commonUtils.ensureArray(orderedPlayerTypes).map((source) => createSofaTimeCountryService(playerDefinitions.PLAYER_DEFINITIONS[source]));
+    payload.services = [...playerServices, ...filteredServices];
     return payload;
 }
 
-function injectTmdbProviderCatalog(payload) {
+function injectTmdbProviderCatalog(payload, orderedPlayerTypes) {
     if (!commonUtils.isPlainObject(payload)) {
         return payload;
     }
@@ -312,12 +307,13 @@ function injectTmdbProviderCatalog(payload) {
         });
     });
 
-    TMDB_PROVIDER_LIST_ENTRIES.slice()
-        .reverse()
-        .forEach((entry) => {
-            filteredResults.unshift(commonUtils.cloneObject(entry));
-        });
-    payload.results = filteredResults;
+    const entriesBySource = Object.fromEntries(Object.values(playerDefinitions.PLAYER_TYPE).map((source, index) => [source, TMDB_PROVIDER_LIST_ENTRIES[index]]));
+    const playerEntries = commonUtils
+        .ensureArray(orderedPlayerTypes)
+        .map((source) => entriesBySource[source])
+        .filter(Boolean)
+        .map((entry) => commonUtils.cloneObject(entry));
+    payload.results = [...playerEntries, ...filteredResults];
     return payload;
 }
 
@@ -327,9 +323,10 @@ async function handleTmdbProviderCatalog() {
     }
 
     const payload = JSON.parse(globalThis.$ctx.responseBody);
+    const orderedPlayerTypes = globalThis.$ctx.argument?.orderedPlayerTypes;
     return {
         type: "respond",
-        body: JSON.stringify(injectTmdbProviderCatalog(payload)),
+        body: JSON.stringify(injectTmdbProviderCatalog(payload, orderedPlayerTypes)),
     };
 }
 
@@ -363,9 +360,10 @@ async function handleSofaTimeCountries() {
     }
 
     const payload = JSON.parse(context.responseBody);
+    const orderedPlayerTypes = context.argument?.orderedPlayerTypes;
     return {
         type: "respond",
-        body: JSON.stringify(injectSofaTimeCountryServices(payload)),
+        body: JSON.stringify(injectSofaTimeCountryServices(payload, orderedPlayerTypes)),
     };
 }
 

@@ -433,6 +433,150 @@ test("Sofa streaming availability request 会移除 country 参数", async () =>
     assert.equal(result.url, "https://streaming-availability.p.rapidapi.com/shows/tt3029574?id=tt3029574");
 });
 
+test("Sofa countries 在自定义序号下会按序号升序重排自定义服务", async () => {
+    const { result } = await runResponseCase({
+        url: "https://streaming-availability.p.rapidapi.com/countries/us",
+        body: readFixture("sofa-countries.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 3,
+            forwardOrder: 1,
+            infuseOrder: 2,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload.services.slice(0, 3).map((item) => item.id),
+        ["forward", "infuse", "eplayerx"],
+    );
+});
+
+test("Sofa countries 在全部序号为 0 时仍保留全部自定义服务（按声明顺序）", async () => {
+    const { result } = await runResponseCase({
+        url: "https://streaming-availability.p.rapidapi.com/countries/us",
+        body: readFixture("sofa-countries.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 0,
+            forwardOrder: 0,
+            infuseOrder: 0,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload.services.slice(0, 3).map((item) => item.id),
+        ["eplayerx", "forward", "infuse"],
+    );
+});
+
+test("TMDb provider catalog 在自定义序号下会按序号升序重排自定义 provider", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/watch/providers/movie",
+        body: readFixture("tmdb-provider-catalog.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 3,
+            forwardOrder: 1,
+            infuseOrder: 2,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload.results.slice(0, 3).map((item) => item.provider_id),
+        [2, 3, 1],
+    );
+});
+
+test("TMDb provider catalog 在全部序号为 0 时仍保留全部自定义 provider（按声明顺序）", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/watch/providers/movie",
+        body: readFixture("tmdb-provider-catalog.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 0,
+            forwardOrder: 0,
+            infuseOrder: 0,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload.results.slice(0, 3).map((item) => item.provider_id),
+        [1, 2, 3],
+    );
+});
+
+test("Sofa streaming availability 在自定义序号下会按序号升序注入 streaming options", async () => {
+    const { result } = await runResponseCase({
+        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
+        body: readFixture("sofa-streaming-availability.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 3,
+            forwardOrder: 1,
+            infuseOrder: 2,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload.streamingOptions.us.map((item) => item.service.id),
+        ["forward", "infuse", "eplayerx"],
+    );
+});
+
+test("Sofa streaming availability 在部分序号为 0 时只注入序号非 0 的播放器", async () => {
+    const { result } = await runResponseCase({
+        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
+        body: readFixture("sofa-streaming-availability.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 0,
+            forwardOrder: 1,
+            infuseOrder: 2,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.deepEqual(
+        payload.streamingOptions.us.map((item) => item.service.id),
+        ["forward", "infuse"],
+    );
+});
+
+test("Sofa streaming availability 在全部序号为 0 时不注入任何自定义播放器", async () => {
+    const { result } = await runResponseCase({
+        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
+        body: readFixture("sofa-streaming-availability.json"),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 0,
+            forwardOrder: 0,
+            infuseOrder: 0,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.streamingOptions.us.length, 0);
+});
+
 test("handleList 按 direct list、wrapped list 与 prominent list 路由分组生效", async (t) => {
     const persistentData = createUnifiedPersistentData({
         googleList: JSON.parse(

@@ -3,27 +3,27 @@ import * as playerDefinitions from "./shared/player-definitions.mjs";
 import * as commonUtils from "./utils/common.mjs";
 
 const PLAYER_BUTTON_ARGUMENT_GROUP_KEYS = {
-    eplayerxEnabled: "eplayerx",
-    forwardEnabled: "forward",
-    infuseEnabled: "infuse",
+    eplayerxOrder: "eplayerx",
+    forwardOrder: "forward",
+    infuseOrder: "infuse",
 };
 
 const ARGUMENT_FIELDS = argumentFields.map((field) => {
     const groupKey = PLAYER_BUTTON_ARGUMENT_GROUP_KEYS[field.key];
-    return groupKey ? { ...field, group: "playerButtonEnabled", groupKey } : field;
+    return groupKey ? { ...field, group: "playerButtonOrder", groupKey } : field;
 });
 
-function createDefaultPlayerButtonEnabledConfig() {
+function createDefaultPlayerButtonOrderConfig() {
     return {
-        eplayerx: true,
-        forward: true,
-        infuse: true,
+        eplayerx: 1,
+        forward: 2,
+        infuse: 3,
     };
 }
 
 function createDefaultArgumentConfig() {
     const config = {
-        playerButtonEnabled: createDefaultPlayerButtonEnabledConfig(),
+        playerButtonOrder: createDefaultPlayerButtonOrderConfig(),
     };
 
     ARGUMENT_FIELDS.forEach(({ key, defaultValue, group, groupKey }) => {
@@ -114,13 +114,33 @@ function normalizePosterImageMode(value) {
 }
 
 function normalizeArgument(argument) {
+    const orderMap = argument.playerButtonOrder;
+    const orderOf = (source) => (Number(orderMap[source]) > 0 ? Number(orderMap[source]) : 0);
+    const orderedPlayerTypes = Object.values(playerDefinitions.PLAYER_TYPE)
+        .slice()
+        .sort((a, b) => {
+            const oa = orderOf(a);
+            const ob = orderOf(b);
+            if (oa === 0 && ob === 0) {
+                return 0;
+            }
+            if (oa === 0) {
+                return 1;
+            }
+            if (ob === 0) {
+                return -1;
+            }
+            return oa - ob;
+        });
+    const enabledPlayerTypes = orderedPlayerTypes.filter((source) => orderOf(source) > 0);
+
     return {
         ...argument,
         posterImageMode: normalizePosterImageMode(argument.posterImageMode),
         backendBaseUrl: normalizeBackendBaseUrl(argument),
-        enabledPlayerTypes: Object.values(playerDefinitions.PLAYER_TYPE).filter((source) => {
-            return argument.playerButtonEnabled[source];
-        }),
+        playerButtonOrder: orderMap,
+        orderedPlayerTypes,
+        enabledPlayerTypes,
     };
 }
 
