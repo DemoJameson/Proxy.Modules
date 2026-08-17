@@ -18,6 +18,10 @@ function fetchTranslationOverrides() {
     return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/translation-overrides`, null, false);
 }
 
+function fetchDoubanCache(query) {
+    return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/credits?${query}`, null, false);
+}
+
 function postTranslations(payload) {
     return httpUtils.postJson(
         `${resolveBackendBaseUrl()}/api/trakt/translations`,
@@ -40,4 +44,25 @@ function postImages(payload) {
     );
 }
 
-export { DEFAULT_BACKEND_BASE_URL, fetchImages, fetchTranslationOverrides, fetchTranslations, postImages, postTranslations, resolveBackendBaseUrl };
+function postDoubanCache(payload) {
+    return httpUtils.postJson(
+        `${resolveBackendBaseUrl()}/api/trakt/credits`,
+        payload,
+        {
+            "content-type": "application/json",
+        },
+        false,
+    );
+}
+
+export {
+    DEFAULT_BACKEND_BASE_URL,
+    fetchDoubanCache,
+    fetchImages,
+    fetchTranslationOverrides,
+    fetchTranslations,
+    postDoubanCache,
+    postImages,
+    postTranslations,
+    resolveBackendBaseUrl,
+};

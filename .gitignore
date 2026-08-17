@@ -9,3 +9,5 @@ node_modules/
 
 .trakt-live-test.local.json
 .vercel
+.trae
+.serena

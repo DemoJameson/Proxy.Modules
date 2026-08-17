@@ -18,6 +18,9 @@
         },
         "api/trakt/images.js": {
             "maxDuration": 30
+        },
+        "api/trakt/credits.js": {
+            "maxDuration": 30
         }
     },
     "ignoreCommand": "git diff --quiet HEAD^ HEAD -- api/ public/ vercel.json"

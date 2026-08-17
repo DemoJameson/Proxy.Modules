@@ -120,42 +120,69 @@ test("cache utils: normalizeUnifiedCache keeps comments cache in current nested 
 
     assert.equal(normalized.google.comments["9001"].comment.translatedText, "很棒的电影");
     assert.equal(normalized.google.comments["9001"].rev, undefined);
-    assert.deepEqual(normalized.douban, {
-        search: {},
-        seasons: {},
-        credits: {},
-    });
+    assert.deepEqual(normalized.douban, {});
 });
 
 test("cache utils: normalizeUnifiedCache 保留豆瓣角色缓存摘要", () => {
+    const now = Date.now();
+    const expiresAt = now + 30 * 24 * 60 * 60 * 1000;
     const normalized = normalizeUnifiedCache({
         version: 9,
         douban: {
-            search: {
-                "tv:tt123": {
+            "shows:123": {
+                subject: {
                     id: "35517044",
-                    targetType: "tv",
+                    targetType: "shows",
                 },
-            },
-            seasons: {
-                35517044: {
+                seasons: {
                     ids: ["4707205", "", "4707205", "6312211"],
                 },
-            },
-            credits: {
-                4707205: {
+                credits: {
                     王骁: ["张一昂", "", "张一昂"],
                 },
+                expiresAt,
             },
         },
     });
 
-    assert.deepEqual(normalized.douban.search["tv:tt123"], {
+    assert.deepEqual(normalized.douban["shows:123"].subject, {
         id: "35517044",
-        targetType: "tv",
+        targetType: "shows",
     });
-    assert.deepEqual(normalized.douban.seasons["35517044"].ids, ["4707205", "6312211"]);
-    assert.deepEqual(normalized.douban.credits["4707205"].王骁, ["张一昂"]);
+    assert.deepEqual(normalized.douban["shows:123"].seasons.ids, ["4707205", "6312211"]);
+    assert.deepEqual(normalized.douban["shows:123"].credits.王骁, ["张一昂"]);
+    assert.equal(normalized.douban["shows:123"].expiresAt, expiresAt);
+});
+
+test("cache utils: normalizeUnifiedCache 丢弃过期豆瓣缓存条目", () => {
+    const now = Date.now();
+    const expired = now - 1000;
+    const fresh = now + 30 * 24 * 60 * 60 * 1000;
+    const normalized = normalizeUnifiedCache({
+        version: 12,
+        douban: {
+            "shows:123": {
+                subject: {
+                    id: "35517044",
+                    targetType: "shows",
+                },
+                credits: {
+                    王骁: ["张一昂"],
+                },
+                expiresAt: fresh,
+            },
+            "shows:456": {
+                subject: {
+                    id: "4707205",
+                    targetType: "shows",
+                },
+                expiresAt: expired,
+            },
+        },
+    });
+
+    assert.equal(normalized.douban["shows:123"].subject.id, "35517044");
+    assert.equal(normalized.douban["shows:456"], undefined);
 });
 
 test("cache utils: normalizeUnifiedCache 不迁移旧 poster 图片缓存", () => {
@@ -269,8 +296,11 @@ test("cache utils: pruneUnifiedCacheToLimit keeps people translations before med
 test("cache utils: pruneUnifiedCacheToLimit can prune douban cache before link ids", () => {
     const env = createEnv();
     const cache = createEmptyUnifiedCache(9, 900);
-    cache.douban.credits["35517044"] = {
-        王骁: ["A".repeat(800)],
+    cache.douban["shows:123"] = {
+        credits: {
+            王骁: ["A".repeat(800)],
+        },
+        expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000,
     };
     cache.trakt.linkIds["123"] = {
         ids: {
@@ -284,7 +314,7 @@ test("cache utils: pruneUnifiedCacheToLimit can prune douban cache before link i
 
     const pruned = pruneUnifiedCacheToLimit(env, cache, 9, 900);
 
-    assert.equal(pruned.douban.credits["35517044"], undefined);
+    assert.equal(pruned.douban["shows:123"], undefined);
     assert.equal(pruned.trakt.linkIds["123"].ids.imdb, "tt123");
     assert.equal(pruned.trakt.linkIds["123"].title, "Original Movie");
 });
@@ -390,11 +420,7 @@ test("cache utils: version 不匹配时清空旧 unified cache", () => {
     assert.equal(unifiedCache.version, createEmptyUnifiedCache().version);
     assert.deepEqual(unifiedCache.trakt.translation, {});
     assert.deepEqual(unifiedCache.google.people, {});
-    assert.deepEqual(unifiedCache.douban, {
-        search: {},
-        seasons: {},
-        credits: {},
-    });
+    assert.deepEqual(unifiedCache.douban, {});
 });
 
 test("cache utils: 无 revision 冲突时 save 不会重读完整 unified cache", () => {

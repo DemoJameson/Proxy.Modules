@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { UNIFIED_CACHE_KEY, UNIFIED_CACHE_MAX_BYTES, UNIFIED_CACHE_SCHEMA_VERSION } from "../../trakt_simplified_chinese/src/utils/cache.mjs";
+import { DOUBAN_CACHE_TTL_MS, UNIFIED_CACHE_KEY, UNIFIED_CACHE_MAX_BYTES, UNIFIED_CACHE_SCHEMA_VERSION } from "../../trakt_simplified_chinese/src/utils/cache.mjs";
 
 import { runScript } from "./run-script.mjs";
 
@@ -43,7 +43,15 @@ function createMediaTranslationCache(entries = {}) {
     });
 }
 
+function withDoubanExpiry(entries, expiresAt) {
+    const source = entries ?? {};
+    return Object.fromEntries(
+        Object.entries(source).map(([key, entry]) => [key, entry && typeof entry === "object" ? { ...entry, expiresAt: entry.expiresAt ?? expiresAt } : entry]),
+    );
+}
+
 function createUnifiedCache(overrides = {}) {
+    const doubanExpiresAt = Date.now() + DOUBAN_CACHE_TTL_MS;
     return JSON.stringify({
         version: UNIFIED_CACHE_SCHEMA_VERSION,
         rev: Number(overrides.rev ?? Date.now()),
@@ -60,11 +68,7 @@ function createUnifiedCache(overrides = {}) {
             people: overrides.googlePeople ?? {},
             list: overrides.googleList ?? {},
         },
-        douban: {
-            search: overrides.doubanSearch ?? {},
-            seasons: overrides.doubanSeasons ?? {},
-            credits: overrides.doubanCredits ?? {},
-        },
+        douban: withDoubanExpiry(overrides.douban, doubanExpiresAt),
         persistent: {
             currentSeason: overrides.persistentCurrentSeason ?? null,
             historyShows: overrides.persistentHistoryShows ?? {},

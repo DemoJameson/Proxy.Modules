@@ -3,7 +3,8 @@ import * as commonUtils from "../utils/common.mjs";
 
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
-const UNIFIED_CACHE_SCHEMA_VERSION = 11;
+const UNIFIED_CACHE_SCHEMA_VERSION = 13;
+const DOUBAN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
@@ -18,9 +19,7 @@ const PRUNE_PRIORITY = {
     "trakt.translation.not_found": 5,
     "trakt.translation.partial_found": 6,
     "trakt.translation.found": 7,
-    "douban.search": 7,
-    "douban.seasons": 7,
-    "douban.credits": 7,
+    douban: 7,
     "trakt.linkIds": 8,
     "google.people": 9,
 };
@@ -162,9 +161,15 @@ function normalizeHistoryShowsEntry(entry) {
     return Object.keys(shows).length > 0 ? { shows } : null;
 }
 
-function normalizeDoubanSearchEntry(entry) {
-    const id = String(entry?.id ?? "").trim();
-    const targetType = String(entry?.targetType ?? "")
+function isDoubanEntryFresh(expiresAt) {
+    const ts = Number(expiresAt);
+    return Number.isFinite(ts) && ts > Date.now();
+}
+
+function normalizeDoubanSubjectEntry(subject) {
+    const source = commonUtils.ensureObject(subject);
+    const id = String(source.id ?? "").trim();
+    const targetType = String(source.targetType ?? "")
         .trim()
         .toLowerCase();
     return id && targetType ? { id, targetType } : null;
@@ -177,14 +182,18 @@ function normalizeStringArray(value) {
         .filter((item, index, array) => item && array.indexOf(item) === index);
 }
 
-function normalizeDoubanSeasonsEntry(entry) {
-    const ids = normalizeStringArray(commonUtils.isPlainObject(entry) ? entry.ids : entry);
+function normalizeDoubanSeasonsEntry(seasons) {
+    const ids = normalizeStringArray(commonUtils.isPlainObject(seasons) ? seasons.ids : seasons);
     return ids.length > 0 ? { ids } : null;
 }
 
-function normalizeDoubanCreditsEntry(entry) {
+function normalizeDoubanCreditsEntry(credits) {
+    const source = commonUtils.ensureObject(credits);
     const normalized = {};
-    Object.entries(commonUtils.ensureObject(entry)).forEach(([name, roles]) => {
+    Object.entries(source).forEach(([name, roles]) => {
+        if (name === "expiresAt") {
+            return;
+        }
         const normalizedName = String(name ?? "").trim();
         const normalizedRoles = normalizeStringArray(roles);
         if (normalizedName && normalizedRoles.length > 0) {
@@ -194,13 +203,33 @@ function normalizeDoubanCreditsEntry(entry) {
     return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
+function normalizeDoubanCreditEntry(entry) {
+    const source = commonUtils.ensureObject(entry);
+    if (!isDoubanEntryFresh(source.expiresAt)) {
+        return null;
+    }
+    const expiresAt = Number(source.expiresAt);
+    const subject = normalizeDoubanSubjectEntry(source.subject);
+    const seasons = normalizeDoubanSeasonsEntry(source.seasons);
+    const credits = normalizeDoubanCreditsEntry(source.credits);
+    if (!subject && !seasons && !credits) {
+        return null;
+    }
+    const normalized = { expiresAt };
+    if (subject) {
+        normalized.subject = subject;
+    }
+    if (seasons) {
+        normalized.seasons = seasons;
+    }
+    if (credits) {
+        normalized.credits = credits;
+    }
+    return normalized;
+}
+
 function normalizeDoubanCache(cache) {
-    const source = commonUtils.ensureObject(cache);
-    return {
-        search: normalizeEntryMap(source.search, normalizeDoubanSearchEntry),
-        seasons: normalizeEntryMap(source.seasons, normalizeDoubanSeasonsEntry),
-        credits: normalizeEntryMap(source.credits, normalizeDoubanCreditsEntry),
-    };
+    return normalizeEntryMap(commonUtils.ensureObject(cache), normalizeDoubanCreditEntry);
 }
 
 function normalizeLinkIdsEntry(entry) {
@@ -302,11 +331,7 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
             people: {},
             list: {},
         },
-        douban: {
-            search: {},
-            seasons: {},
-            credits: {},
-        },
+        douban: {},
         persistent: {
             currentSeason: null,
             historyShows: {},
@@ -548,6 +573,11 @@ function deletePrunableEntry(cache, target) {
         return;
     }
 
+    if (target.bucket === null) {
+        delete cache[target.scope][target.key];
+        return;
+    }
+
     delete cache[target.scope][target.bucket][target.key];
 }
 
@@ -599,30 +629,12 @@ function buildPrunableEntries(env, cache) {
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
-    Object.entries(commonUtils.ensureObject(cache.douban.search)).forEach(([key, entry]) => {
+    Object.entries(commonUtils.ensureObject(cache.douban)).forEach(([key, entry]) => {
         prunableEntries.push({
             scope: "douban",
-            bucket: "search",
+            bucket: null,
             key,
-            priority: PRUNE_PRIORITY["douban.search"],
-            estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
-        });
-    });
-    Object.entries(commonUtils.ensureObject(cache.douban.seasons)).forEach(([key, entry]) => {
-        prunableEntries.push({
-            scope: "douban",
-            bucket: "seasons",
-            key,
-            priority: PRUNE_PRIORITY["douban.seasons"],
-            estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
-        });
-    });
-    Object.entries(commonUtils.ensureObject(cache.douban.credits)).forEach(([key, entry]) => {
-        prunableEntries.push({
-            scope: "douban",
-            bucket: "credits",
-            key,
-            priority: PRUNE_PRIORITY["douban.credits"],
+            priority: PRUNE_PRIORITY.douban,
             estimatedBytes: estimatePrunableEntryBytes(env, key, entry),
         });
     });
@@ -1045,6 +1057,7 @@ export {
     buildFieldTranslationCacheKey,
     clearCurrentSeason,
     createEmptyUnifiedCache,
+    DOUBAN_CACHE_TTL_MS,
     GOOGLE_PEOPLE_CACHE_MAX_BYTES,
     getAuthToken,
     getCurrentSeason,
