@@ -8,9 +8,10 @@ import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequest
 
 const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 
-test("字符串参数第一位解析为 posterImageMode，第 5-7 位解析为 *Order 数字", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false,2,1,3]"));
+test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 posterImageMode，第 5-7 位解析为 *Order 数字", () => {
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,2,1,3]"));
 
+    assert.equal(parsed.fakeVipEnabled, true);
     assert.equal(parsed.posterImageMode, "original");
     assert.equal(parsed.historyEpisodesMergedByShow, true);
     assert.equal(parsed.googleTranslationEnabled, true);
@@ -26,7 +27,7 @@ test("characterTranslationEnabled 默认开启，且位于 googleTranslationEnab
     const defaults = normalizeArgument(createDefaultArgumentConfig());
     assert.equal(defaults.characterTranslationEnabled, true);
 
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false]"));
     assert.equal(parsed.googleTranslationEnabled, true);
     assert.equal(parsed.characterTranslationEnabled, false);
     assert.equal(parsed.playerButtonOrder.eplayerx, 1);
@@ -40,14 +41,14 @@ test("*Order 默认值为 1/2/3，非法值回落到默认序号", () => {
     assert.equal(defaults.playerButtonOrder.forward, 2);
     assert.equal(defaults.playerButtonOrder.infuse, 3);
 
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false,abc,NaN,2.5]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,abc,NaN,2.5]"));
     assert.equal(parsed.playerButtonOrder.eplayerx, 1);
     assert.equal(parsed.playerButtonOrder.forward, 2);
     assert.equal(parsed.playerButtonOrder.infuse, 2);
 });
 
 test("序号 0 在 enabledPlayerTypes 中隐藏，但仍保留在 orderedPlayerTypes 末尾", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[original,true,true,false,0,2,1]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,0,2,1]"));
     assert.equal(parsed.playerButtonOrder.eplayerx, 0);
     assert.equal(parsed.playerButtonOrder.forward, 2);
     assert.equal(parsed.playerButtonOrder.infuse, 1);
@@ -68,14 +69,14 @@ test("全部序号相同（含 0）时按 PLAYER_TYPE 声明顺序稳定排序",
 });
 
 test("posterImageMode 非法值回退 original", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[bogus]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,bogus]"));
 
     assert.equal(parsed.posterImageMode, "original");
 });
 
 test("posterImageMode 支持中文选项标签", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[原片语言]"));
-    const defaultParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[原图]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,原片语言]"));
+    const defaultParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,原图]"));
 
     assert.equal(parsed.posterImageMode, "original");
     assert.equal(defaultParsed.posterImageMode, "default");

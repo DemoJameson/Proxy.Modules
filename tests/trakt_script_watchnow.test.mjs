@@ -44,6 +44,21 @@ test("/users/settings 会注入 vip 标记、广告标记和 watchnow favorites"
     assert.deepEqual(payload.browsing.watchnow.favorites.slice(0, 3), ["sg-eplayerx", "sg-forward", "sg-infuse"]);
 });
 
+test("/users/settings 在 fakeVipEnabled=false 时不注入 vip 和广告标记，但仍注入 watchnow favorites", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/users/settings",
+        body: readFixture("user-settings.json"),
+        argument: {
+            fakeVipEnabled: false,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.user.vip, false);
+    assert.equal(payload.account.display_ads, true);
+    assert.deepEqual(payload.browsing.watchnow.favorites.slice(0, 3), ["sg-eplayerx", "sg-forward", "sg-infuse"]);
+});
+
 test("/watchnow/sources 会按序号注入自定义 source 定义（默认正向 eplayerx→forward→infuse）", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/watchnow/sources",

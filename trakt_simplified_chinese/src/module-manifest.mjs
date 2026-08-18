@@ -23,6 +23,13 @@ const BOXJS_CONFIG_KEY = "dj_trakt_boxjs_configs";
 
 const argumentFields = [
     {
+        key: "fakeVipEnabled",
+        defaultValue: true,
+        type: "boolean",
+        tag: "伪装成 VIP",
+        desc: "启用后伪装为 Trakt VIP 会员，移除 App 中的广告",
+    },
+    {
         key: "posterImageMode",
         defaultValue: "original",
         type: "select",
@@ -96,7 +103,6 @@ const argumentFields = [
 ];
 
 const ALL_ARGUMENT_KEYS = argumentFields.map((field) => field.key);
-const CORE_ARGUMENT_KEYS = ["posterImageMode", "historyEpisodesMergedByShow", "googleTranslationEnabled", "characterTranslationEnabled", "backendBaseUrl", "debugEnabled"];
 
 const scriptRules = [
     {
@@ -142,7 +148,7 @@ const scriptRules = [
         pattern: String.raw`^https:\/\/apiz?\.trakt\.tv\/sync\/history\/episodes\/?(\?.*)?$`,
         scriptFile: TRAKT_SCRIPT_FILE,
         timeout: 10,
-        argumentKeys: CORE_ARGUMENT_KEYS,
+        argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
         title: "Trakt History Episodes Request",
@@ -151,7 +157,7 @@ const scriptRules = [
         pattern: String.raw`^https:\/\/apiz?\.trakt\.tv\/users\/[^\/]+?\/history\/episodes\/?(\?.*)?$`,
         scriptFile: TRAKT_SCRIPT_FILE,
         timeout: 10,
-        argumentKeys: CORE_ARGUMENT_KEYS,
+        argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
         title: "Trakt Current Season Request",
@@ -160,7 +166,7 @@ const scriptRules = [
         pattern: String.raw`^https:\/\/apiz?\.trakt\.tv\/shows\/[^\/]+\/seasons\/\d+(?:\/.*|\?.*)?$`,
         scriptFile: TRAKT_SCRIPT_FILE,
         timeout: 10,
-        argumentKeys: CORE_ARGUMENT_KEYS,
+        argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
         title: "Trakt Response Router",

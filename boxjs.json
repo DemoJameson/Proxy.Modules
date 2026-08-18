@@ -10,6 +10,7 @@
             "id": "demojameson_trakt_simplified_chinese",
             "name": "Trakt 增强",
             "keys": [
+                "@dj_trakt_boxjs_configs.fakeVipEnabled",
                 "@dj_trakt_boxjs_configs.posterImageMode",
                 "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
                 "@dj_trakt_boxjs_configs.googleTranslationEnabled",
@@ -27,6 +28,13 @@
                 "https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/images/trakt.webp"
             ],
             "settings": [
+                {
+                    "id": "@dj_trakt_boxjs_configs.fakeVipEnabled",
+                    "name": "伪装成 VIP",
+                    "val": true,
+                    "type": "boolean",
+                    "desc": "启用后伪装为 Trakt VIP 会员，移除 App 中的广告"
+                },
                 {
                     "id": "@dj_trakt_boxjs_configs.posterImageMode",
                     "name": "海报语言",

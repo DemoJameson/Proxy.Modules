@@ -293,16 +293,20 @@ async function resolveWatchnowContext(target, linkCache) {
     return null;
 }
 
-function injectUserSettingsPayload(data, orderedPlayerTypes) {
+function injectUserSettingsPayload(data, orderedPlayerTypes, fakeVipEnabled) {
     if (!data || typeof data !== "object") {
         return data;
     }
 
     data.user = commonUtils.ensureObject(data.user);
-    data.user.vip = true;
     data.account = commonUtils.ensureObject(data.account);
-    data.account.display_ads = false;
     data.browsing = commonUtils.ensureObject(data.browsing);
+
+    if (fakeVipEnabled) {
+        data.user.vip = true;
+        data.account.display_ads = false;
+    }
+
     data.browsing.watchnow = commonUtils.ensureObject(data.browsing.watchnow);
     data.browsing.watchnow.favorites = injectWatchnowFavoriteSources(data.browsing.watchnow.favorites, resolveWatchnowRegion(data.browsing.watchnow), orderedPlayerTypes);
     return data;
@@ -361,8 +365,10 @@ async function handleWatchnowSources() {
 
 async function handleUserSettings() {
     const data = JSON.parse(globalThis.$ctx.responseBody);
-    const orderedPlayerTypes = globalThis.$ctx.argument?.orderedPlayerTypes;
-    const nextData = injectUserSettingsPayload(data, orderedPlayerTypes);
+    const argument = globalThis.$ctx.argument;
+    const orderedPlayerTypes = argument?.orderedPlayerTypes;
+    const fakeVipEnabled = argument?.fakeVipEnabled ?? true;
+    const nextData = injectUserSettingsPayload(data, orderedPlayerTypes, fakeVipEnabled);
     if (!nextData || typeof nextData !== "object") {
         return { type: "passThrough" };
     }

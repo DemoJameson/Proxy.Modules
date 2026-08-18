@@ -37,8 +37,8 @@ test("module manifest generates current BoxJs keys from argument fields", async 
         app.settings.map((setting) => setting.id),
         expectedKeys,
     );
-    assert.equal(app.keys[0], `@${BOXJS_CONFIG_KEY}.posterImageMode`);
-    assert.equal(app.settings[0].id, `@${BOXJS_CONFIG_KEY}.posterImageMode`);
+    assert.equal(app.keys[0], `@${BOXJS_CONFIG_KEY}.fakeVipEnabled`);
+    assert.equal(app.settings[0].id, `@${BOXJS_CONFIG_KEY}.fakeVipEnabled`);
     assert.ok(app.keys.includes(`@${BOXJS_CONFIG_KEY}.historyEpisodesMergedByShow`));
     assert.ok(app.keys.includes(`@${BOXJS_CONFIG_KEY}.characterTranslationEnabled`));
 
