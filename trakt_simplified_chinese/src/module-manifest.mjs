@@ -134,14 +134,6 @@ const scriptRules = [
         argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
-        title: "SofaTime Streaming Availability Request",
-        comment: "仅拦截 SofaTime 的 streaming-availability shows 请求，移除 country 参数",
-        phase: "http-request",
-        pattern: String.raw`^https:\/\/streaming-availability\.p\.rapidapi\.com\/shows\/tt\d+(\?.*)?$`,
-        scriptFile: TRAKT_SCRIPT_FILE,
-        timeout: 10,
-    },
-    {
         title: "Trakt Sync History Episodes Request",
         comment: "拦截 sync/history/episodes 请求，放大 limit",
         phase: "http-request",
@@ -191,21 +183,10 @@ const scriptRules = [
         argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
-        title: "SofaTime Streaming Availability",
-        comment: "仅拦截 SofaTime 的 streaming-availability shows 详情，注入播放器",
+        title: "TMDB Detail Watch Providers",
+        comment: "仅拦截 SofaTime 的 TMDB 详情请求（append_to_response 含 watch/providers），清除原有观看来源并注入排序 1 播放器",
         phase: "http-response",
-        pattern: String.raw`^https:\/\/streaming-availability\.p\.rapidapi\.com\/shows\/tt\d+(\?.*)?$`,
-        scriptFile: TRAKT_SCRIPT_FILE,
-        timeout: 60,
-        requiresBody: true,
-        maxSize: 0,
-        argumentKeys: ALL_ARGUMENT_KEYS,
-    },
-    {
-        title: "SofaTime Country Services",
-        comment: "仅拦截 SofaTime 的 streaming-availability 国家服务列表，注入播放器",
-        phase: "http-response",
-        pattern: String.raw`^https:\/\/streaming-availability\.p\.rapidapi\.com\/countries\/[a-z]{2}(\?.*)?$`,
+        pattern: String.raw`^https:\/\/api\.themoviedb\.org\/3\/(?:tv|movie)\/\d+\?.*watch(?:%2F|\/)providers.*$`,
         scriptFile: TRAKT_SCRIPT_FILE,
         timeout: 60,
         requiresBody: true,
@@ -224,7 +205,7 @@ const scriptRules = [
     },
 ];
 
-const mitmHosts = ["apiz.trakt.tv", "api.trakt.tv", "api.themoviedb.org", "image.tmdb.org", "streaming-availability.p.rapidapi.com", "loon-plugins.demojameson.de5.net"];
+const mitmHosts = ["apiz.trakt.tv", "api.trakt.tv", "api.themoviedb.org", "image.tmdb.org", "loon-plugins.demojameson.de5.net"];
 
 const boxjs = {
     id: "demojameson.app.sub",

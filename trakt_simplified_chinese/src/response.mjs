@@ -121,16 +121,10 @@ function createResponsePhaseRoutes() {
             handler: playerInjectionSofaTimeHandler.handleTmdbProviderCatalog,
         }),
         createRoute({
-            pattern: /^shows\/tt\d+$/i,
-            id: "streamingAvailability.showByImdb",
-            host: /^streaming-availability\.p\.rapidapi\.com$/i,
-            handler: playerInjectionSofaTimeHandler.handleSofaTimeStreamingAvailability,
-        }),
-        createRoute({
-            id: "streamingAvailability.countries",
-            host: /^streaming-availability\.p\.rapidapi\.com$/i,
-            pattern: /^countries\/[a-z]{2}$/i,
-            handler: playerInjectionSofaTimeHandler.handleSofaTimeCountries,
+            pattern: /^3\/(tv|movie)\/\d+$/i,
+            id: "tmdb.detail.watchProviders",
+            host: /^api\.themoviedb\.org$/i,
+            handler: playerInjectionSofaTimeHandler.handleTmdbDetailWatchProviders,
         }),
 
         createRoute({ pattern: /^watchnow\/sources$/i, id: "watchnow.sources", handler: playerInjectionTraktHandler.handleWatchnowSources }),

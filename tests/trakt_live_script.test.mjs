@@ -1494,27 +1494,25 @@ test("live script: response route coverage matrix covers all response phase rout
             },
         },
         {
-            url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-            body: readFixture("sofa-streaming-availability.json"),
+            url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+            body: JSON.stringify({
+                id: 108978,
+                name: "Reacher",
+                "watch/providers": {
+                    results: {
+                        US: {
+                            link: "https://www.themoviedb.org/tv/108978-reacher/watch?locale=US",
+                            flatrate: [{ logo_path: "/prime.jpg", provider_id: 119, provider_name: "Amazon Prime Video", display_priority: 1 }],
+                        },
+                    },
+                },
+            }),
             headers: {
                 "user-agent": "Sofa Time/1.0",
             },
             assertPayload(payload) {
                 assert.equal(
-                    payload.streamingOptions.us.some((item) => item.service.id === "forward"),
-                    true,
-                );
-            },
-        },
-        {
-            url: "https://streaming-availability.p.rapidapi.com/countries/us",
-            body: readFixture("sofa-countries.json"),
-            headers: {
-                "user-agent": "Sofa Time/1.0",
-            },
-            assertPayload(payload) {
-                assert.equal(
-                    payload.services.some((item) => item.id === "forward"),
+                    payload["watch/providers"].results.US.flatrate.some((item) => item.provider_id === 1),
                     true,
                 );
             },
@@ -1932,15 +1930,6 @@ test("live script: request route coverage matrix covers all request phase routes
                 assert.equal(result.url, "https://image.tmdb.org/t/p/w780/poster.jpg");
                 assert.equal(result.headers.Accept, "image/webp");
                 assert.equal(Object.hasOwn(result.headers, "accept"), false);
-            },
-        },
-        {
-            url: "https://streaming-availability.p.rapidapi.com/shows/tt3029574?country=tw&id=tt3029574",
-            headers: {
-                "user-agent": "Sofa Time/1.0",
-            },
-            assertResult(result) {
-                assert.equal(result.url, "https://streaming-availability.p.rapidapi.com/shows/tt3029574?id=tt3029574");
             },
         },
         {

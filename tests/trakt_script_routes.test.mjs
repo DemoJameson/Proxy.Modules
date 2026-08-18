@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
+import { REGION_CODES } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
 import { TRAKT_DIRECT_TRANSLATION_MAX_REFS } from "../trakt_simplified_chinese/src/shared/trakt-translation-helper.mjs";
 
 import {
@@ -241,22 +242,201 @@ function createEpisodeCommentPersistentData() {
     });
 }
 
-test("Sofa countries 会注入自定义服务", async () => {
+function createTmdbDetailBody(results) {
+    return JSON.stringify({
+        id: 108978,
+        name: "Reacher",
+        "watch/providers": {
+            results,
+        },
+    });
+}
+
+test("TMDB tv 详情只保留注入播放器并清除原有观看来源", async () => {
     const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/countries/us",
-        body: readFixture("sofa-countries.json"),
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({
+            AD: {
+                link: "https://www.themoviedb.org/tv/108978-reacher/watch?locale=AD",
+                flatrate: [{ logo_path: "/prime.jpg", provider_id: 119, provider_name: "Amazon Prime Video", display_priority: 1 }],
+            },
+            US: {
+                link: "https://www.themoviedb.org/tv/108978-reacher/watch?locale=US",
+                buy: [{ logo_path: "/apple.jpg", provider_id: 350, provider_name: "Apple TV", display_priority: 2 }],
+                ads: [{ logo_path: "/tubi.jpg", provider_id: 478, provider_name: "Tubi", display_priority: 3 }],
+            },
+        }),
         headers: {
             "user-agent": "Sofa Time/1.0",
         },
     });
 
     const payload = JSON.parse(result.body);
-    assert.deepEqual(
-        payload.services.slice(0, 3).map((item) => item.id),
-        ["eplayerx", "forward", "infuse"],
-    );
-    assert.ok(payload.services.some((item) => item.id === "netflix"));
-    assert.equal(payload.services.filter((item) => item.id === "forward").length, 1);
+    const ad = payload["watch/providers"].results.AD;
+    assert.equal(ad.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=108978");
+    assert.equal(ad.flatrate.length, 1);
+    assert.equal(ad.flatrate[0].provider_id, 1);
+    assert.equal(ad.flatrate[0].provider_name, "EplayerX");
+    assert.equal(ad.flatrate[0].display_priority, 1);
+
+    const us = payload["watch/providers"].results.US;
+    assert.equal(us.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=108978");
+    assert.equal(us.flatrate.length, 1);
+    assert.equal(us.flatrate[0].provider_id, 1);
+    assert.equal(us.buy, undefined);
+    assert.equal(us.ads, undefined);
+});
+
+test("TMDB movie 详情会注入 type=movie 的 deeplink", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/movie/550?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({
+            US: {
+                link: "https://www.themoviedb.org/movie/550-fight-club/watch?locale=US",
+            },
+        }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const us = payload["watch/providers"].results.US;
+    assert.equal(us.link, "https://eplayerx.com/tmdb-info/detail?type=movie&id=550");
+    assert.equal(us.flatrate[0].provider_id, 1);
+});
+
+test("TMDB 详情在自定义序号下只注入排序 1 的播放器", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({ US: { link: "https://www.themoviedb.org/tv/108978/watch?locale=US" } }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 3,
+            forwardOrder: 1,
+            infuseOrder: 2,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const us = payload["watch/providers"].results.US;
+    assert.equal(us.link, "https://fwds.cc/tmdb?type=tv&id=108978");
+    assert.equal(us.flatrate.length, 1);
+    assert.equal(us.flatrate[0].provider_id, 2);
+    assert.equal(us.flatrate[0].provider_name, "Forward");
+});
+
+test("TMDB 详情在部分序号为 0 时只注入序号非 0 的最前播放器", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({ US: { link: "https://www.themoviedb.org/tv/108978/watch?locale=US" } }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 0,
+            forwardOrder: 1,
+            infuseOrder: 2,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const us = payload["watch/providers"].results.US;
+    assert.equal(us.flatrate[0].provider_id, 2);
+    assert.equal(us.flatrate[0].provider_name, "Forward");
+});
+
+test("TMDB 详情在全部序号为 0 时不注入任何播放器", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({ US: { link: "https://www.themoviedb.org/tv/108978/watch?locale=US" } }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+        argument: {
+            eplayerxOrder: 0,
+            forwardOrder: 0,
+            infuseOrder: 0,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("TMDB 详情在 results 为空时为全部 REGION_CODES 注入", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({}),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const results = payload["watch/providers"].results;
+    assert.equal(Object.keys(results).length, REGION_CODES.length);
+    REGION_CODES.forEach((regionCode) => {
+        assert.equal(results[regionCode].link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=108978", `region ${regionCode} link`);
+        assert.equal(results[regionCode].flatrate.length, 1, `region ${regionCode} flatrate`);
+    });
+});
+
+test("TMDB 详情对非 SofaTime 请求直接透传", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({ US: { link: "https://www.themoviedb.org/tv/108978/watch?locale=US" } }),
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("TMDB 详情 append_to_response 不含 watch/providers 时透传", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=videos",
+        body: createTmdbDetailBody({ US: { link: "https://www.themoviedb.org/tv/108978/watch?locale=US" } }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("TMDB 详情 body 无 watch/providers 字段时透传", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: JSON.stringify({ id: 108978, name: "Reacher" }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("TMDB 详情 flatrate 已有旧自定义条目时也会整体清除只留注入播放器", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers",
+        body: createTmdbDetailBody({
+            US: {
+                link: "https://eplayerx.com/tmdb-info/detail?type=tv&id=108978",
+                flatrate: [
+                    { logo_path: "/forward_logo.webp", provider_id: 2, provider_name: "Forward", display_priority: 1 },
+                    { logo_path: "/prime.jpg", provider_id: 119, provider_name: "Amazon Prime Video", display_priority: 2 },
+                ],
+            },
+        }),
+        headers: {
+            "user-agent": "Sofa Time/1.0",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const us = payload["watch/providers"].results.US;
+    assert.equal(us.flatrate.length, 1);
+    assert.equal(us.flatrate[0].provider_id, 1);
 });
 
 test("TMDb provider catalog 会注入自定义 provider", async () => {
@@ -275,204 +455,6 @@ test("TMDb provider catalog 会注入自定义 provider", async () => {
     );
     assert.ok(payload.results.some((item) => item.provider_id === 8));
     assert.equal(payload.results.filter((item) => item.provider_id === 2).length, 1);
-});
-
-test("Sofa streaming availability 会注入自定义 streaming options", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: readFixture("sofa-streaming-availability.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(payload.tmdbId, "movie/123");
-    assert.deepEqual(
-        payload.streamingOptions.us.map((item) => item.service.id),
-        ["eplayerx", "forward", "infuse"],
-    );
-    assert.ok(payload.streamingOptions.us.every((item) => typeof item.link === "string" && item.link.length > 0));
-});
-
-test("Sofa streaming availability 默认使用 EplayerX Universal Link movie 链接", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: readFixture("sofa-streaming-availability.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    const eplayerxOption = payload.streamingOptions.us.find((item) => item.service.id === "eplayerx");
-    const forwardOption = payload.streamingOptions.us.find((item) => item.service.id === "forward");
-    assert.equal(eplayerxOption.link, "https://eplayerx.com/tmdb-info/detail?type=movie&id=123");
-    assert.equal(eplayerxOption.videoLink, "https://eplayerx.com/tmdb-info/detail?type=movie&id=123");
-    assert.equal(forwardOption.link, "https://fwds.cc/tmdb?type=movie&id=123");
-    assert.equal(forwardOption.videoLink, "https://fwds.cc/tmdb?type=movie&id=123");
-});
-
-test("Sofa streaming availability 默认使用 EplayerX Universal Link TV 链接且不追加季集参数", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: JSON.stringify({
-            tmdbId: "tv/299167",
-            streamingOptions: {
-                us: [],
-            },
-            seasons: [
-                {
-                    number: 1,
-                    streamingOptions: {
-                        us: [],
-                    },
-                    episodes: [
-                        {
-                            number: 2,
-                            streamingOptions: {
-                                us: [],
-                            },
-                        },
-                    ],
-                },
-            ],
-        }),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    const showOption = payload.streamingOptions.us.find((item) => item.service.id === "eplayerx");
-    const seasonOption = payload.seasons[0].streamingOptions.us.find((item) => item.service.id === "eplayerx");
-    const episodeOption = payload.seasons[0].episodes[0].streamingOptions.us.find((item) => item.service.id === "eplayerx");
-    const forwardShowOption = payload.streamingOptions.us.find((item) => item.service.id === "forward");
-    const forwardSeasonOption = payload.seasons[0].streamingOptions.us.find((item) => item.service.id === "forward");
-    const forwardEpisodeOption = payload.seasons[0].episodes[0].streamingOptions.us.find((item) => item.service.id === "forward");
-    assert.equal(showOption.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
-    assert.equal(seasonOption.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
-    assert.equal(episodeOption.link, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
-    assert.equal(episodeOption.videoLink, "https://eplayerx.com/tmdb-info/detail?type=tv&id=299167");
-    assert.equal(forwardShowOption.link, "https://fwds.cc/tmdb?type=tv&id=299167");
-    assert.equal(forwardSeasonOption.link, "https://fwds.cc/tmdb?type=tv&id=299167");
-    assert.equal(forwardEpisodeOption.link, "https://fwds.cc/tmdb?type=tv&id=299167");
-    assert.equal(forwardEpisodeOption.videoLink, "https://fwds.cc/tmdb?type=tv&id=299167");
-});
-
-test("Sofa streaming availability 在 404 时会反查 IMDb 到 TMDb 并返回注入结果", async () => {
-    const lookupUrl = "https://film-show-ratings.p.rapidapi.com/item/?id=tt1234567";
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: readFixture("sofa-streaming-404.json"),
-        responseStatus: 404,
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-            "x-rapidapi-key": "test-key",
-        },
-        httpGetMocks: {
-            [lookupUrl]: JSON.stringify({
-                result: {
-                    type: "film",
-                    ids: {
-                        TMDB: 987,
-                    },
-                },
-            }),
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(result.status, 200);
-    assert.equal(payload.tmdbId, "movie/987");
-    assert.deepEqual(
-        payload.streamingOptions.us.map((item) => item.service.id),
-        ["eplayerx", "forward", "infuse"],
-    );
-});
-
-test("Sofa streaming availability 在 400 时会返回 200 并带注入结果", async () => {
-    const lookupUrl = "https://film-show-ratings.p.rapidapi.com/item/?id=tt3029574";
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt3029574?country=tw&id=tt3029574",
-        body: readFixture("sofa-streaming-404.json"),
-        responseStatus: 400,
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-            "x-rapidapi-key": "test-key",
-        },
-        httpGetMocks: {
-            [lookupUrl]: JSON.stringify({
-                result: {
-                    type: "show",
-                    ids: {
-                        TMDB: 299167,
-                    },
-                },
-            }),
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(result.status, 200);
-    assert.equal(payload.tmdbId, "tv/299167");
-    assert.deepEqual(
-        payload.streamingOptions.us.map((item) => item.service.id),
-        ["eplayerx", "forward", "infuse"],
-    );
-});
-
-test("Sofa streaming availability request 会移除 country 参数", async () => {
-    const { result } = await runRequestCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt3029574?country=tw&id=tt3029574",
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-    });
-
-    assert.equal(result.url, "https://streaming-availability.p.rapidapi.com/shows/tt3029574?id=tt3029574");
-});
-
-test("Sofa countries 在自定义序号下会按序号升序重排自定义服务", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/countries/us",
-        body: readFixture("sofa-countries.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-        argument: {
-            eplayerxOrder: 3,
-            forwardOrder: 1,
-            infuseOrder: 2,
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.deepEqual(
-        payload.services.slice(0, 3).map((item) => item.id),
-        ["forward", "infuse", "eplayerx"],
-    );
-});
-
-test("Sofa countries 在全部序号为 0 时仍保留全部自定义服务（按声明顺序）", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/countries/us",
-        body: readFixture("sofa-countries.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-        argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 0,
-            infuseOrder: 0,
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.deepEqual(
-        payload.services.slice(0, 3).map((item) => item.id),
-        ["eplayerx", "forward", "infuse"],
-    );
 });
 
 test("TMDb provider catalog 在自定义序号下会按序号升序重排自定义 provider", async () => {
@@ -515,66 +497,6 @@ test("TMDb provider catalog 在全部序号为 0 时仍保留全部自定义 pro
         payload.results.slice(0, 3).map((item) => item.provider_id),
         [1, 2, 3],
     );
-});
-
-test("Sofa streaming availability 在自定义序号下会按序号升序注入 streaming options", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: readFixture("sofa-streaming-availability.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-        argument: {
-            eplayerxOrder: 3,
-            forwardOrder: 1,
-            infuseOrder: 2,
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.deepEqual(
-        payload.streamingOptions.us.map((item) => item.service.id),
-        ["forward", "infuse", "eplayerx"],
-    );
-});
-
-test("Sofa streaming availability 在部分序号为 0 时只注入序号非 0 的播放器", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: readFixture("sofa-streaming-availability.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-        argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 1,
-            infuseOrder: 2,
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.deepEqual(
-        payload.streamingOptions.us.map((item) => item.service.id),
-        ["forward", "infuse"],
-    );
-});
-
-test("Sofa streaming availability 在全部序号为 0 时不注入任何自定义播放器", async () => {
-    const { result } = await runResponseCase({
-        url: "https://streaming-availability.p.rapidapi.com/shows/tt1234567",
-        body: readFixture("sofa-streaming-availability.json"),
-        headers: {
-            "user-agent": "Sofa Time/1.0",
-        },
-        argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 0,
-            infuseOrder: 0,
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(payload.streamingOptions.us.length, 0);
 });
 
 test("handleList 按 direct list、wrapped list 与 prominent list 路由分组生效", async (t) => {
@@ -1806,8 +1728,8 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["users.settings", "https://api.trakt.tv/users/settings"],
         ["tmdb.watchProviders", "https://api.themoviedb.org/3/watch/providers/movie"],
         ["tmdb.watchProviders", "https://api.themoviedb.org/3/watch/providers/tv"],
-        ["streamingAvailability.showByImdb", "https://streaming-availability.p.rapidapi.com/shows/tt1234567"],
-        ["streamingAvailability.countries", "https://streaming-availability.p.rapidapi.com/countries/us"],
+        ["tmdb.detail.watchProviders", "https://api.themoviedb.org/3/tv/108978?api_key=x&append_to_response=watch/providers"],
+        ["tmdb.detail.watchProviders", "https://api.themoviedb.org/3/movie/123?append_to_response=seasons,watch/providers"],
         ["watchnow.sources", "https://api.trakt.tv/watchnow/sources"],
         ["media.people", "https://api.trakt.tv/movies/123/people"],
         ["media.people", "https://api.trakt.tv/shows/123/people"],
