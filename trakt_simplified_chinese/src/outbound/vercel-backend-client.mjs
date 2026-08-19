@@ -1,10 +1,28 @@
 import * as httpUtils from "../utils/http.mjs";
 
 const DEFAULT_BACKEND_BASE_URL = "https://proxy-modules.demojameson.de5.net";
+// 发出 POST 请求后等待 100ms，尽量确保请求已被代理运行时真正发出
+const POST_DISPATCH_DELAY_MS = 100;
+
+function delay(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function resolveBackendBaseUrl() {
     // 空白输入回退默认值，保证本函数永不返回空字符串
     return String(globalThis.$ctx.argument?.backendBaseUrl || DEFAULT_BACKEND_BASE_URL).trim() || DEFAULT_BACKEND_BASE_URL;
+}
+
+function postJsonWithDispatchDelay(url, payload) {
+    const requestPromise = httpUtils.postJson(
+        url,
+        payload,
+        {
+            "content-type": "application/json",
+        },
+        false,
+    );
+    return delay(POST_DISPATCH_DELAY_MS).then(() => requestPromise);
 }
 
 function fetchTranslations(query) {
@@ -32,58 +50,23 @@ function fetchCommentTranslations(query) {
 }
 
 function postTranslations(payload) {
-    return httpUtils.postJson(
-        `${resolveBackendBaseUrl()}/api/trakt/translations`,
-        payload,
-        {
-            "content-type": "application/json",
-        },
-        false,
-    );
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/translations`, payload);
 }
 
 function postImages(payload) {
-    return httpUtils.postJson(
-        `${resolveBackendBaseUrl()}/api/trakt/images`,
-        payload,
-        {
-            "content-type": "application/json",
-        },
-        false,
-    );
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/images`, payload);
 }
 
 function postDoubanCache(payload) {
-    return httpUtils.postJson(
-        `${resolveBackendBaseUrl()}/api/trakt/credits`,
-        payload,
-        {
-            "content-type": "application/json",
-        },
-        false,
-    );
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/credits`, payload);
 }
 
 function postPeopleNames(payload) {
-    return httpUtils.postJson(
-        `${resolveBackendBaseUrl()}/api/trakt/people-names`,
-        payload,
-        {
-            "content-type": "application/json",
-        },
-        false,
-    );
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/people-names`, payload);
 }
 
 function postCommentTranslations(payload) {
-    return httpUtils.postJson(
-        `${resolveBackendBaseUrl()}/api/trakt/comment-translations`,
-        payload,
-        {
-            "content-type": "application/json",
-        },
-        false,
-    );
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/comment-translations`, payload);
 }
 
 export {
