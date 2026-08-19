@@ -89,23 +89,17 @@ function normalizeMediaTranslationValue(translation) {
 }
 
 function normalizeMediaTranslationEntry(entry) {
-    const status =
-        entry?.status === translationCache.CACHE_STATUS.FOUND
-            ? translationCache.CACHE_STATUS.FOUND
-            : entry?.status === translationCache.CACHE_STATUS.PARTIAL_FOUND
-              ? translationCache.CACHE_STATUS.PARTIAL_FOUND
-              : translationCache.CACHE_STATUS.NOT_FOUND;
     const translation = normalizeMediaTranslationValue(entry?.translation);
-    if (!translation) {
-        return {
-            status: translationCache.CACHE_STATUS.NOT_FOUND,
-        };
-    }
-
-    return {
-        status,
-        translation,
+    const normalized = {
+        status: translationCache.normalizeTranslationStatus(entry?.status),
     };
+    if (translation) {
+        normalized.translation = translation;
+    }
+    if (entry?.complete === true) {
+        normalized.complete = true;
+    }
+    return normalized;
 }
 
 function normalizeImageField(entry) {

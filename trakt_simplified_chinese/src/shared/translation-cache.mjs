@@ -90,6 +90,17 @@ function hasUsefulTranslation(translation) {
     return !!(translation && (!isEmptyTranslationValue(translation.title) || !isEmptyTranslationValue(translation.overview) || !isEmptyTranslationValue(translation.tagline)));
 }
 
+function deriveTranslationStatus(translation) {
+    if (translation && !isEmptyTranslationValue(translation.title)) {
+        return CACHE_STATUS.FOUND;
+    }
+    return hasUsefulTranslation(translation) ? CACHE_STATUS.PARTIAL_FOUND : CACHE_STATUS.NOT_FOUND;
+}
+
+function normalizeTranslationStatus(status) {
+    return status === CACHE_STATUS.FOUND ? CACHE_STATUS.FOUND : status === CACHE_STATUS.PARTIAL_FOUND ? CACHE_STATUS.PARTIAL_FOUND : CACHE_STATUS.NOT_FOUND;
+}
+
 function normalizeTranslationPayload(translation) {
     if (!translation || typeof translation !== "object") {
         return null;
@@ -216,6 +227,7 @@ export {
     areTranslationsEqual,
     CACHE_STATUS,
     containsChineseText,
+    deriveTranslationStatus,
     extractEpisodePlaceholderNumber,
     extractNormalizedTranslation,
     findTranslationByRegion,
@@ -225,6 +237,7 @@ export {
     normalizeTranslationFieldsInPlace,
     normalizeTranslationFieldValue,
     normalizeTranslationPayload,
+    normalizeTranslationStatus,
     normalizeTranslations,
     normalizeTranslationText,
     pickCnTranslation,

@@ -134,6 +134,10 @@ function normalizeEntry(entry) {
         }
     }
 
+    if (entry.complete === true) {
+        normalized.complete = true;
+    }
+
     return normalized;
 }
 

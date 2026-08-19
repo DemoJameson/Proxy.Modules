@@ -68,6 +68,25 @@ async function handleMediaDetail() {
     }
 
     const cache = cacheUtils.loadCache(context.env);
+    const backendState = traktTranslationHelper.createBackendState(traktTranslationHelper.MEDIA_CONFIG);
+    let cacheChanged = false;
+    try {
+        cacheChanged = await traktTranslationHelper.ensureDetailTranslation(
+            cache,
+            mediaType,
+            {
+                ...ref,
+                availableTranslations: commonUtils.isArray(data?.available_translations) ? data.available_translations : null,
+            },
+            backendState,
+        );
+    } catch (error) {
+        context.env.log(`Trakt detail translation fetch failed: ${error}`);
+    }
+    if (cacheChanged) {
+        cacheUtils.saveCache(context.env, cache);
+    }
+    traktTranslationHelper.flushBackendWrites(backendState);
     traktTranslationHelper.applyTranslation(context.userAgent, data, traktTranslationHelper.getCachedTranslation(cache, mediaType, ref), mediaType);
 
     try {
@@ -107,11 +126,12 @@ async function handleTranslations() {
             !cachedEntry || cachedEntry.status !== normalized.status || !translationCache.areTranslationsEqual(cachedEntry.translation, normalized.translation);
 
         if (shouldUpdateCache) {
-            traktTranslationHelper.storeTranslationEntry(cache, target.mediaType, target, normalized);
+            const completeEntry = { ...normalized, complete: true };
+            traktTranslationHelper.storeTranslationEntry(cache, target.mediaType, target, completeEntry);
             cacheUtils.saveCache(context.env, cache);
 
             const backendState = traktTranslationHelper.createBackendState(traktTranslationHelper.MEDIA_CONFIG);
-            traktTranslationHelper.queueBackendWrite(backendState, target.mediaType, target, normalized);
+            traktTranslationHelper.queueBackendWrite(backendState, target.mediaType, target, completeEntry);
             try {
                 traktTranslationHelper.flushBackendWrites(backendState);
             } catch (error) {

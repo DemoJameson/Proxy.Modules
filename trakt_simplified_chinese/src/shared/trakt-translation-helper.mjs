@@ -80,8 +80,9 @@ const IMAGE_FIELD_SIZE = {
     [IMAGE_FIELD.LOGO]: "w500",
 };
 
-function buildTranslationCacheEntry(status, translation) {
-    return translation ? { status, translation } : { status };
+function buildTranslationCacheEntry(status, translation, complete = false) {
+    const entry = translation ? { status, translation } : { status };
+    return complete ? { ...entry, complete: true } : entry;
 }
 
 function getOverrideGroupName(mediaType) {
@@ -158,16 +159,12 @@ function storeTranslationEntry(cache, mediaType, ref, entry) {
         return null;
     }
     const translation = translationCache.normalizeTranslationPayload(entry?.translation ?? null);
-    const status =
-        entry?.status === translationCache.CACHE_STATUS.FOUND
-            ? translationCache.CACHE_STATUS.FOUND
-            : entry?.status === translationCache.CACHE_STATUS.PARTIAL_FOUND
-              ? translationCache.CACHE_STATUS.PARTIAL_FOUND
-              : translationCache.CACHE_STATUS.NOT_FOUND;
+    const status = translationCache.normalizeTranslationStatus(entry?.status);
+    const complete = entry?.complete === true;
     cache[cacheKey] =
         (status === translationCache.CACHE_STATUS.FOUND || status === translationCache.CACHE_STATUS.PARTIAL_FOUND) && translation
-            ? buildTranslationCacheEntry(status, translation)
-            : buildTranslationCacheEntry(translationCache.CACHE_STATUS.NOT_FOUND, translation);
+            ? buildTranslationCacheEntry(status, translation, complete)
+            : buildTranslationCacheEntry(translationCache.CACHE_STATUS.NOT_FOUND, translation, complete);
     return cache[cacheKey];
 }
 
@@ -1351,13 +1348,69 @@ async function fetchAndPersistMissing(cache, mediaType, refs, vercelBackendClien
     await processInBatches(refs, async (ref) => {
         try {
             const merged = await fetchDirectTranslation(mediaType, ref);
-            cacheChanged = !!storeTranslationEntry(cache, mediaType, ref, merged) || cacheChanged;
-            queueBackendWrite(vercelBackendClient, mediaType, ref, merged);
+            const completeEntry = { ...merged, complete: true };
+            cacheChanged = !!storeTranslationEntry(cache, mediaType, ref, completeEntry) || cacheChanged;
+            queueBackendWrite(vercelBackendClient, mediaType, ref, completeEntry);
         } catch (error) {
             globalThis.$ctx.env.log(`Trakt translation fetch failed for key=${buildMediaCacheLookupKey(mediaType, ref)}: ${error}`);
         }
     });
     return cacheChanged;
+}
+
+function isDetailTranslationIncomplete(entry) {
+    if (!entry) {
+        return true;
+    }
+    if (entry.complete === true) {
+        return false;
+    }
+    const translation = entry.translation;
+    if (!translation) {
+        return false;
+    }
+    return translationCache.TRANSLATION_FIELDS.some((field) => field !== "title" && translationCache.isEmptyTranslationValue(translation[field]));
+}
+
+function mergeDetailTranslationEntries(cachedEntry, directResult) {
+    const mergedFields = {};
+    translationCache.TRANSLATION_FIELDS.forEach((field) => {
+        mergedFields[field] = directResult?.translation?.[field] ?? cachedEntry?.translation?.[field] ?? null;
+    });
+    const translation = translationCache.normalizeTranslationPayload(mergedFields);
+    return {
+        status: translationCache.deriveTranslationStatus(translation),
+        translation,
+        complete: true,
+    };
+}
+
+async function ensureDetailTranslation(cache, mediaType, ref, backendState) {
+    if (!ref || !buildMediaCacheLookupKey(mediaType, ref) || shouldSkipTranslationLookup(ref)) {
+        return false;
+    }
+
+    const detailRef = mediaType === mediaTypes.MEDIA_TYPE.EPISODE ? { ...ref, backendLookupKey: buildEpisodeCompositeKey(ref.showId, ref.seasonNumber, ref.episodeNumber) } : ref;
+    if (!isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
+        return false;
+    }
+
+    try {
+        const hydrated = await fetchTranslationsFromBackend({ ...backendState, backendFetchMinRefs: 0 }, cache, {
+            [mediaType]: [detailRef],
+        });
+        if (hydrated && !isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
+            return true;
+        }
+    } catch (error) {
+        globalThis.$ctx.env.log(`Trakt backend cache read failed: ${error}`);
+    }
+
+    const directResult = await fetchDirectTranslation(mediaType, detailRef);
+    const mergedEntry = mergeDetailTranslationEntries(getCachedTranslation(cache, mediaType, detailRef), directResult);
+    storeTranslationEntry(cache, mediaType, detailRef, mergedEntry);
+    queueBackendWrite(backendState, mediaType, detailRef, mergedEntry);
+    return true;
 }
 
 function getBulkApiIdForRef(mediaType, ref) {
@@ -1653,6 +1706,7 @@ export {
     buildEpisodeCompositeKey,
     buildMediaCacheLookupKey,
     createBackendState,
+    ensureDetailTranslation,
     fetchAndPersistMissing,
     fetchAndPersistMissingImages,
     fetchBulkTranslationsForMissing,
@@ -1665,6 +1719,7 @@ export {
     getOverrideForTarget,
     getOverrideFromTable,
     hydrateFromBackend,
+    isDetailTranslationIncomplete,
     isPosterImageReplacementUserAgent,
     isScriptInitiatedTranslationRequest,
     loadTranslationOverrides,

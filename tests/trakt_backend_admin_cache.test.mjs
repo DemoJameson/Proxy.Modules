@@ -657,6 +657,40 @@ test("backend translations GET reads Upstash pipeline array response", async () 
     });
 });
 
+test("backend translations 往返保留 complete 标记", async () => {
+    const store = new Map();
+
+    await withBackend(store, async () => {
+        const postRes = await invoke(translationsHandler, {
+            method: "POST",
+            body: {
+                movies: {
+                    123: {
+                        status: 1,
+                        translation: {
+                            title: "完整标题",
+                            overview: "完整简介",
+                            tagline: null,
+                        },
+                        complete: true,
+                    },
+                },
+            },
+        });
+
+        assert.equal(postRes.statusCode, 200);
+        assert.equal(getJsonValue(store, AUTO_MOVIE_123).complete, true);
+
+        const getRes = await invoke(translationsHandler, {
+            method: "GET",
+            query: { movies: "123" },
+        });
+
+        assert.equal(getRes.statusCode, 200);
+        assert.equal(getRes.jsonBody.movies["123"].complete, true);
+    });
+});
+
 test("backend POST keeps writing auto cache while override stays separate", async () => {
     const store = new Map();
     seedAuto(store, AUTO_MOVIE_123, {
