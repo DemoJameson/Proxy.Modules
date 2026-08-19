@@ -921,6 +921,17 @@ test("handleWrapperMediaList 按 wrapper 路由分组生效", async (t) => {
             },
         },
         {
+            name: "smart list items all route",
+            url: "https://apiz.trakt.tv/smart-lists/list-2511e1626ebd8469/items?extended=colors,full,images&limit=100&page=1",
+            body: createMixedMovieBody({ rank: 1 }),
+            persistentData: createMoviePersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].movie.title, "中文电影");
+                assert.equal(payload[0].movie.overview, "中文简介");
+                assert.equal(payload[0].rank, 1);
+            },
+        },
+        {
             name: "users ratings typed route",
             url: "https://api.trakt.tv/users/me/ratings/movies",
             body: createWrappedMovieBody(),

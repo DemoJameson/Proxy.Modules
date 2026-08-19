@@ -74,6 +74,7 @@ function createResponsePhaseRoutes() {
             id: "lists.items.filtered",
             handler: mediaTranslationHandler.handleWrapperMediaList,
         }),
+        createRoute({ pattern: /^smart-lists\/[^/]+\/items$/i, id: "smartLists.items.all", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^users\/[^/]+\/ratings\/all$/i, id: "users.ratings.all", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^users\/[^/]+\/ratings\/(movies|shows|episodes)$/i, id: "users.ratings.mediaTyped", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^users\/[^/]+\/favorites\/media(\/[^/]+)?$/i, id: "users.favorites.media", handler: mediaTranslationHandler.handleWrapperMediaList }),
