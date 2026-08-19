@@ -224,7 +224,60 @@ test("people-names GET 返回 google 来源条目并丢弃缺字段的存储条�
                 42: googleEntry,
             },
         });
+        // 请求 2 条仅命中 1 条：部分命中使用短 TTL，避免客户端回写后 CDN 持续返回旧响应
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
+    });
+});
+
+test("people-names GET 部分命中时使用 PARTIAL_FOUND 短缓存头", async () => {
+    const store = new Map();
+    store.set(PERSON_NAME_42, jsonValue(createPersonNameEntry()));
+
+    await withBackend(store, async () => {
+        const res = await invoke({
+            method: "GET",
+            query: {
+                people: "42,99",
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        assert.deepEqual(res.jsonBody, {
+            people: {
+                42: createPersonNameEntry(),
+            },
+        });
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
+        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
+    });
+});
+
+test("people-names GET 完整命中时使用 FOUND 长缓存头", async () => {
+    const store = new Map();
+    const entry42 = createPersonNameEntry("hash-1", "汤姆·汉克斯");
+    const entry99 = createPersonNameEntry("hash-2", "巩俐");
+    store.set(PERSON_NAME_42, jsonValue(entry42));
+    store.set(PERSON_NAME_99, jsonValue(entry99));
+
+    await withBackend(store, async () => {
+        const res = await invoke({
+            method: "GET",
+            query: {
+                people: "42,99",
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        assert.deepEqual(res.jsonBody, {
+            people: {
+                42: entry42,
+                99: entry99,
+            },
+        });
         assert.deepEqual(res.headers["Cache-Control"], "public, max-age=300");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=86400, stale-while-revalidate=86400");
     });
 });
 

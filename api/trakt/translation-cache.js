@@ -21,9 +21,9 @@ const RESPONSE_CACHE_HEADERS = {
         "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
     },
     [CACHE_STATUS.PARTIAL_FOUND]: {
-        "Cache-Control": "public, max-age=300",
-        "CDN-Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
-        "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
+        "Cache-Control": "public, max-age=60",
+        "CDN-Cache-Control": "public, s-maxage=60, stale-while-revalidate=600",
+        "Vercel-CDN-Cache-Control": "public, s-maxage=60, stale-while-revalidate=600",
     },
     [CACHE_STATUS.NOT_FOUND]: {
         "Cache-Control": "public, max-age=0, must-revalidate",

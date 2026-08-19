@@ -24,7 +24,10 @@ async function handleGet(req, res, kvConfig) {
 
     const { people } = await readManyPersonNameEntriesFromKv(kvConfig, peopleIds);
 
-    setResponseCacheHeaders(res, Object.keys(people).length > 0 ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND);
+    // 区分完整/部分命中：部分命中说明客户端即将回写缺失条目，CDN 不能长缓存
+    const foundCount = Object.keys(people).length;
+    const cacheStatus = foundCount === 0 ? CACHE_STATUS.NOT_FOUND : foundCount >= peopleIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.PARTIAL_FOUND;
+    setResponseCacheHeaders(res, cacheStatus);
     res.status(200).json({ people });
 }
 
