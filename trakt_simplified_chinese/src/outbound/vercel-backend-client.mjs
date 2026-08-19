@@ -49,6 +49,10 @@ function fetchCommentTranslations(query) {
     return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/comment-translations?${query}`, null, false);
 }
 
+function fetchListTranslations(query) {
+    return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/list-translations?${query}`, null, false);
+}
+
 function postTranslations(payload) {
     return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/translations`, payload);
 }
@@ -69,17 +73,23 @@ function postCommentTranslations(payload) {
     return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/comment-translations`, payload);
 }
 
+function postListTranslations(payload) {
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/list-translations`, payload);
+}
+
 export {
     DEFAULT_BACKEND_BASE_URL,
     fetchCommentTranslations,
     fetchDoubanCache,
     fetchImages,
+    fetchListTranslations,
     fetchPeopleNames,
     fetchTranslationOverrides,
     fetchTranslations,
     postCommentTranslations,
     postDoubanCache,
     postImages,
+    postListTranslations,
     postPeopleNames,
     postTranslations,
     resolveBackendBaseUrl,

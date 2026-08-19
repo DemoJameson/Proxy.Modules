@@ -197,6 +197,11 @@ function runScript({
                         return;
                     }
 
+                    if (/\/api\/trakt\/list-translations(?:\?|$)/.test(String(options.url ?? ""))) {
+                        callback(null, { status: 200, statusCode: 200, body: "{}" }, "{}");
+                        return;
+                    }
+
                     callback(new Error(`Unexpected HTTP GET: ${options.url}`));
                 },
                 post(options, callback) {
@@ -239,6 +244,11 @@ function runScript({
                     }
 
                     if (/\/api\/trakt\/comment-translations(?:\?|$)/.test(String(options.url ?? ""))) {
+                        callback(null, { status: 200, statusCode: 200, body: "{}" }, "{}");
+                        return;
+                    }
+
+                    if (/\/api\/trakt\/list-translations(?:\?|$)/.test(String(options.url ?? ""))) {
                         callback(null, { status: 200, statusCode: 200, body: "{}" }, "{}");
                         return;
                     }

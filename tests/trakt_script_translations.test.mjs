@@ -32,6 +32,7 @@ const TEST_BACKEND_BASE_URL = "https://backend.example";
 const TEST_BACKEND_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translations`;
 const TEST_BACKEND_IMAGES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/images`;
 const TEST_BACKEND_COMMENT_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/comment-translations`;
+const TEST_BACKEND_LIST_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/list-translations`;
 const TEST_DIRECT_TRANSLATION_URL = "https://api.trakt.tv/movies/123/translations/zh?extended=all";
 const TEST_DIRECT_EPISODE_TRANSLATION_URL = "https://api.trakt.tv/shows/555/seasons/1/episodes/12/translations/zh?extended=all";
 const TEST_TMDB_MOVIE_IMAGES_URL = "https://api.tmdb.org/3/movie/456/images?language=zh%2Cen&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
@@ -3661,6 +3662,93 @@ test("list descriptions 在 Google 返回空翻译结果时会保留原描述且
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].description, "A good list");
     assert.deepEqual(parseUnifiedCache(persistentData).google.list, {});
+});
+
+test("list descriptions 后端命中时会应用远端翻译并跳过 Google 请求", async () => {
+    const backendEntry = {
+        name: {
+            sourceTextHash: computeStringHash("Favorites"),
+            translatedText: "收藏夹",
+        },
+        description: {
+            sourceTextHash: computeStringHash("A good list"),
+            translatedText: "一个不错的列表",
+        },
+    };
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/lists/popular",
+        body: readFixture("list-descriptions.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_LIST_TRANSLATIONS_URL}?lists=321`]: JSON.stringify({ lists: { 321: backendEntry } }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].name, "收藏夹");
+    assert.equal(payload[0].description, "一个不错的列表");
+
+    const cache = parseUnifiedCache(persistentData).google.list;
+    assert.equal(cache["321"].name.translatedText, "收藏夹");
+    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["321"].description.sourceTextHash, computeStringHash("A good list"));
+
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
+        false,
+    );
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_LIST_TRANSLATIONS_URL),
+        false,
+    );
+});
+
+test("list descriptions 后端未命中时会 Google 翻译并 fire-and-forget 回写后端", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/lists/popular",
+        body: readFixture("list-descriptions.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_LIST_TRANSLATIONS_URL}?lists=321`]: "{}",
+        },
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["收藏夹", "一个不错的列表"]),
+            [TEST_BACKEND_LIST_TRANSLATIONS_URL]: createHttpStatusMock(200, "{}"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].name, "收藏夹");
+    assert.equal(payload[0].description, "一个不错的列表");
+
+    const cache = parseUnifiedCache(persistentData).google.list;
+    assert.equal(cache["321"].name.translatedText, "收藏夹");
+    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
+
+    assert.ok(
+        httpLogs.some((entry) => entry.method === "GET" && entry.url === `${TEST_BACKEND_LIST_TRANSLATIONS_URL}?lists=321`),
+        "expected a backend GET for missing list translations",
+    );
+    const backendPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_LIST_TRANSLATIONS_URL);
+    assert.ok(backendPost, "expected a fire-and-forget POST to the list-translations backend");
+    assert.deepEqual(JSON.parse(backendPost.body), {
+        lists: {
+            321: {
+                name: {
+                    sourceTextHash: computeStringHash("Favorites"),
+                    translatedText: "收藏夹",
+                },
+                description: {
+                    sourceTextHash: computeStringHash("A good list"),
+                    translatedText: "一个不错的列表",
+                },
+            },
+        },
+    });
 });
 
 test("sentiments 会应用缓存中的翻译结果", async () => {

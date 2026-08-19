@@ -27,6 +27,9 @@
         },
         "api/trakt/comment-translations.js": {
             "maxDuration": 30
+        },
+        "api/trakt/list-translations.js": {
+            "maxDuration": 30
         }
     },
     "ignoreCommand": "git diff --quiet HEAD^ HEAD -- api/ public/ vercel.json"
