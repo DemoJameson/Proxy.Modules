@@ -1,3 +1,4 @@
+import * as vercelBackendClientModule from "../outbound/vercel-backend-client.mjs";
 import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import * as googleTranslationPipeline from "../shared/google-translation-pipeline.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
@@ -5,6 +6,9 @@ import * as traktLinkIds from "../shared/trakt-link-ids.mjs";
 import * as mediaTranslationHelper from "../shared/trakt-translation-helper.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
+
+const COMMENT_TRANSLATION_BACKEND_WRITE_BATCH_SIZE = 50;
+const commentTranslationBackendWriteQueue = {};
 
 function isChineseLanguage(language) {
     const normalized = String(language ?? "")
@@ -204,6 +208,86 @@ async function createCommentContextResolver(options = {}) {
     };
 }
 
+function queueCommentTranslationBackendWrite(commentId, fieldEntry) {
+    const normalizedCommentId = String(commentId ?? "").trim();
+    const sourceTextHash = String(fieldEntry?.sourceTextHash ?? "").trim();
+    const translatedText = String(fieldEntry?.translatedText ?? "").trim();
+    if (!normalizedCommentId || !sourceTextHash || !translatedText) {
+        return;
+    }
+    commentTranslationBackendWriteQueue[normalizedCommentId] = { comment: { sourceTextHash, translatedText } };
+}
+
+function flushCommentTranslationBackendWrites() {
+    const keys = Object.keys(commentTranslationBackendWriteQueue);
+    if (keys.length === 0) {
+        return;
+    }
+    for (let start = 0; start < keys.length; start += COMMENT_TRANSLATION_BACKEND_WRITE_BATCH_SIZE) {
+        const batchKeys = keys.slice(start, start + COMMENT_TRANSLATION_BACKEND_WRITE_BATCH_SIZE);
+        const payload = { comments: {} };
+        batchKeys.forEach((key) => {
+            payload.comments[key] = commentTranslationBackendWriteQueue[key];
+            delete commentTranslationBackendWriteQueue[key];
+        });
+        vercelBackendClientModule.postCommentTranslations(payload).catch(() => {});
+    }
+}
+
+function normalizeBackendCommentIds(commentIds) {
+    return commonUtils
+        .ensureArray(commentIds)
+        .map((id) => String(id ?? "").trim())
+        .filter(Boolean)
+        .filter((id, index, array) => array.indexOf(id) === index)
+        .sort((left, right) => Number(left) - Number(right));
+}
+
+function mergeBackendCommentTranslationEntry(cache, commentId, entry) {
+    const commentEntry = commonUtils.isPlainObject(entry?.comment) ? entry.comment : null;
+    const sourceTextHash = String(commentEntry?.sourceTextHash ?? "").trim();
+    const translatedText = String(commentEntry?.translatedText ?? "").trim();
+    if (!sourceTextHash || !translatedText) {
+        return false;
+    }
+
+    const cacheKey = String(commentId);
+    const currentEntry = commonUtils.isPlainObject(cache?.[cacheKey]) ? cache[cacheKey] : {};
+    const currentFieldEntry = commonUtils.isPlainObject(currentEntry.comment) ? currentEntry.comment : null;
+    if (currentFieldEntry?.sourceTextHash === sourceTextHash && currentFieldEntry.translatedText === translatedText) {
+        return false;
+    }
+
+    cache[cacheKey] = {
+        ...currentEntry,
+        comment: {
+            sourceTextHash,
+            translatedText,
+        },
+    };
+    return true;
+}
+
+async function hydrateCommentTranslationsFromBackend(cache, commentIds) {
+    const ids = normalizeBackendCommentIds(commentIds);
+    if (ids.length === 0) {
+        return false;
+    }
+
+    try {
+        const payload = await vercelBackendClientModule.fetchCommentTranslations(`comments=${ids.join(",")}`);
+        const entries = commonUtils.ensureObject(payload?.comments);
+        let changed = false;
+        Object.entries(entries).forEach(([commentId, entry]) => {
+            changed = mergeBackendCommentTranslationEntry(cache, commentId, entry) || changed;
+        });
+        return changed;
+    } catch (error) {
+        globalThis.$ctx?.env?.log?.(`Trakt comment translation backend cache read failed: ${error}`);
+        return false;
+    }
+}
+
 async function translateCommentsInPlace(payload, options = {}) {
     const context = globalThis.$ctx;
     const commentEntries = collectCommentTargets(payload);
@@ -212,32 +296,47 @@ async function translateCommentsInPlace(payload, options = {}) {
     }
 
     const cache = cacheUtils.loadCommentTranslationCache(context.env);
-    const resolveContextLine = await createCommentContextResolver(options);
-    const targets = commonUtils
-        .ensureArray(commentEntries)
-        .filter((entry) => shouldTranslateComment(entry.comment))
+    const translateableEntries = commonUtils.ensureArray(commentEntries).filter((entry) => shouldTranslateComment(entry.comment));
+
+    // 本地缓存未命中的评论先从后端批量补齐（不受 googleTranslationEnabled 限制，与人物名行为一致）；
+    // 后端读取与双语上下文构建相互独立（分别写 google.comments 与 trakt.linkIds/translation 缓存），并行执行
+    const missingCommentIds = translateableEntries
         .map((entry) => {
-            const comment = entry.comment;
-            const sourceText = String(comment.comment ?? "").trim();
-            const contextLine = resolveContextLine(entry);
-            const requestText = contextLine ? googleTranslationContext.buildSourceText(sourceText, contextLine) : sourceText;
-            const normalizeTranslatedComment = (translatedText) =>
-                contextLine ? googleTranslationContext.removeContextLine(translatedText, contextLine) : String(translatedText ?? "").trim();
-            return {
-                sourceLanguage: String(comment.language ?? "en").toLowerCase(),
-                sourceText: requestText,
-                getCachedTranslation() {
-                    return cacheUtils.getHashedFieldTranslation(cache, comment.id, "comment", sourceText);
-                },
-                setCachedTranslation(translatedText) {
-                    return cacheUtils.setHashedFieldTranslation(cache, comment.id, "comment", sourceText, normalizeTranslatedComment(translatedText));
-                },
-                applyTranslation(translatedText, options = {}) {
-                    comment.comment = options.source === "cache" ? String(translatedText ?? "").trim() : normalizeTranslatedComment(translatedText);
-                    return true;
-                },
-            };
-        });
+            const sourceText = String(entry.comment.comment ?? "").trim();
+            return cacheUtils.getHashedFieldTranslation(cache, entry.comment.id, "comment", sourceText) ? "" : String(entry.comment.id);
+        })
+        .filter(Boolean);
+    const [hydratedChanged, resolveContextLine] = await Promise.all([hydrateCommentTranslationsFromBackend(cache, missingCommentIds), createCommentContextResolver(options)]);
+    const targets = translateableEntries.map((entry) => {
+        const comment = entry.comment;
+        const sourceText = String(comment.comment ?? "").trim();
+        const contextLine = resolveContextLine(entry);
+        const requestText = contextLine ? googleTranslationContext.buildSourceText(sourceText, contextLine) : sourceText;
+        const normalizeTranslatedComment = (translatedText) =>
+            contextLine ? googleTranslationContext.removeContextLine(translatedText, contextLine) : String(translatedText ?? "").trim();
+        return {
+            sourceLanguage: String(comment.language ?? "en").toLowerCase(),
+            sourceText: requestText,
+            getCachedTranslation() {
+                return cacheUtils.getHashedFieldTranslation(cache, comment.id, "comment", sourceText);
+            },
+            setCachedTranslation(translatedText) {
+                const normalizedTranslation = normalizeTranslatedComment(translatedText);
+                const targetCacheChanged = cacheUtils.setHashedFieldTranslation(cache, comment.id, "comment", sourceText, normalizedTranslation);
+                if (targetCacheChanged) {
+                    queueCommentTranslationBackendWrite(comment.id, {
+                        sourceTextHash: commonUtils.computeStringHash(sourceText),
+                        translatedText: normalizedTranslation,
+                    });
+                }
+                return targetCacheChanged;
+            },
+            applyTranslation(translatedText, options = {}) {
+                comment.comment = options.source === "cache" ? String(translatedText ?? "").trim() : normalizeTranslatedComment(translatedText);
+                return true;
+            },
+        };
+    });
 
     const result = await googleTranslationPipeline.translateTextFieldTargets(targets, {
         googleTranslationEnabled: context.argument.googleTranslationEnabled,
@@ -246,9 +345,10 @@ async function translateCommentsInPlace(payload, options = {}) {
         },
     });
 
-    if (context.argument.googleTranslationEnabled && result.cacheChanged) {
+    if ((context.argument.googleTranslationEnabled && result.cacheChanged) || hydratedChanged) {
         cacheUtils.saveCommentTranslationCache(context.env, cache);
     }
+    flushCommentTranslationBackendWrites();
 
     return payload;
 }

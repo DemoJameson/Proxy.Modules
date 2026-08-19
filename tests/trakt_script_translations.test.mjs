@@ -31,6 +31,7 @@ import {
 const TEST_BACKEND_BASE_URL = "https://backend.example";
 const TEST_BACKEND_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translations`;
 const TEST_BACKEND_IMAGES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/images`;
+const TEST_BACKEND_COMMENT_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/comment-translations`;
 const TEST_DIRECT_TRANSLATION_URL = "https://api.trakt.tv/movies/123/translations/zh?extended=all";
 const TEST_DIRECT_EPISODE_TRANSLATION_URL = "https://api.trakt.tv/shows/555/seasons/1/episodes/12/translations/zh?extended=all";
 const TEST_TMDB_MOVIE_IMAGES_URL = "https://api.tmdb.org/3/movie/456/images?language=zh%2Cen&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
@@ -2541,7 +2542,198 @@ test("comments 列表会翻译未命中的评论并写回缓存", async () => {
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
     assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
     assert.equal(
-        httpLogs.some((entry) => entry.method === "GET"),
+        httpLogs.some((entry) => entry.method === "GET" && /^https:\/\/api[a-z]*\.trakt\.tv\//.test(entry.url)),
+        false,
+    );
+});
+
+test("comments 本地未命中时会读取后端评论缓存并写回本地", async () => {
+    const backendEntry = {
+        comment: {
+            sourceTextHash: computeStringHash("Great movie"),
+            translatedText: "很棒的电影",
+        },
+    };
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/comments/123/replies",
+        body: readFixture("comments.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=9001`]: JSON.stringify({ comments: { 9001: backendEntry } }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
+        false,
+    );
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_COMMENT_TRANSLATIONS_URL),
+        false,
+    );
+});
+
+test("comments 后端未命中时会 Google 翻译并 fire-and-forget 回写后端", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/comments/123/replies",
+        body: readFixture("comments.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=9001`]: "{}",
+        },
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["很棒的电影"]),
+            [TEST_BACKEND_COMMENT_TRANSLATIONS_URL]: createHttpStatusMock(200, "{}"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+
+    assert.ok(
+        httpLogs.some((entry) => entry.method === "GET" && entry.url === `${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=9001`),
+        "expected a backend comment-translations GET",
+    );
+    const backendPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_COMMENT_TRANSLATIONS_URL);
+    assert.ok(backendPost, "expected a fire-and-forget POST to the comment-translations backend");
+    assert.deepEqual(JSON.parse(backendPost.body), {
+        comments: {
+            9001: {
+                comment: {
+                    sourceTextHash: computeStringHash("Great movie"),
+                    translatedText: "很棒的电影",
+                },
+            },
+        },
+    });
+});
+
+test("googleTranslationEnabled=false 时 comments 仍会读取并应用后端评论缓存", async () => {
+    const backendEntry = {
+        comment: {
+            sourceTextHash: computeStringHash("Great movie"),
+            translatedText: "很棒的电影",
+        },
+    };
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/comments/123/replies",
+        body: readFixture("comments.json"),
+        argument: {
+            googleTranslationEnabled: false,
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=9001`]: JSON.stringify({ comments: { 9001: backendEntry } }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
+        false,
+    );
+});
+
+test("comments 后端条目 hash 不匹配时不应用并走 Google 覆盖", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/comments/123/replies",
+        body: readFixture("comments.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=9001`]: JSON.stringify({
+                comments: {
+                    9001: {
+                        comment: {
+                            sourceTextHash: "deadbeef",
+                            translatedText: "旧错误翻译",
+                        },
+                    },
+                },
+            }),
+        },
+        httpPostMocks: {
+            [GOOGLE_TRANSLATE_URL]: createGoogleTranslateResponse(["很棒的电影"]),
+            [TEST_BACKEND_COMMENT_TRANSLATIONS_URL]: createHttpStatusMock(200, "{}"),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].comment, "很棒的电影");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+
+    const backendPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_COMMENT_TRANSLATIONS_URL);
+    assert.ok(backendPost, "expected the fresh translation to be written back to the backend");
+    assert.equal(JSON.parse(backendPost.body).comments["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+});
+
+test("comments 详情会读取后端评论缓存并跳过 Google 翻译", async () => {
+    const body = JSON.stringify({
+        id: 453514,
+        comment: "The story feels forced just to include retro actors.",
+        spoiler: true,
+        review: false,
+        parent_id: 0,
+        language: "en",
+    });
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://apiz.trakt.tv/comments/453514?extended=reactions",
+        body,
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=453514`]: JSON.stringify({
+                comments: {
+                    453514: {
+                        comment: {
+                            sourceTextHash: computeStringHash("The story feels forced just to include retro actors."),
+                            translatedText: "故事感觉很牵强，只是为了加入复古演员。",
+                        },
+                    },
+                },
+            }),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.comment, "故事感觉很牵强，只是为了加入复古演员。");
+
+    const cache = parseUnifiedCache(persistentData).google.comments;
+    assert.equal(cache["453514"].comment.translatedText, "故事感觉很牵强，只是为了加入复古演员。");
+    assert.equal(cache["453514"].comment.sourceTextHash, computeStringHash("The story feels forced just to include retro actors."));
+
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
+        false,
+    );
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_COMMENT_TRANSLATIONS_URL),
         false,
     );
 });

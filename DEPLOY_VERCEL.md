@@ -108,6 +108,32 @@
 }
 ```
 
+### 评论翻译缓存 `/api/trakt/comment-translations`
+
+- 路径：`/api/trakt/comment-translations`
+- 方法：
+    - `GET`：读取评论翻译，查询参数 `comments=9001,9002`（数字评论 ID，去重）
+    - `POST`：写入评论翻译
+- 实现文件：`/api/trakt/comment-translations.js`
+- KV key：`trakt:comment-translation:{commentId}`，TTL 90 天；评论正文变更由 `sourceTextHash` 兜底失效
+
+GET 返回示例：
+
+```json
+{
+    "comments": {
+        "9001": {
+            "comment": {
+                "sourceTextHash": "源文本哈希",
+                "translatedText": "很棒的电影"
+            }
+        }
+    }
+}
+```
+
+POST 请求体为 `{ "comments": { "9001": { "comment": { "sourceTextHash": "...", "translatedText": "..." } } } }`，返回 `{ "counts": { "comments": 1 } }`。
+
 ## 部署到 Vercel
 
 1. 将当前仓库推送到 GitHub。

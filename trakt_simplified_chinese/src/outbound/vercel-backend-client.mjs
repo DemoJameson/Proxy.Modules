@@ -3,7 +3,8 @@ import * as httpUtils from "../utils/http.mjs";
 const DEFAULT_BACKEND_BASE_URL = "https://proxy-modules.demojameson.de5.net";
 
 function resolveBackendBaseUrl() {
-    return String(globalThis.$ctx.argument?.backendBaseUrl || DEFAULT_BACKEND_BASE_URL).trim();
+    // 空白输入回退默认值，保证本函数永不返回空字符串
+    return String(globalThis.$ctx.argument?.backendBaseUrl || DEFAULT_BACKEND_BASE_URL).trim() || DEFAULT_BACKEND_BASE_URL;
 }
 
 function fetchTranslations(query) {
@@ -24,6 +25,10 @@ function fetchDoubanCache(query) {
 
 function fetchPeopleNames(query) {
     return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/people-names?${query}`, null, false);
+}
+
+function fetchCommentTranslations(query) {
+    return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/comment-translations?${query}`, null, false);
 }
 
 function postTranslations(payload) {
@@ -70,13 +75,26 @@ function postPeopleNames(payload) {
     );
 }
 
+function postCommentTranslations(payload) {
+    return httpUtils.postJson(
+        `${resolveBackendBaseUrl()}/api/trakt/comment-translations`,
+        payload,
+        {
+            "content-type": "application/json",
+        },
+        false,
+    );
+}
+
 export {
     DEFAULT_BACKEND_BASE_URL,
+    fetchCommentTranslations,
     fetchDoubanCache,
     fetchImages,
     fetchPeopleNames,
     fetchTranslationOverrides,
     fetchTranslations,
+    postCommentTranslations,
     postDoubanCache,
     postImages,
     postPeopleNames,
