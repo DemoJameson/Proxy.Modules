@@ -3,10 +3,9 @@ import test from "node:test";
 
 import { applyArgumentObjectConfig, applyArgumentStringConfig, createDefaultArgumentConfig, normalizeArgument } from "../trakt_simplified_chinese/src/argument.mjs";
 import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
+import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
 
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
-
-const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 
 test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 posterImageMode，第 5-7 位解析为 *Order 数字", () => {
     const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,2,1,3]"));

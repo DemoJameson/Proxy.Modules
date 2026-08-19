@@ -5,11 +5,12 @@ import * as httpUtils from "../utils/http.mjs";
 const DEEPLX_TRANSLATE_API_URL = "https://deeplx.demojameson.de5.net/deepl";
 const DEEPLX_TARGET_LANGUAGE = "ZH";
 const DEEPLX_BATCH_SEPARATOR_PATTERN = "\\n¶\\d+¶\\n";
-const DEEPLX_MAX_TEXT_CHARACTERS = 3000;
+const DEEPLX_MAX_TEXT_CHARACTERS = 1500;
 const DEEPLX_MAX_REQUEST_BYTES = 96 * 1024;
 const DEEPLX_MAX_CONCURRENT_BATCHES = 20;
 const DEEPLX_MAX_RETRIES = 2;
 const DEEPLX_RETRY_DELAY_MS = 120;
+const DEEPLX_REQUEST_TIMEOUT_MS = 30_000;
 const DEEPLX_RETRY_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
 const LONG_TEXT_SPLIT_BOUNDARY_PATTERN = /[\n。！？.!?;；]/;
 const LONG_TEXT_SPLIT_SEARCH_WINDOW = 250;
@@ -110,6 +111,7 @@ function extractDeepLxTranslatedText(payload) {
 async function postDeepLxPayload(payload) {
     const response = await httpUtils.post({
         url: DEEPLX_TRANSLATE_API_URL,
+        timeout: DEEPLX_REQUEST_TIMEOUT_MS,
         headers: {
             accept: "application/json",
             "content-type": "application/json;charset=UTF-8",
@@ -402,4 +404,4 @@ async function translateTextsWithGoogle(texts, sourceLanguage) {
     return extractTranslatedTexts(buildGoogleCompatiblePayload(translatedTexts), normalizedTexts);
 }
 
-export { translateTextsWithGoogle };
+export { DEEPLX_MAX_TEXT_CHARACTERS, DEEPLX_TRANSLATE_API_URL, translateTextsWithGoogle };

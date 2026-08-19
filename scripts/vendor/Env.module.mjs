@@ -131,15 +131,31 @@ function Env(name, opts) {
         sender = this.post
       }
 
-      const delayPromise = (promise, delay = 1000) => {
-        return Promise.race([
-          promise,
-          new Promise((resolve, reject) => {
-            setTimeout(() => {
-              reject(new Error('请求超时'))
-            }, delay)
-          })
-        ])
+      // 默认请求超时时间为 10 秒
+      if (!opts.timeout) opts.timeout = 10
+
+      // 统一先转换为秒；大于 500 视为毫秒输入
+      opts.timeout = Number.parseInt(opts.timeout, 10)
+      if (opts.timeout > 500) opts.timeout = Math.round(opts.timeout / 1000)
+
+      // Loon / Quantumult X / Node.js 要求毫秒
+      // Surge / Stash / Egern / Shadowrocket 原生接受秒
+      let needRace = false
+      switch (this.getEnv()) {
+        case 'Loon':
+        case 'Quantumult X':
+        case 'Node.js':
+          opts.timeout = opts.timeout * 1000
+          break
+      }
+
+      // Quantumult X / Node.js 无原生 timeout，需要 Promise.race 提供超时保护
+      // Loon / Surge / Stash / Egern / Shadowrocket 的 $httpClient 原生支持 timeout，无需 race
+      switch (this.getEnv()) {
+        case 'Quantumult X':
+        case 'Node.js':
+          needRace = true
+          break
       }
 
       const call = new Promise((resolve, reject) => {
@@ -149,7 +165,21 @@ function Env(name, opts) {
         })
       })
 
-      return opts.timeout ? delayPromise(call, opts.timeout) : call
+      // $httpClient 平台由原生 timeout 处理超时，直接返回即可
+      if (!needRace) return call
+
+      // Quantumult X / Node.js 用 Promise.race 提供超时保护
+      let timeoutId
+      return Promise.race([
+        call,
+        new Promise((resolve, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error('请求超时, 请检查网络后重试'))
+          }, opts.timeout)
+        })
+      ]).finally(() => {
+        clearTimeout(timeoutId)
+      })
     }
 
     get(opts) {

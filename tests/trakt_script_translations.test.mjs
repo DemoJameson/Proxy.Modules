@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
 import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
 
 import {
@@ -27,7 +28,6 @@ import {
     UNIFIED_CACHE_SCHEMA_VERSION,
 } from "./helpers/trakt-test-helpers.mjs";
 
-const GOOGLE_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 const TEST_BACKEND_BASE_URL = "https://backend.example";
 const TEST_BACKEND_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translations`;
 const TEST_BACKEND_IMAGES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/images`;

@@ -3,10 +3,11 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
+import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, "..", "..", "trakt_simplified_chinese", "trakt_simplified_chinese.js");
 const scriptContent = fs.readFileSync(scriptPath, "utf8");
-const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
 
 function createTestConsole(verboseLogs) {
@@ -116,8 +117,39 @@ function runScript({
     return new Promise((resolve, reject) => {
         const persistentStore = createPersistentStore(persistentData);
         const httpLogs = [];
-        const timeout = setTimeout(() => reject(new Error("Timed out waiting for $done")), 2000);
+        const pendingTimers = new Set();
+        const timeout = setTimeout(() => {
+            clearPendingTimers();
+            reject(new Error("Timed out waiting for $done"));
+        }, 2000);
         let settled = false;
+
+        const trackedSetTimeout = (fn, delay, ...args) => {
+            const id = setTimeout(
+                (...timerArgs) => {
+                    pendingTimers.delete(id);
+                    if (typeof fn === "function") {
+                        fn(...timerArgs);
+                    }
+                },
+                delay,
+                ...args,
+            );
+            pendingTimers.add(id);
+            return id;
+        };
+
+        const trackedClearTimeout = (id) => {
+            clearTimeout(id);
+            pendingTimers.delete(id);
+        };
+
+        const clearPendingTimers = () => {
+            for (const id of pendingTimers) {
+                clearTimeout(id);
+            }
+            pendingTimers.clear();
+        };
 
         const context = {
             $loon: {},
@@ -208,6 +240,7 @@ function runScript({
                 }
                 settled = true;
                 clearTimeout(timeout);
+                clearPendingTimers();
                 setTimeout(() => {
                     resolve({
                         result,
@@ -219,8 +252,8 @@ function runScript({
             },
             console: createTestConsole(verboseLogs),
             URL,
-            setTimeout,
-            clearTimeout,
+            setTimeout: trackedSetTimeout,
+            clearTimeout: trackedClearTimeout,
         };
 
         if (hasResponse) {
@@ -236,6 +269,7 @@ function runScript({
             vm.runInNewContext(scriptContent, context, { filename: scriptPath });
         } catch (error) {
             clearTimeout(timeout);
+            clearPendingTimers();
             reject(error);
         }
     });

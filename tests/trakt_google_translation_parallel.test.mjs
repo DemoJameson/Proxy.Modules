@@ -1,12 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { translateTextsWithGoogle } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import { DEEPLX_MAX_TEXT_CHARACTERS, DEEPLX_TRANSLATE_API_URL, translateTextsWithGoogle } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
 import * as googleTranslationContext from "../trakt_simplified_chinese/src/shared/google-translation-context.mjs";
 import { translateTextFieldTargets } from "../trakt_simplified_chinese/src/shared/google-translation-pipeline.mjs";
-
-const DEEPLX_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
-const DEEPLX_MAX_TEXT_CHARACTERS = 3000;
 
 function createDeferred() {
     let resolve;
@@ -38,7 +35,7 @@ function getRequestText(body) {
     return String(payload.text ?? "");
 }
 
-test("DeepLX 兼容层超过 3000 字符上限时最多并行 20 个分批请求", async () => {
+test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求", async () => {
     const originalContext = globalThis.$ctx;
     const deferredResponses = [];
     const posts = [];
@@ -73,7 +70,7 @@ test("DeepLX 兼容层超过 3000 字符上限时最多并行 20 个分批请求
         let resolvedCount = 0;
         while (resolvedCount < posts.length) {
             const post = posts[resolvedCount];
-            assert.equal(post.url, DEEPLX_TRANSLATE_URL);
+            assert.equal(post.url, DEEPLX_TRANSLATE_API_URL);
             const payload = JSON.parse(post.body);
             assert.ok(String(payload.text ?? "").length <= DEEPLX_MAX_TEXT_CHARACTERS);
             deferredResponses[resolvedCount].resolve({ status: 200, body: createDeepLxPayload(getRequestTexts(post.body)) });
@@ -149,7 +146,7 @@ test("DeepLX 兼容层会切分超长单条文本并拼回结果", async () => {
     }
 });
 
-test("DeepLX 兼容层切分带上下文的超长单条文本时会把上下文头计入 3000 字符限制", async () => {
+test("DeepLX 兼容层切分带上下文的超长单条文本时会把上下文头计入 1500 字符限制", async () => {
     const originalContext = globalThis.$ctx;
     const posts = [];
 
@@ -373,7 +370,7 @@ test("DeepLX 兼容层支持无上下文、有上下文和重复上下文混合�
     }
 });
 
-test("DeepLX 兼容层计算 3000 字符限制时包含上下文头", async () => {
+test("DeepLX 兼容层计算 1500 字符限制时包含上下文头", async () => {
     const originalContext = globalThis.$ctx;
     const posts = [];
 
@@ -389,9 +386,9 @@ test("DeepLX 兼容层计算 3000 字符限制时包含上下文头", async () =
     };
 
     try {
-        const contextLine = `${"Context ".repeat(100)}(中文片名)`;
+        const contextLine = `${"Context ".repeat(50)}(中文片名)`;
         const translatedTexts = await translateTextsWithGoogle(
-            [googleTranslationContext.buildSourceText("A".repeat(2100), contextLine), googleTranslationContext.buildSourceText("B".repeat(2100), contextLine)],
+            [googleTranslationContext.buildSourceText("A".repeat(700), contextLine), googleTranslationContext.buildSourceText("B".repeat(700), contextLine)],
             "en",
         );
         assert.equal(posts.length, 2);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-
+import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
 import {
     computeStringHash,
     createGoogleTranslateResponse,
@@ -18,7 +18,6 @@ import {
     runResponseCase,
 } from "./helpers/trakt-test-helpers.mjs";
 
-const GOOGLE_TRANSLATE_URL = "https://deeplx.demojameson.de5.net/deepl";
 const TMDB_MOVIE_CREDITS_URL = "regex:^https://api\\.tmdb\\.org/3/movie/456\\?";
 const TMDB_PERSON_URL = "regex:^https://api\\.tmdb\\.org/3/person/31\\?";
 const DOUBAN_SEARCH_TT123_MOVIE_URL = "https://frodo.douban.com/api/v2/search/suggestion?q=tt123&apikey=0ac44ae016490db2204ce0a042db2916";
