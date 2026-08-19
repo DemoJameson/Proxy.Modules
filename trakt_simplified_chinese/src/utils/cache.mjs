@@ -60,11 +60,20 @@ function normalizePersonTranslationEntry(entry) {
             ...normalizedName,
             source: name.source,
         };
+        if (commonUtils.isNonNullish(name.expiresAt) && Number.isFinite(Number(name.expiresAt))) {
+            normalized.name.expiresAt = Number(name.expiresAt);
+        }
     }
 
     const biography = normalizeHashedTranslationEntry(source.biography);
     if (biography) {
         normalized.biography = biography;
+    }
+
+    // TMDB 查询无中文名的负缓存条目，7 天 TTL
+    const notFound = commonUtils.ensureObject(source.notFound);
+    if (commonUtils.isNonNullish(notFound.expiresAt) && Number.isFinite(Number(notFound.expiresAt))) {
+        normalized.notFound = { expiresAt: Number(notFound.expiresAt) };
     }
 
     return Object.keys(normalized).length > 0 ? normalized : null;

@@ -22,6 +22,10 @@ function fetchDoubanCache(query) {
     return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/credits?${query}`, null, false);
 }
 
+function fetchPeopleNames(query) {
+    return httpUtils.fetchJson(`${resolveBackendBaseUrl()}/api/trakt/people-names?${query}`, null, false);
+}
+
 function postTranslations(payload) {
     return httpUtils.postJson(
         `${resolveBackendBaseUrl()}/api/trakt/translations`,
@@ -55,14 +59,27 @@ function postDoubanCache(payload) {
     );
 }
 
+function postPeopleNames(payload) {
+    return httpUtils.postJson(
+        `${resolveBackendBaseUrl()}/api/trakt/people-names`,
+        payload,
+        {
+            "content-type": "application/json",
+        },
+        false,
+    );
+}
+
 export {
     DEFAULT_BACKEND_BASE_URL,
     fetchDoubanCache,
     fetchImages,
+    fetchPeopleNames,
     fetchTranslationOverrides,
     fetchTranslations,
     postDoubanCache,
     postImages,
+    postPeopleNames,
     postTranslations,
     resolveBackendBaseUrl,
 };

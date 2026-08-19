@@ -17,6 +17,8 @@
   放 people detail、media people list、person credits 相关测试。
 - `trakt_script_routes.test.mjs`
   放 Sofa Time、TMDb provider、request/response route matrix、以及不适合归到其他主题的 route smoke tests。
+- `trakt_backend_*.test.mjs`
+  直接测 Vercel 后端 `api/trakt/` 接口的 KV 读写行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）。
 
 新增脚本级测试时，优先按“行为域”归类，不按 URL 数量平均拆分。
 

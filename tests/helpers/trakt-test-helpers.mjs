@@ -7,6 +7,8 @@ import { DOUBAN_CACHE_TTL_MS, UNIFIED_CACHE_KEY, UNIFIED_CACHE_MAX_BYTES, UNIFIE
 import { runScript } from "./run-script.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const TMDB_PERSON_NAME_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const GOOGLE_PERSON_NAME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 
 function readFixture(name) {
     return fs.readFileSync(path.resolve(__dirname, "..", "fixtures", "trakt", name), "utf8");
@@ -110,11 +112,17 @@ function createPeopleTranslationCache(overrides = {}) {
         },
     };
 
+    const mergedPerson = {
+        ...defaultPerson,
+        ...overrides["42"],
+    };
+    if (mergedPerson.name && mergedPerson.name.expiresAt === undefined) {
+        const ttlMs = mergedPerson.name.source === "tmdb" ? TMDB_PERSON_NAME_TTL_MS : GOOGLE_PERSON_NAME_TTL_MS;
+        mergedPerson.name = { ...mergedPerson.name, expiresAt: Date.now() + ttlMs };
+    }
+
     return JSON.stringify({
-        42: {
-            ...defaultPerson,
-            ...overrides["42"],
-        },
+        42: mergedPerson,
         ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== "42")),
     });
 }

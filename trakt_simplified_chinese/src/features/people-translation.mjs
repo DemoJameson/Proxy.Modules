@@ -15,6 +15,10 @@ const PEOPLE_NAME_SOURCE = {
     TMDB: "tmdb",
     GOOGLE: "google",
 };
+// TMDB 命中中文名 90 天、Google 姓名 30 天、无中文名负缓存 7 天（本地与远端一致）
+const TMDB_PERSON_NAME_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const GOOGLE_PERSON_NAME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TMDB_PERSON_NAME_NOT_FOUND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PEOPLE_LIST_ORIGINAL_NAME_KEY = "__traktOriginalName";
 const DOUBAN_CHARACTER_LANGUAGES = new Set(["zh", "ja", "ko"]);
 const DOUBAN_SEARCH_TARGET_TYPE = {
@@ -78,6 +82,77 @@ function flushDoubanBackendWrites() {
     const hasWrites = Object.keys(payload.movies).length > 0 || Object.keys(payload.shows).length > 0;
     if (hasWrites && vercelBackendClientModule.resolveBackendBaseUrl()) {
         vercelBackendClientModule.postDoubanCache(payload).catch(() => {});
+    }
+}
+
+const peopleNameBackendWriteQueue = {};
+
+function queuePeopleNameBackendWrite(personId, nameEntry) {
+    const normalizedPersonId = String(personId ?? "").trim();
+    const entry = buildPersonNameCacheEntry(nameEntry);
+    if (!normalizedPersonId || !entry) {
+        return;
+    }
+    // tmdb 优先：已排队的 tmdb 条目不被 google 覆盖；正向条目覆盖同 id 的负缓存条目
+    if (entry.source === PEOPLE_NAME_SOURCE.GOOGLE && peopleNameBackendWriteQueue[normalizedPersonId]?.name?.source === PEOPLE_NAME_SOURCE.TMDB) {
+        return;
+    }
+    peopleNameBackendWriteQueue[normalizedPersonId] = { name: entry };
+}
+
+function queuePeopleNameNotFoundBackendWrite(personId) {
+    const normalizedPersonId = String(personId ?? "").trim();
+    if (!normalizedPersonId || commonUtils.isPlainObject(peopleNameBackendWriteQueue[normalizedPersonId]?.name)) {
+        return;
+    }
+    peopleNameBackendWriteQueue[normalizedPersonId] = { notFound: true };
+}
+
+function flushPeopleNameBackendWrites() {
+    const keys = Object.keys(peopleNameBackendWriteQueue);
+    if (keys.length === 0) {
+        return;
+    }
+    const payload = { people: {} };
+    keys.forEach((key) => {
+        payload.people[key] = peopleNameBackendWriteQueue[key];
+        delete peopleNameBackendWriteQueue[key];
+    });
+    if (vercelBackendClientModule.resolveBackendBaseUrl()) {
+        vercelBackendClientModule.postPeopleNames(payload).catch(() => {});
+    }
+}
+
+function normalizeBackendPeopleIds(personIds) {
+    return commonUtils
+        .ensureArray(personIds)
+        .map((id) => String(id ?? "").trim())
+        .filter(Boolean)
+        .filter((id, index, array) => array.indexOf(id) === index)
+        .sort((left, right) => Number(left) - Number(right));
+}
+
+async function hydratePeopleNamesFromBackend(cache, personIds) {
+    if (!vercelBackendClientModule.resolveBackendBaseUrl()) {
+        return false;
+    }
+
+    const ids = normalizeBackendPeopleIds(personIds);
+    if (ids.length === 0) {
+        return false;
+    }
+
+    try {
+        const payload = await vercelBackendClientModule.fetchPeopleNames(`people=${ids.join(",")}`);
+        const entries = commonUtils.ensureObject(payload?.people);
+        let changed = false;
+        Object.entries(entries).forEach(([personId, entry]) => {
+            changed = setPeopleTranslationCacheEntry(cache, personId, entry) || changed;
+        });
+        return changed;
+    } catch (error) {
+        globalThis.$ctx?.env?.log?.(`Trakt people name backend cache read failed: ${error}`);
+        return false;
     }
 }
 
@@ -172,7 +247,35 @@ function buildPersonNameCacheEntry(payload) {
 }
 
 function getValidPersonNameCacheEntry(entry) {
-    return buildPersonNameCacheEntry(entry?.name);
+    const nameEntry = buildPersonNameCacheEntry(entry?.name);
+    if (!nameEntry) {
+        return null;
+    }
+
+    // tmdb 姓名 90 天 TTL、google 姓名 30 天 TTL；缺失或过期的 expiresAt 视为失效
+    const expiresAt = Number(commonUtils.ensureObject(entry?.name).expiresAt);
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        return null;
+    }
+
+    return nameEntry;
+}
+
+function getValidPersonNameNotFoundEntry(entry) {
+    const notFound = commonUtils.ensureObject(entry?.notFound);
+    const expiresAt = Number(notFound.expiresAt);
+    return Number.isFinite(expiresAt) && expiresAt > Date.now() ? notFound : null;
+}
+
+function applyPersonNameNotFoundCache(cache, personId) {
+    const currentEntry = getPeopleTranslationCacheEntry(cache, personId);
+    if (getValidPersonNameCacheEntry(currentEntry)?.source === PEOPLE_NAME_SOURCE.TMDB) {
+        return false;
+    }
+
+    const changed = setPeopleTranslationCacheEntry(cache, personId, { notFound: true });
+    queuePeopleNameNotFoundBackendWrite(personId);
+    return changed;
 }
 
 function shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry) {
@@ -196,7 +299,7 @@ function shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry) {
     );
 }
 
-function setPeopleTranslationCacheEntry(cache, personId, payload) {
+function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendName = false) {
     if (!cache || commonUtils.isNullish(personId) || !commonUtils.isPlainObject(payload)) {
         return false;
     }
@@ -205,11 +308,31 @@ function setPeopleTranslationCacheEntry(cache, personId, payload) {
     const currentEntry = getPeopleTranslationCacheEntry(cache, key);
     const nextEntry = commonUtils.isPlainObject(currentEntry) ? { ...currentEntry } : {};
 
+    // TMDB 查询无中文名：写 7 天负缓存；已有有效 tmdb 姓名或未过期负缓存时跳过
+    if (payload.notFound === true) {
+        const hasValidTmdbName = getValidPersonNameCacheEntry(currentEntry)?.source === PEOPLE_NAME_SOURCE.TMDB;
+        if (!hasValidTmdbName && !getValidPersonNameNotFoundEntry(currentEntry)) {
+            nextEntry.notFound = { expiresAt: Date.now() + TMDB_PERSON_NAME_NOT_FOUND_TTL_MS };
+        }
+    }
+
     if (commonUtils.isPlainObject(payload.name)) {
         const nextNameEntry = buildPersonNameCacheEntry(payload.name);
         const currentNameEntry = getValidPersonNameCacheEntry(currentEntry);
         if (nextNameEntry && shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry)) {
-            nextEntry.name = nextNameEntry;
+            const storedNameEntry = { ...nextNameEntry };
+            if (storedNameEntry.source === PEOPLE_NAME_SOURCE.TMDB) {
+                storedNameEntry.expiresAt = Date.now() + TMDB_PERSON_NAME_TTL_MS;
+                if (commonUtils.isPlainObject(nextEntry.notFound)) {
+                    delete nextEntry.notFound;
+                }
+            } else if (storedNameEntry.source === PEOPLE_NAME_SOURCE.GOOGLE) {
+                storedNameEntry.expiresAt = Date.now() + GOOGLE_PERSON_NAME_TTL_MS;
+            }
+            nextEntry.name = storedNameEntry;
+            if (queueBackendName) {
+                queuePeopleNameBackendWrite(key, storedNameEntry);
+            }
         }
     }
 
@@ -693,24 +816,62 @@ function applyPeopleListCachedNameTranslations(data, cache) {
             cacheEntries.some((entry) => {
                 return getValidPersonNameCacheEntry(entry)?.source === PEOPLE_NAME_SOURCE.GOOGLE;
             });
+        // 有效负缓存表示 TMDB 已确认无中文名，无需再查
+        const hasValidNotFound = cacheEntries.some((entry) => getValidPersonNameNotFoundEntry(entry));
 
         if (cachedName) {
             if (cachedName !== originalName) {
                 person.name = cachedName;
                 changed = true;
             }
-            if (hasUpgradeableGoogleCache) {
+            if (hasUpgradeableGoogleCache && !hasValidNotFound) {
                 hasMissing = true;
             }
             return;
         }
 
-        if (commonUtils.isNonNullish(person?.ids?.tmdb)) {
+        if (commonUtils.isNonNullish(person?.ids?.tmdb) && !hasValidNotFound) {
             hasMissing = true;
         }
     });
 
     return { changed, hasMissing };
+}
+
+function collectPeopleListMissingTmdbNameIds(data, cache) {
+    if (!commonUtils.isPlainObject(data) || !commonUtils.isPlainObject(cache)) {
+        return [];
+    }
+
+    // 与 applyPeopleListCachedNameTranslations 的 hasMissing 判定保持一致：
+    // 有 tmdb id 且（无 hash 匹配的缓存姓名，或缓存为 google 来源可升级为 tmdb），且无有效负缓存
+    return collectPeopleListPersonItems(data).reduce((ids, item) => {
+        const person = item?.person;
+        if (!commonUtils.isPlainObject(person) || commonUtils.isNullish(person?.ids?.tmdb)) {
+            return ids;
+        }
+
+        const originalName = String(person.name ?? "").trim();
+        if (!originalName) {
+            return ids;
+        }
+
+        const cacheEntries = getPersonTranslationCacheKeys(person)
+            .map((personKey) => getPeopleTranslationCacheEntry(cache, personKey))
+            .filter(Boolean);
+        const hasValidNotFound = cacheEntries.some((entry) => getValidPersonNameNotFoundEntry(entry));
+        if (hasValidNotFound) {
+            return ids;
+        }
+
+        const hasCachedName = cacheEntries.map((entry) => getCachedPersonNameTranslation(entry, originalName)).some(Boolean);
+        const hasUpgradeableGoogleCache = cacheEntries.some((entry) => getValidPersonNameCacheEntry(entry)?.source === PEOPLE_NAME_SOURCE.GOOGLE);
+        if (hasCachedName && !hasUpgradeableGoogleCache) {
+            return ids;
+        }
+
+        return ids.concat(getPersonTranslationCacheKeys(person));
+    }, []);
 }
 
 function applyPeopleListCastNameTranslations(data, tmdbCastNameMap, cache) {
@@ -728,6 +889,10 @@ function applyPeopleListCastNameTranslations(data, tmdbCastNameMap, cache) {
 
         const translatedName = String(tmdbCastNameMap[String(personTmdbId)] ?? "").trim();
         if (!translatedName || !commonUtils.containsChineseCharacter(translatedName)) {
+            // TMDB 已查询但该人物无中文名：写 7 天负缓存（本地 + 远端）
+            getPersonTranslationCacheKeys(person).forEach((personKey) => {
+                changed = applyPersonNameNotFoundCache(cache, personKey) || changed;
+            });
             return;
         }
 
@@ -741,15 +906,13 @@ function applyPeopleListCastNameTranslations(data, tmdbCastNameMap, cache) {
             changed = true;
         }
 
+        const tmdbNameEntry = {
+            sourceTextHash: commonUtils.computeStringHash(originalName),
+            translatedText: translatedName,
+            source: PEOPLE_NAME_SOURCE.TMDB,
+        };
         getPersonTranslationCacheKeys(person).forEach((personKey) => {
-            changed =
-                setPeopleTranslationCacheEntry(cache, personKey, {
-                    name: {
-                        sourceTextHash: commonUtils.computeStringHash(originalName),
-                        translatedText: translatedName,
-                        source: PEOPLE_NAME_SOURCE.TMDB,
-                    },
-                }) || changed;
+            changed = setPeopleTranslationCacheEntry(cache, personKey, { name: tmdbNameEntry }, true) || changed;
         });
     });
 
@@ -803,13 +966,18 @@ function applyPeopleListGoogleNameTranslations(translationTargets, translatedTex
         changed = true;
 
         getPersonTranslationCacheKeys(person).forEach((personKey) => {
-            setPeopleTranslationCacheEntry(cache, personKey, {
-                name: {
-                    sourceTextHash: commonUtils.computeStringHash(originalName),
-                    translatedText: translatedName,
-                    source: PEOPLE_NAME_SOURCE.GOOGLE,
+            setPeopleTranslationCacheEntry(
+                cache,
+                personKey,
+                {
+                    name: {
+                        sourceTextHash: commonUtils.computeStringHash(originalName),
+                        translatedText: translatedName,
+                        source: PEOPLE_NAME_SOURCE.GOOGLE,
+                    },
                 },
-            });
+                true,
+            );
         });
     });
 
@@ -964,6 +1132,37 @@ function applyPeopleCollectionCachedTranslations(data, cache) {
     return { changed, nameTargets, biographyTargets };
 }
 
+function collectPeopleCollectionMissingTmdbNameIds(data, cache) {
+    if (!commonUtils.isPlainObject(cache)) {
+        return [];
+    }
+
+    return collectPeopleCollectionItems(data).reduce((ids, item) => {
+        const person = item?.person;
+        if (!commonUtils.isPlainObject(person) || commonUtils.isNullish(person?.ids?.tmdb)) {
+            return ids;
+        }
+
+        const originalName = String(person.name ?? "").trim();
+        if (!originalName) {
+            return ids;
+        }
+
+        const personKeys = getPersonTranslationCacheKeys(person);
+        if (personKeys.length === 0) {
+            return ids;
+        }
+
+        const hasCachedName = personKeys.map((personKey) => getCachedPersonNameTranslation(getPeopleTranslationCacheEntry(cache, personKey), originalName)).some(Boolean);
+        const hasValidNotFound = personKeys.some((personKey) => getValidPersonNameNotFoundEntry(getPeopleTranslationCacheEntry(cache, personKey)));
+        if (hasCachedName || hasValidNotFound) {
+            return ids;
+        }
+
+        return ids.concat(personKeys);
+    }, []);
+}
+
 async function applyPeopleCollectionGoogleNameTranslations(translationTargets, cache) {
     const result = await googleTranslationPipeline.translateTextFieldTargets(
         commonUtils.ensureArray(translationTargets).map((target) => {
@@ -985,13 +1184,18 @@ async function applyPeopleCollectionGoogleNameTranslations(translationTargets, c
                     let changed = false;
                     commonUtils.ensureArray(target?.personKeys).forEach((personKey) => {
                         changed =
-                            setPeopleTranslationCacheEntry(cache, personKey, {
-                                name: {
-                                    sourceTextHash: commonUtils.computeStringHash(originalName),
-                                    translatedText: translatedName,
-                                    source: PEOPLE_NAME_SOURCE.GOOGLE,
+                            setPeopleTranslationCacheEntry(
+                                cache,
+                                personKey,
+                                {
+                                    name: {
+                                        sourceTextHash: commonUtils.computeStringHash(originalName),
+                                        translatedText: translatedName,
+                                        source: PEOPLE_NAME_SOURCE.GOOGLE,
+                                    },
                                 },
-                            }) || changed;
+                                true,
+                            ) || changed;
                     });
                     return changed;
                 },
@@ -1218,6 +1422,11 @@ async function handleMediaPeopleList() {
     }
 
     const cache = cacheUtils.loadPeopleTranslationCache(context.env);
+    const missingTmdbNameIds = collectPeopleListMissingTmdbNameIds(data, cache);
+    let cacheChanged = false;
+    if (missingTmdbNameIds.length > 0) {
+        cacheChanged = await hydratePeopleNamesFromBackend(cache, missingTmdbNameIds);
+    }
     const cachedResult = applyPeopleListCachedNameTranslations(data, cache);
 
     try {
@@ -1257,7 +1466,7 @@ async function handleMediaPeopleList() {
         })();
 
         const [tmdbResult, googleResult, doubanResult] = await Promise.allSettled([tmdbPromise, googlePromise, doubanPromise]);
-        let changed = false;
+        let changed = cacheChanged;
 
         if (tmdbResult.status === "fulfilled" && tmdbResult.value) {
             const tmdbCastNameMap = buildTmdbCastNameMap(tmdbResult.value);
@@ -1285,6 +1494,7 @@ async function handleMediaPeopleList() {
         if (changed) {
             cacheUtils.savePeopleTranslationCache(context.env, cache);
         }
+        flushPeopleNameBackendWrites();
         return { type: "respond", body: JSON.stringify(data) };
     } catch (error) {
         context.env.log(`Trakt media people translation failed: ${error}`);
@@ -1317,13 +1527,22 @@ async function handlePeopleSearchList() {
     }
 
     const cache = cacheUtils.loadPeopleTranslationCache(context.env);
+    const missingTmdbNameIds = collectPeopleCollectionMissingTmdbNameIds(data, cache);
+    let hydratedChanged = false;
+    if (missingTmdbNameIds.length > 0) {
+        hydratedChanged = await hydratePeopleNamesFromBackend(cache, missingTmdbNameIds);
+    }
     const cachedResult = applyPeopleCollectionCachedTranslations(data, cache);
-    let changed = cachedResult.changed;
+    let changed = cachedResult.changed || hydratedChanged;
 
     try {
         const nameTargets = context.argument.googleTranslationEnabled ? cachedResult.nameTargets : [];
         const biographyTargets = context.argument.googleTranslationEnabled ? cachedResult.biographyTargets : [];
         if (nameTargets.length === 0 && biographyTargets.length === 0) {
+            if (changed) {
+                cacheUtils.savePeopleTranslationCache(context.env, cache);
+            }
+            flushPeopleNameBackendWrites();
             return { type: "respond", body: JSON.stringify(data) };
         }
 
@@ -1347,9 +1566,11 @@ async function handlePeopleSearchList() {
         if (changed) {
             cacheUtils.savePeopleTranslationCache(context.env, cache);
         }
+        flushPeopleNameBackendWrites();
         return { type: "respond", body: JSON.stringify(data) };
     } catch (error) {
         context.env.log(`Trakt people collection translation failed: ${error}`);
+        flushPeopleNameBackendWrites();
         return { type: "respond", body: JSON.stringify(data) };
     }
 }
@@ -1367,6 +1588,15 @@ async function handlePeopleDetail() {
     }
 
     const cache = cacheUtils.loadPeopleTranslationCache(context.env);
+    const initialCacheEntry = getPeopleTranslationCacheEntry(cache, personId);
+    const shouldHydrateTmdbName =
+        commonUtils.isNonNullish(data?.ids?.tmdb) &&
+        getValidPersonNameCacheEntry(initialCacheEntry)?.source !== PEOPLE_NAME_SOURCE.TMDB &&
+        !getValidPersonNameNotFoundEntry(initialCacheEntry);
+    let cacheChanged = false;
+    if (shouldHydrateTmdbName) {
+        cacheChanged = await hydratePeopleNamesFromBackend(cache, [personId]);
+    }
     const cacheEntry = getPeopleTranslationCacheEntry(cache, personId);
     const nextCacheEntry = {};
     const originalName = String(data.name ?? "").trim();
@@ -1393,7 +1623,8 @@ async function handlePeopleDetail() {
         };
     }
 
-    const shouldFetchTmdbName = originalName && commonUtils.isNonNullish(data?.ids?.tmdb) && cachedNameEntry?.source !== PEOPLE_NAME_SOURCE.TMDB;
+    const shouldFetchTmdbName =
+        originalName && commonUtils.isNonNullish(data?.ids?.tmdb) && cachedNameEntry?.source !== PEOPLE_NAME_SOURCE.TMDB && !getValidPersonNameNotFoundEntry(cacheEntry);
     const namePromise = shouldFetchTmdbName ? fetchTmdbPerson(data.ids.tmdb) : null;
     let hasTranslatedName = !!cachedName;
     if (namePromise) {
@@ -1408,6 +1639,9 @@ async function handlePeopleDetail() {
                 };
                 biographyContextName = translatedName;
                 hasTranslatedName = true;
+            } else {
+                // TMDB 查询完成但无中文名：写 7 天负缓存（本地 + 远端）
+                cacheChanged = applyPersonNameNotFoundCache(cache, personId) || cacheChanged;
             }
         } catch (error) {
             context.env.log(`Trakt people name translation failed for ${personId}: ${error}`);
@@ -1469,9 +1703,11 @@ async function handlePeopleDetail() {
         }
     }
 
-    if (Object.keys(nextCacheEntry).length > 0 && setPeopleTranslationCacheEntry(cache, personId, nextCacheEntry)) {
+    const nextCacheChanged = Object.keys(nextCacheEntry).length > 0 && setPeopleTranslationCacheEntry(cache, personId, nextCacheEntry, true);
+    if (cacheChanged || nextCacheChanged) {
         cacheUtils.savePeopleTranslationCache(context.env, cache);
     }
+    flushPeopleNameBackendWrites();
 
     return { type: "respond", body: JSON.stringify(data) };
 }
