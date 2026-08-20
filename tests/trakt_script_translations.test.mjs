@@ -880,7 +880,7 @@ test("/movies/:id 会用 TMDb 中文 w780 海报替换 images.poster[0]", async 
     });
 
     const payload = JSON.parse(result.body);
-    const cachePoster = parseUnifiedCache(persistentData).trakt.image["movie:123"].poster;
+    const cachePoster = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"].poster;
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/best-cn-poster.jpg");
     assert.equal(cachePoster.status, 1);
     assert.equal(cachePoster.url, "https://image.tmdb.org/t/p/original/best-cn-poster.jpg");
@@ -1381,7 +1381,7 @@ test("/movies/:id 会用 TMDb 中文 logo 替换 images.logo[0] 并写回后端�
 
     const payload = JSON.parse(result.body);
     const imageCache = parseUnifiedCache(persistentData).trakt.image;
-    const cache = imageCache["movie:123"];
+    const cache = imageCache["chinese:movies:123"];
     const imagePost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_IMAGES_URL);
     const imagePostBody = JSON.parse(imagePost.body);
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/movie-poster.jpg");
@@ -1537,7 +1537,7 @@ test("movie/show 向 TMDb 请求图片时会同时缓存 poster 和 logo", async
     });
 
     const payload = JSON.parse(result.body);
-    const cache = parseUnifiedCache(persistentData).trakt.image["movie:123"];
+    const cache = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"];
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/movie-poster.jpg");
     assert.equal(payload.images.logo, undefined);
     assert.equal(cache.poster.url, "https://image.tmdb.org/t/p/original/movie-poster.jpg");
@@ -1619,7 +1619,7 @@ test("本地图片缓存 PARTIAL_FOUND 未过期时直接替换且不请求 TMDb
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "movie:123": {
+                "chinese:movies:123": {
                     poster: {
                         status: 2,
                         url: "https://image.tmdb.org/t/p/original/partial-poster.jpg",
@@ -1653,7 +1653,7 @@ test("TMDb 获取后本地当前模式缓存会写入新获取的完整图片数
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "movie:123": {
+                "chinese:movies:123": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/old-poster.jpg",
@@ -1686,7 +1686,7 @@ test("TMDb 获取后本地当前模式缓存会写入新获取的完整图片数
     });
 
     const payload = JSON.parse(result.body);
-    const cache = parseUnifiedCache(persistentData).trakt.image["movie:123"];
+    const cache = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"];
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/new-poster.jpg");
     assert.equal(payload.images.logo[0], "https://image.tmdb.org/t/p/w500/new-logo.png");
     assert.equal(cache.poster.url, "https://image.tmdb.org/t/p/original/new-poster.jpg");
@@ -1703,7 +1703,7 @@ test("当前模式本地图片缓存命中时不请求另一种模式后端缓�
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "movie:123": {
+                "chinese:movies:123": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/cached-poster.jpg",
@@ -1813,7 +1813,7 @@ test("本地图片缓存 PARTIAL_FOUND/NOT_FOUND 过期后会重新请求 TMDb",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "movie:123": {
+                "chinese:movies:123": {
                     poster: {
                         status: 2,
                         url: "https://image.tmdb.org/t/p/original/expired-poster.jpg",
@@ -1851,7 +1851,7 @@ test("本地图片缓存 PARTIAL_FOUND/NOT_FOUND 过期后会重新请求 TMDb",
     });
 
     const payload = JSON.parse(result.body);
-    const cache = parseUnifiedCache(persistentData).trakt.image["movie:123"];
+    const cache = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"];
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/fresh-poster.jpg");
     assert.equal(cache.poster.status, 1);
     assert.equal(cache.poster.expiresAt, null);
@@ -1897,7 +1897,7 @@ test("/shows 直出列表会用 TMDb 中文海报替换剧集 images.poster[0]",
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].title, "中文剧集");
     assert.equal(payload[0].images.poster[0], "https://image.tmdb.org/t/p/w780/sg-show-poster.jpg");
-    const cachePoster = parseUnifiedCache(persistentData).trakt.image["show:555"].poster;
+    const cachePoster = parseUnifiedCache(persistentData).trakt.image["chinese:shows:555"].poster;
     assert.equal(cachePoster.status, 2);
     assert.equal(cachePoster.url, "https://image.tmdb.org/t/p/original/sg-show-poster.jpg");
     assert.ok(cachePoster.expiresAt > Date.now() + 29 * 24 * 60 * 60 * 1000);
@@ -2030,7 +2030,7 @@ test("TMDb poster 缓存命中时不会重复请求", async () => {
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "movie:123": {
+                "chinese:movies:123": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/cached-poster.jpg",
@@ -2160,7 +2160,7 @@ test("/shows/:id/seasons 会用 TMDb 中文季海报替换 season images.poster[
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].images.poster[0], "https://image.tmdb.org/t/p/w780/best-season-poster.jpg");
     assert.equal(payload[0].episodes[0].title, "第一集中文");
-    assert.equal(parseUnifiedCache(persistentData).trakt.image["season:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/best-season-poster.jpg");
+    assert.equal(parseUnifiedCache(persistentData).trakt.image["chinese:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/best-season-poster.jpg");
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === "https://api.trakt.tv/shows/555?extended=cloud9,full,watchnow"));
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === `${TEST_BACKEND_IMAGES_URL}?mode=chinese&seasons=555:1`));
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_SEASON_IMAGES_URL));
@@ -2400,7 +2400,7 @@ test("/shows/:id/seasons 命中后端季图片缓存时写入新 season 本地 k
     const payload = JSON.parse(result.body);
     const imageCache = parseUnifiedCache(persistentData).trakt.image;
     assert.equal(payload[0].images.poster[0], "https://image.tmdb.org/t/p/w780/backend-season-poster.jpg");
-    assert.equal(imageCache["season:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/backend-season-poster.jpg");
+    assert.equal(imageCache["chinese:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/backend-season-poster.jpg");
     assert.equal(imageCache["season:555:1"], undefined);
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_SEASON_IMAGES_URL),

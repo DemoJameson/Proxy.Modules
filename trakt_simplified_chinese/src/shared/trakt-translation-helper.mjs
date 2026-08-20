@@ -232,9 +232,6 @@ function buildImageCacheKey(mediaType, ref) {
     if (!group || !lookupKey) {
         return "";
     }
-    if (mode === POSTER_IMAGE_MODE.CHINESE) {
-        return mediaType === "season" ? `${mediaType}:${group}:${lookupKey}` : `${mediaType}:${lookupKey}`;
-    }
     return `${mode}:${group}:${lookupKey}`;
 }
 
