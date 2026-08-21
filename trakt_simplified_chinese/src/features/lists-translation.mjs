@@ -130,7 +130,7 @@ async function handleList() {
         return { type: "respond", body: JSON.stringify(lists) };
     }
 
-    // 本地未命中的片单先从后端批量补齐（不受 googleTranslationEnabled 限制，与评论/人物名行为一致）
+    // 本地未命中的片单先从后端批量补齐（不受 translationEngine 限制，与评论/人物名行为一致）
     const missingListIds = entries
         .filter((entry) => entry.listId && !cacheUtils.getHashedFieldTranslation(cache, entry.listId, entry.field, entry.sourceText))
         .map((entry) => entry.listId);
@@ -159,7 +159,7 @@ async function handleList() {
     }));
 
     const result = await googleTranslationPipeline.translateTextFieldTargets(targets, {
-        googleTranslationEnabled: context.argument.googleTranslationEnabled,
+        translationEngine: context.argument.translationEngine,
         logFailure(language, error) {
             context.env.log(`Trakt list description translation failed for language=${language}: ${error}`);
         },

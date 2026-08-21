@@ -3,7 +3,7 @@ import test from "node:test";
 
 import { applyArgumentObjectConfig, applyArgumentStringConfig, createDefaultArgumentConfig, normalizeArgument } from "../trakt_simplified_chinese/src/argument.mjs";
 import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
-import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
@@ -13,7 +13,7 @@ test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 post
     assert.equal(parsed.fakeVipEnabled, true);
     assert.equal(parsed.posterImageMode, "original");
     assert.equal(parsed.historyEpisodesMergedByShow, true);
-    assert.equal(parsed.googleTranslationEnabled, true);
+    assert.equal(parsed.translationEngine, "google");
     assert.equal(parsed.characterTranslationEnabled, false);
     assert.equal(parsed.playerButtonOrder.eplayerx, 2);
     assert.equal(parsed.playerButtonOrder.forward, 1);
@@ -22,12 +22,12 @@ test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 post
     assert.deepEqual(parsed.enabledPlayerTypes, ["forward", "eplayerx", "infuse"]);
 });
 
-test("characterTranslationEnabled 默认开启，且位于 googleTranslationEnabled 后一位", () => {
+test("translationEngine 默认 google，且位于 characterTranslationEnabled 前一位", () => {
     const defaults = normalizeArgument(createDefaultArgumentConfig());
     assert.equal(defaults.characterTranslationEnabled, true);
 
     const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false]"));
-    assert.equal(parsed.googleTranslationEnabled, true);
+    assert.equal(parsed.translationEngine, "google");
     assert.equal(parsed.characterTranslationEnabled, false);
     assert.equal(parsed.playerButtonOrder.eplayerx, 1);
     assert.deepEqual(parsed.orderedPlayerTypes, ["eplayerx", "forward", "infuse"]);
@@ -58,9 +58,9 @@ test("序号 0 在 enabledPlayerTypes 中隐藏，但仍保留在 orderedPlayerT
 test("全部序号相同（含 0）时按 PLAYER_TYPE 声明顺序稳定排序", () => {
     const parsed = normalizeArgument(
         applyArgumentObjectConfig(createDefaultArgumentConfig(), {
-            eplayerxOrder: 5,
-            forwardOrder: 5,
-            infuseOrder: 0,
+            eplayerxButtonOrder: 5,
+            forwardButtonOrder: 5,
+            infuseButtonOrder: 0,
         }),
     );
     assert.deepEqual(parsed.orderedPlayerTypes, ["eplayerx", "forward", "infuse"]);
@@ -115,12 +115,12 @@ test("redirect 请求直接返回原 deeplink", async () => {
     assert.equal(result.response.headers.Location, "infuse://movie/456");
 });
 
-test("googleTranslationEnabled=false 时 comments 不触发 Google 翻译且保留原文", async () => {
+test("translationEngine=off 时 comments 不触发 Google 翻译且保留原文", async () => {
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/comments/123/replies",
         body: readFixture("comments.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
     });
 
@@ -133,12 +133,12 @@ test("googleTranslationEnabled=false 时 comments 不触发 Google 翻译且保�
     );
 });
 
-test("googleTranslationEnabled=true 时 comments 会请求 Google 翻译并写回缓存", async () => {
+test("translationEngine=deeplx 时 comments 会请求 DeepLX 翻译并写回缓存", async () => {
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/comments/123/replies",
         body: readFixture("comments.json"),
         argument: {
-            googleTranslationEnabled: true,
+            translationEngine: "deeplx",
         },
         httpPostMocks: {
             [DEEPLX_TRANSLATE_URL]: JSON.stringify({ data: "很棒的电影" }),
@@ -159,9 +159,9 @@ test("全部序号为 0 时 /movies/:id/watchnow 不注入自定义播放器条�
         url: "https://api.trakt.tv/movies/123/watchnow",
         body: readFixture("movie-watchnow.json"),
         argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 0,
-            infuseOrder: 0,
+            eplayerxButtonOrder: 0,
+            forwardButtonOrder: 0,
+            infuseButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {
@@ -187,9 +187,9 @@ test("仅 forward 序号非 0 时 /movies/:id/watchnow 只注入 forward 条目"
         url: "https://api.trakt.tv/movies/123/watchnow",
         body: readFixture("movie-watchnow.json"),
         argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 1,
-            infuseOrder: 0,
+            eplayerxButtonOrder: 0,
+            forwardButtonOrder: 1,
+            infuseButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {

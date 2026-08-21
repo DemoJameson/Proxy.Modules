@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 import {
     computeStringHash,
     createGoogleTranslateResponse,
@@ -152,13 +152,13 @@ test("/people/:id 会应用缓存中的中文姓名和 biography", async () => {
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
 });
 
-test("googleTranslationEnabled=false 时 people detail 不触发 Google 翻译，仍保留缓存并允许 TMDb 姓名回退", async () => {
+test("translationEngine=off 时 people detail 不触发 Google 翻译，仍保留缓存并允许 TMDb 姓名回退", async () => {
     const cachedPeople = JSON.parse(createPeopleTranslationCache());
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/people/42",
         body: readFixture("people-detail.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         persistentData: createUnifiedPersistentData({
             googlePeople: cachedPeople,
@@ -224,12 +224,12 @@ test("people detail 会通过 Google 翻译未命中的姓名和 biography 并�
     });
 });
 
-test("googleTranslationEnabled=false 时 people detail 不翻译 biography，且不触发 Google 请求", async () => {
+test("translationEngine=off 时 people detail 不翻译 biography，且不触发 Google 请求", async () => {
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/people/42",
         body: readFixture("people-detail.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         httpGetMocks: {
             [TMDB_PERSON_URL]: JSON.stringify({
@@ -1251,12 +1251,12 @@ test("episode people 无 seasons 缓存时用当前季第一集 imdb 查询豆�
     assert.equal(cache.trakt.linkIds["episode:first:123:2"].ids.imdb, "ttseason201");
 });
 
-test("googleTranslationEnabled=false 时 media people 列表不触发 Google 回退，但 TMDb 姓名翻译仍生效", async () => {
+test("translationEngine=off 时 media people 列表不触发 Google 回退，但 TMDb 姓名翻译仍生效", async () => {
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/people",
         body: readFixture("media-people-list.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(createWatchnowIdsCache()),
@@ -1348,7 +1348,7 @@ test("media people 列表已有 tmdb 缓存时，Google 返回不同姓名也不
             crew: {},
         }),
         argument: {
-            googleTranslationEnabled: true,
+            translationEngine: "deeplx",
         },
         persistentData: createUnifiedPersistentData({
             googlePeople: {
@@ -1750,7 +1750,7 @@ test("people detail 会读取演职人员姓名后端缓存并跳过 TMDb person
         url: "https://api.trakt.tv/people/42",
         body: readFixture("people-detail.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         httpGetMocks: {
             [BACKEND_PEOPLE_NAMES_42_URL]: createBackendPeopleNamesResponse(),
@@ -1778,7 +1778,7 @@ test("people detail 走 TMDb 获取中文名后会回写演职人员姓名后端
         url: "https://api.trakt.tv/people/42",
         body: readFixture("people-detail.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         httpGetMocks: {
             [TMDB_PERSON_URL]: JSON.stringify({
@@ -1813,7 +1813,7 @@ test("people detail 走 TMDb 查无中文名时会写本地负缓存并回写后
         url: "https://api.trakt.tv/people/42",
         body: readFixture("people-detail.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         httpGetMocks: {
             [TMDB_PERSON_URL]: JSON.stringify({
@@ -1854,7 +1854,7 @@ test("people detail 有效负缓存会跳过 TMDb person 请求", async () => {
             },
         }),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
     });
 
@@ -1991,7 +1991,7 @@ test("people detail 后端返回负缓存时会落到本地并跳过 TMDb person
         url: "https://api.trakt.tv/people/42",
         body: readFixture("people-detail.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         httpGetMocks: {
             [BACKEND_PEOPLE_NAMES_42_URL]: JSON.stringify({

@@ -1,6 +1,7 @@
 import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import * as googleTranslationPipeline from "../shared/google-translation-pipeline.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
+import * as translationEngine from "../shared/translation-engine.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
@@ -425,7 +426,7 @@ async function handleSentiments() {
         };
     }
 
-    if (!context.argument.googleTranslationEnabled) {
+    if (!translationEngine.isTranslationEnabled(context.argument.translationEngine)) {
         return {
             type: "respond",
             body: JSON.stringify(data),

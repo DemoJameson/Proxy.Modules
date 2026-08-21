@@ -314,9 +314,9 @@ test("TMDB 详情在自定义序号下只注入排序 1 的播放器", async () 
             "user-agent": "Sofa Time/1.0",
         },
         argument: {
-            eplayerxOrder: 3,
-            forwardOrder: 1,
-            infuseOrder: 2,
+            eplayerxButtonOrder: 3,
+            forwardButtonOrder: 1,
+            infuseButtonOrder: 2,
         },
     });
 
@@ -336,9 +336,9 @@ test("TMDB 详情在部分序号为 0 时只注入序号非 0 的最前播放器
             "user-agent": "Sofa Time/1.0",
         },
         argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 1,
-            infuseOrder: 2,
+            eplayerxButtonOrder: 0,
+            forwardButtonOrder: 1,
+            infuseButtonOrder: 2,
         },
     });
 
@@ -356,9 +356,9 @@ test("TMDB 详情在全部序号为 0 时不注入任何播放器", async () => 
             "user-agent": "Sofa Time/1.0",
         },
         argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 0,
-            infuseOrder: 0,
+            eplayerxButtonOrder: 0,
+            forwardButtonOrder: 0,
+            infuseButtonOrder: 0,
         },
     });
 
@@ -465,9 +465,9 @@ test("TMDb provider catalog 在自定义序号下会按序号升序重排自定�
             "user-agent": "Sofa Time/1.0",
         },
         argument: {
-            eplayerxOrder: 3,
-            forwardOrder: 1,
-            infuseOrder: 2,
+            eplayerxButtonOrder: 3,
+            forwardButtonOrder: 1,
+            infuseButtonOrder: 2,
         },
     });
 
@@ -486,9 +486,9 @@ test("TMDb provider catalog 在全部序号为 0 时仍保留全部自定义 pro
             "user-agent": "Sofa Time/1.0",
         },
         argument: {
-            eplayerxOrder: 0,
-            forwardOrder: 0,
-            infuseOrder: 0,
+            eplayerxButtonOrder: 0,
+            forwardButtonOrder: 0,
+            infuseButtonOrder: 0,
         },
     });
 

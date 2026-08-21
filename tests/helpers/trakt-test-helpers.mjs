@@ -277,21 +277,33 @@ function createWrappedMovieBody() {
     ]);
 }
 
+// 测试默认引擎固定为 deeplx，复用既有 DeepLX mock 断言，避免 39 个集成测试因默认引擎改为 google 而失效。
+// 需要验证 google 默认引擎的用例在 argument 中显式指定 translationEngine: "google" 并 mock translate-pa 端点。
 function runResponseCase(input) {
+    const { argument, headers, ...rest } = input ?? {};
     return runScript({
         hasResponse: true,
-        ...input,
+        ...rest,
+        argument: {
+            translationEngine: "deeplx",
+            ...argument,
+        },
         headers: {
             "user-agent": "Trakt/1.0",
-            ...input?.headers,
+            ...headers,
         },
     });
 }
 
 function runRequestCase(input) {
+    const { argument, ...rest } = input ?? {};
     return runScript({
         hasResponse: false,
-        ...input,
+        ...rest,
+        argument: {
+            translationEngine: "deeplx",
+            ...argument,
+        },
     });
 }
 

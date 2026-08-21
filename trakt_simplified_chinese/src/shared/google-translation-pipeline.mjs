@@ -1,5 +1,5 @@
-import * as googleTranslateClient from "../outbound/google-translate-client.mjs";
 import * as commonUtils from "../utils/common.mjs";
+import * as translationEngine from "./translation-engine.mjs";
 
 function normalizeTranslation(value) {
     return String(value ?? "").trim();
@@ -7,8 +7,9 @@ function normalizeTranslation(value) {
 
 async function translateTextFieldTargets(targets, options = {}) {
     const normalizedTargets = commonUtils.ensureArray(targets);
-    const googleTranslationEnabled = options.googleTranslationEnabled !== false;
-    const translateTexts = options.translateTexts || googleTranslateClient.translateTextsWithGoogle;
+    const engineEnabled = translationEngine.isTranslationEnabled(options.translationEngine);
+    // 注入的 translateTexts（测试用）不套回退；否则 google 引擎失败后自动回退 DeepLX。
+    const translateTexts = options.translateTexts || translationEngine.selectTranslateTextsWithFallback(options.translationEngine);
     const pendingByLanguage = {};
     let changed = false;
     let cacheChanged = false;
@@ -39,7 +40,7 @@ async function translateTextFieldTargets(targets, options = {}) {
             return;
         }
 
-        if (!googleTranslationEnabled) {
+        if (!engineEnabled) {
             return;
         }
 

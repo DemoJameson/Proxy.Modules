@@ -1,5 +1,4 @@
 import * as doubanClientModule from "../outbound/douban-client.mjs";
-import * as googleTranslateClient from "../outbound/google-translate-client.mjs";
 import * as tmdbClientModule from "../outbound/tmdb-client.mjs";
 import * as traktApiClientModule from "../outbound/trakt-api-client.mjs";
 import * as vercelBackendClientModule from "../outbound/vercel-backend-client.mjs";
@@ -8,6 +7,7 @@ import * as googleTranslationPipeline from "../shared/google-translation-pipelin
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as traktLinkIds from "../shared/trakt-link-ids.mjs";
 import * as mediaTranslationHelper from "../shared/trakt-translation-helper.mjs";
+import * as translationEngine from "../shared/translation-engine.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
@@ -215,7 +215,8 @@ function fetchTraktEpisodeDetail(ref) {
 }
 
 function translateTextsWithGoogle(texts, sourceLanguage) {
-    return googleTranslateClient.translateTextsWithGoogle(texts, sourceLanguage);
+    // 引擎选择统一收敛在 shared/translation-engine.mjs，缺省时回退到脚本参数；google 失败自动回退 DeepLX。
+    return translationEngine.selectTranslateTextsWithFallback(globalThis.$ctx?.argument?.translationEngine)(texts, sourceLanguage);
 }
 
 function getPeopleTranslationCacheEntry(cache, personId) {
@@ -1430,7 +1431,7 @@ async function handleMediaPeopleList() {
     const cachedResult = applyPeopleListCachedNameTranslations(data, cache);
 
     try {
-        const googleTargets = context.argument.googleTranslationEnabled ? collectPeopleListGoogleNameTranslationTargets(data, cache) : [];
+        const googleTargets = translationEngine.isTranslationEnabled(context.argument.translationEngine) ? collectPeopleListGoogleNameTranslationTargets(data, cache) : [];
         const googlePromise =
             cachedResult.hasMissing && googleTargets.length > 0
                 ? translateTextsWithGoogle(
@@ -1536,8 +1537,8 @@ async function handlePeopleSearchList() {
     let changed = cachedResult.changed || hydratedChanged;
 
     try {
-        const nameTargets = context.argument.googleTranslationEnabled ? cachedResult.nameTargets : [];
-        const biographyTargets = context.argument.googleTranslationEnabled ? cachedResult.biographyTargets : [];
+        const nameTargets = translationEngine.isTranslationEnabled(context.argument.translationEngine) ? cachedResult.nameTargets : [];
+        const biographyTargets = translationEngine.isTranslationEnabled(context.argument.translationEngine) ? cachedResult.biographyTargets : [];
         if (nameTargets.length === 0 && biographyTargets.length === 0) {
             if (changed) {
                 cacheUtils.savePeopleTranslationCache(context.env, cache);
@@ -1650,8 +1651,8 @@ async function handlePeopleDetail() {
 
     const googleTranslationTargets = [];
     const hasMatchingTmdbName = !!getCachedTmdbPersonNameTranslation(cacheEntry, originalName);
-    const shouldFetchGoogleName = context.argument.googleTranslationEnabled && originalName && !hasTranslatedName && !hasMatchingTmdbName;
-    const shouldFetchGoogleBiography = context.argument.googleTranslationEnabled && originalBiography && !cachedBiography;
+    const shouldFetchGoogleName = translationEngine.isTranslationEnabled(context.argument.translationEngine) && originalName && !hasTranslatedName && !hasMatchingTmdbName;
+    const shouldFetchGoogleBiography = translationEngine.isTranslationEnabled(context.argument.translationEngine) && originalBiography && !cachedBiography;
     if (shouldFetchGoogleName) {
         googleTranslationTargets.push({ field: "name", sourceText: originalName });
     }

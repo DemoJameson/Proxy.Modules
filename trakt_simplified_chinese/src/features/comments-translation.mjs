@@ -4,6 +4,7 @@ import * as googleTranslationPipeline from "../shared/google-translation-pipelin
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as traktLinkIds from "../shared/trakt-link-ids.mjs";
 import * as mediaTranslationHelper from "../shared/trakt-translation-helper.mjs";
+import * as translationEngine from "../shared/translation-engine.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
@@ -184,16 +185,17 @@ async function hydrateMissingCommentMediaNames(requestTarget, linkCache, mediaCa
 }
 
 async function createCommentContextResolver(options = {}) {
+    const context = globalThis.$ctx;
     const requestTarget = resolveCommentRequestTarget();
     const hasRequestContext = !!requestTarget;
-    const googleTranslationEnabled = globalThis.$ctx.argument?.googleTranslationEnabled !== false;
+    const engineEnabled = translationEngine.isTranslationEnabled(context?.argument?.translationEngine);
     const linkCache = hasRequestContext ? cacheUtils.loadLinkIdsCache(globalThis.$ctx.env) : {};
     const mediaCache = hasRequestContext ? cacheUtils.loadCache(globalThis.$ctx.env) : {};
     let requestContextLine = "";
 
     if (hasRequestContext) {
         const entries = readRequestCommentMediaEntries(requestTarget, linkCache, mediaCache);
-        if (entries && googleTranslationEnabled) {
+        if (entries && engineEnabled) {
             await hydrateMissingCommentMediaNames(requestTarget, linkCache, mediaCache, entries);
             const refreshed = readRequestCommentMediaEntries(requestTarget, linkCache, mediaCache);
             requestContextLine = buildBilingualContextLine(refreshed?.linkEntry?.title, refreshed?.translationEntry?.translation?.title);
@@ -298,7 +300,7 @@ async function translateCommentsInPlace(payload, options = {}) {
     const cache = cacheUtils.loadCommentTranslationCache(context.env);
     const translateableEntries = commonUtils.ensureArray(commentEntries).filter((entry) => shouldTranslateComment(entry.comment));
 
-    // 本地缓存未命中的评论先从后端批量补齐（不受 googleTranslationEnabled 限制，与人物名行为一致）；
+    // 本地缓存未命中的评论先从后端批量补齐（不受 translationEngine 限制，与人物名行为一致）；
     // 后端读取与双语上下文构建相互独立（分别写 google.comments 与 trakt.linkIds/translation 缓存），并行执行
     const missingCommentIds = translateableEntries
         .map((entry) => {
@@ -339,13 +341,13 @@ async function translateCommentsInPlace(payload, options = {}) {
     });
 
     const result = await googleTranslationPipeline.translateTextFieldTargets(targets, {
-        googleTranslationEnabled: context.argument.googleTranslationEnabled,
+        translationEngine: context.argument.translationEngine,
         logFailure(language, error) {
             context.env.log(`Trakt comment translation failed for language=${language}: ${error}`);
         },
     });
 
-    if ((context.argument.googleTranslationEnabled && result.cacheChanged) || hydratedChanged) {
+    if ((translationEngine.isTranslationEnabled(context.argument.translationEngine) && result.cacheChanged) || hydratedChanged) {
         cacheUtils.saveCommentTranslationCache(context.env, cache);
     }
     flushCommentTranslationBackendWrites();

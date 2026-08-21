@@ -1,11 +1,12 @@
 import { argumentFields, BOXJS_CONFIG_KEY, DEFAULT_BACKEND_BASE_URL } from "./module-manifest.mjs";
 import * as playerDefinitions from "./shared/player-definitions.mjs";
+import { normalizeTranslationEngine } from "./shared/translation-engine.mjs";
 import * as commonUtils from "./utils/common.mjs";
 
 const PLAYER_BUTTON_ARGUMENT_GROUP_KEYS = {
-    eplayerxOrder: "eplayerx",
-    forwardOrder: "forward",
-    infuseOrder: "infuse",
+    eplayerxButtonOrder: "eplayerx",
+    forwardButtonOrder: "forward",
+    infuseButtonOrder: "infuse",
 };
 
 const ARGUMENT_FIELDS = argumentFields.map((field) => {
@@ -137,6 +138,7 @@ function normalizeArgument(argument) {
     return {
         ...argument,
         posterImageMode: normalizePosterImageMode(argument.posterImageMode),
+        translationEngine: normalizeTranslationEngine(argument.translationEngine),
         backendBaseUrl: normalizeBackendBaseUrl(argument),
         playerButtonOrder: orderMap,
         orderedPlayerTypes,

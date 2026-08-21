@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
-import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
 
 import {
@@ -2790,13 +2790,13 @@ test("comments 列表会应用缓存中的评论翻译", async () => {
     assert.equal(afterPersistentData[UNIFIED_CACHE_KEY], beforeCache);
 });
 
-test("googleTranslationEnabled=false 时 comments 不触发 Google 翻译，但仍可应用缓存", async () => {
+test("translationEngine=off 时 comments 不触发 Google 翻译，但仍可应用缓存", async () => {
     const cachedComments = JSON.parse(createCommentTranslationCache());
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/comments/123/replies",
         body: readFixture("comments.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         persistentData: createUnifiedPersistentData({
             googleComments: cachedComments,
@@ -2909,7 +2909,7 @@ test("comments 后端未命中时会 Google 翻译并 fire-and-forget 回写后�
     });
 });
 
-test("googleTranslationEnabled=false 时 comments 仍会读取并应用后端评论缓存", async () => {
+test("translationEngine=off 时 comments 仍会读取并应用后端评论缓存", async () => {
     const backendEntry = {
         comment: {
             sourceTextHash: computeStringHash("Great movie"),
@@ -2920,7 +2920,7 @@ test("googleTranslationEnabled=false 时 comments 仍会读取并应用后端评
         url: "https://api.trakt.tv/comments/123/replies",
         body: readFixture("comments.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
             backendBaseUrl: TEST_BACKEND_BASE_URL,
         },
         httpGetMocks: {
@@ -3458,7 +3458,7 @@ test("list descriptions 会应用缓存中的描述翻译", async () => {
     assert.equal(payload[0].description, "一个不错的列表");
 });
 
-test("googleTranslationEnabled=false 时 list descriptions 不触发 Google 翻译，但仍可应用缓存", async () => {
+test("translationEngine=off 时 list descriptions 不触发 Google 翻译，但仍可应用缓存", async () => {
     const cachedList = JSON.parse(
         createListTranslationCache({
             321: {
@@ -3486,7 +3486,7 @@ test("googleTranslationEnabled=false 时 list descriptions 不触发 Google 翻�
         url: "https://api.trakt.tv/movies/123/lists/popular",
         body: readFixture("list-descriptions.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         persistentData,
     });
@@ -3773,13 +3773,13 @@ test("sentiments 会应用缓存中的翻译结果", async () => {
     assert.equal(payload.text, "观众文本");
 });
 
-test("googleTranslationEnabled=false 时 sentiments 不触发 Google 翻译，但仍可应用缓存", async () => {
+test("translationEngine=off 时 sentiments 不触发 Google 翻译，但仍可应用缓存", async () => {
     const cachedSentiments = JSON.parse(createSentimentTranslationCache());
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/sentiments",
         body: readFixture("sentiments.json"),
         argument: {
-            googleTranslationEnabled: false,
+            translationEngine: "off",
         },
         persistentData: createUnifiedPersistentData({
             googleSentiments: cachedSentiments,

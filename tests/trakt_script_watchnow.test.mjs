@@ -77,9 +77,9 @@ test("/watchnow/sources 在自定义序号下会按序号升序重排 source 定
         url: "https://api.trakt.tv/watchnow/sources",
         body: readFixture("watchnow-sources.json"),
         argument: {
-            eplayerxOrder: 3,
-            forwardOrder: 1,
-            infuseOrder: 2,
+            eplayerxButtonOrder: 3,
+            forwardButtonOrder: 1,
+            infuseButtonOrder: 2,
         },
     });
 
@@ -95,9 +95,9 @@ test("/watchnow/sources 在全部序号为 0 时仍会保留自定义 source 定
         url: "https://api.trakt.tv/watchnow/sources",
         body: readFixture("watchnow-sources.json"),
         argument: {
-            eplayerxOrder: 0,
-            infuseOrder: 0,
-            forwardOrder: 0,
+            eplayerxButtonOrder: 0,
+            infuseButtonOrder: 0,
+            forwardButtonOrder: 0,
         },
     });
 
@@ -232,9 +232,9 @@ test("/movies/:id/watchnow 在部分序号为 0 时只注入序号非 0 的播�
         url: "https://api.trakt.tv/movies/123/watchnow",
         body: readFixture("movie-watchnow.json"),
         argument: {
-            eplayerxOrder: 0,
-            infuseOrder: 0,
-            forwardOrder: 1,
+            eplayerxButtonOrder: 0,
+            infuseButtonOrder: 0,
+            forwardButtonOrder: 1,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(
@@ -270,9 +270,9 @@ test("/movies/:id/watchnow 在全部序号为 0 时会保留原始 watchnow 响�
         url: "https://api.trakt.tv/movies/123/watchnow",
         body: readFixture("movie-watchnow.json"),
         argument: {
-            eplayerxOrder: 0,
-            infuseOrder: 0,
-            forwardOrder: 0,
+            eplayerxButtonOrder: 0,
+            infuseButtonOrder: 0,
+            forwardButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(

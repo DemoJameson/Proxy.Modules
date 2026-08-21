@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
-import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, "..", "..", "trakt_simplified_chinese", "trakt_simplified_chinese.js");

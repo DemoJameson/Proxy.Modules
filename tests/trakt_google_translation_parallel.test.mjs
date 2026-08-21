@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { DEEPLX_MAX_TEXT_CHARACTERS, DEEPLX_TRANSLATE_API_URL, translateTextsWithGoogle } from "../trakt_simplified_chinese/src/outbound/google-translate-client.mjs";
+import { DEEPLX_MAX_TEXT_CHARACTERS, DEEPLX_TRANSLATE_API_URL, translateTextsWithDeeplx } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 import * as googleTranslationContext from "../trakt_simplified_chinese/src/shared/google-translation-context.mjs";
 import { translateTextFieldTargets } from "../trakt_simplified_chinese/src/shared/google-translation-pipeline.mjs";
 
@@ -61,7 +61,7 @@ test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求
 
     try {
         const texts = Array.from({ length: 1500 }, (_, index) => `${String(index).padStart(4, "0")}-${"x".repeat(80)}`);
-        const translationPromise = translateTextsWithGoogle(texts, "en");
+        const translationPromise = translateTextsWithDeeplx(texts, "en");
         await Promise.resolve();
 
         assert.equal(posts.length, 20);
@@ -110,7 +110,7 @@ test("DeepLX 兼容层在拼接分隔符丢失时回退逐条翻译", async () =
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["hello", "world"], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["hello", "world"], "en");
         assert.deepEqual(translatedTexts, ["逐条:hello", "逐条:world"]);
         assert.equal(posts.length, 3);
     } finally {
@@ -136,7 +136,7 @@ test("DeepLX 兼容层会切分超长单条文本并拼回结果", async () => {
 
     try {
         const longText = `${"A".repeat(3700)}.${"B".repeat(3700)}.`;
-        const translatedTexts = await translateTextsWithGoogle([longText], "en");
+        const translatedTexts = await translateTextsWithDeeplx([longText], "en");
         const requestLengths = posts.map((post) => getRequestTexts(post.body)[0].length);
         assert.ok(posts.length > 2);
         assert.ok(requestLengths.every((length) => length <= DEEPLX_MAX_TEXT_CHARACTERS));
@@ -163,7 +163,7 @@ test("DeepLX 兼容层切分带上下文的超长单条文本时会把上下文�
 
     try {
         const contextLine = `${"Context ".repeat(80)}(中文片名)`;
-        const translatedTexts = await translateTextsWithGoogle([googleTranslationContext.buildSourceText("A".repeat(9000), contextLine)], "en");
+        const translatedTexts = await translateTextsWithDeeplx([googleTranslationContext.buildSourceText("A".repeat(9000), contextLine)], "en");
         assert.ok(posts.length > 1);
         assert.ok(posts.every((post) => getRequestText(post.body).length <= DEEPLX_MAX_TEXT_CHARACTERS));
         assert.ok(posts.every((post) => getRequestText(post.body).startsWith(`${contextLine}\n`)));
@@ -191,7 +191,7 @@ test("DeepLX 兼容层切分多行长文本时会尽量合并到接近上限", a
 
     try {
         const longListText = Array.from({ length: 300 }, (_, index) => `${String(index + 1).padStart(3, "0")} - Miss You, Love You`).join("\r\n");
-        const translatedTexts = await translateTextsWithGoogle([longListText], "en");
+        const translatedTexts = await translateTextsWithDeeplx([longListText], "en");
         const requestLengths = posts.map((post) => getRequestTexts(post.body)[0].length);
         assert.ok(posts.length > 2);
         assert.ok(requestLengths.every((length) => length <= DEEPLX_MAX_TEXT_CHARACTERS));
@@ -221,7 +221,7 @@ test("DeepLX 兼容层遇到临时失败时会重试", async () => {
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["hello"], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["hello"], "en");
         assert.deepEqual(translatedTexts, ["译:hello"]);
         assert.equal(posts.length, 2);
     } finally {
@@ -251,7 +251,7 @@ test("DeepLX 兼容层会让相同上下文分别跟随每条拼接文本", asyn
 
     try {
         const contextLine = "Original Movie (中文电影)";
-        const translatedTexts = await translateTextsWithGoogle(
+        const translatedTexts = await translateTextsWithDeeplx(
             [googleTranslationContext.buildSourceText("Overall enjoyable", contextLine), googleTranslationContext.buildSourceText("Detailed analysis", contextLine)],
             "en",
         );
@@ -284,7 +284,7 @@ test("DeepLX 兼容层会让不同上下文分别跟随对应文本且保持正�
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(
+        const translatedTexts = await translateTextsWithDeeplx(
             [
                 googleTranslationContext.buildSourceText("Overall enjoyable", "The Housemaid (家弑服务)"),
                 googleTranslationContext.buildSourceText("Slow pacing", "Another Movie (另一部电影)"),
@@ -324,7 +324,7 @@ test("DeepLX 兼容层只会按每条文本自己的上下文清理裸上下文�
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["Story", googleTranslationContext.buildSourceText("Overall enjoyable", "Original Movie (中文电影)")], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["Story", googleTranslationContext.buildSourceText("Overall enjoyable", "Original Movie (中文电影)")], "en");
         assert.equal(posts.length, 1);
         assert.equal(getRequestText(posts[0].body), "Story\n¶1¶\nOriginal Movie (中文电影)\nOverall enjoyable");
         assert.deepEqual(translatedTexts, ["Original Movie (中文电影)\n剧情", "整体观感不错"]);
@@ -354,7 +354,7 @@ test("DeepLX 兼容层支持无上下文、有上下文和重复上下文混合�
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(
+        const translatedTexts = await translateTextsWithDeeplx(
             [
                 "Plain text",
                 googleTranslationContext.buildSourceText("First contextual text", "Movie A (影片甲)"),
@@ -387,7 +387,7 @@ test("DeepLX 兼容层计算 1500 字符限制时包含上下文头", async () =
 
     try {
         const contextLine = `${"Context ".repeat(50)}(中文片名)`;
-        const translatedTexts = await translateTextsWithGoogle(
+        const translatedTexts = await translateTextsWithDeeplx(
             [googleTranslationContext.buildSourceText("A".repeat(700), contextLine), googleTranslationContext.buildSourceText("B".repeat(700), contextLine)],
             "en",
         );
@@ -413,7 +413,7 @@ test("DeepLX 兼容层会在无提示词时修复开头残缺书名号", async (
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["The Housemaid is a psychological thriller."], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["The Housemaid is a psychological thriller."], "en");
         assert.deepEqual(translatedTexts, ["《家弑服务》是一部心理惊悚片。"]);
     } finally {
         globalThis.$ctx = originalContext;
@@ -434,7 +434,7 @@ test("DeepLX 兼容层会修复带冒号标题开头残缺书名号", async () =
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["Michael Jackson: Journey of a Superstar chronicles his artistic career."], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["Michael Jackson: Journey of a Superstar chronicles his artistic career."], "en");
         assert.deepEqual(translatedTexts, ["《迈克尔·杰克逊：巨星之路》讲述了他的艺术生涯。"]);
     } finally {
         globalThis.$ctx = originalContext;
@@ -498,7 +498,7 @@ test("DeepLX 兼容层会把中文译音名分隔符 - 替换为 ·", async () =
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["Tom Hanks is a well-known actor"], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["Tom Hanks is a well-known actor"], "en");
         assert.deepEqual(translatedTexts, ["汤姆·汉克斯 是 well-known 演员"]);
     } finally {
         globalThis.$ctx = originalContext;
@@ -519,7 +519,7 @@ test("DeepLX 兼容层会替换多段连续中文译音名分隔符", async () =
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(["Jean-Claude Van Damme starred in works 1-3 released on 2020-01-01"], "en");
+        const translatedTexts = await translateTextsWithDeeplx(["Jean-Claude Van Damme starred in works 1-3 released on 2020-01-01"], "en");
         assert.deepEqual(translatedTexts, ["让·克洛德·范·达姆 于 2020-01-01 出演作品 1-3 部"]);
     } finally {
         globalThis.$ctx = originalContext;
@@ -544,8 +544,46 @@ test("DeepLX 兼容层在批量翻译路径下替换多个人名分隔符", asyn
     };
 
     try {
-        const translatedTexts = await translateTextsWithGoogle(queue, "en");
+        const translatedTexts = await translateTextsWithDeeplx(queue, "en");
         assert.deepEqual(translatedTexts, ["译:汤姆·汉克斯", "译:摩根·弗里曼"]);
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
+test("DeepLX 兼容层超长文本单段失败时空段兜底保留其余译文", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+
+    globalThis.$ctx = {
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    const [text] = getRequestTexts(options.body);
+                    if (text.includes("FAILSEG")) {
+                        // 400 非临时失败，不触发重试，模拟该段翻译失败。
+                        return Promise.resolve({ status: 400, body: "bad request" });
+                    }
+                    return Promise.resolve({ status: 200, body: JSON.stringify({ data: `[${text.length}]` }) });
+                },
+            },
+        },
+    };
+
+    try {
+        const longText = `${"A".repeat(800)}FAILSEG${"A".repeat(800)}.${"B".repeat(1500)}.`;
+        const translatedTexts = await translateTextsWithDeeplx([longText], "en");
+        const expected = posts
+            .map((post) => {
+                const [text] = getRequestTexts(post.body);
+                return text.includes("FAILSEG") ? "" : `[${text.length}]`;
+            })
+            .join("");
+        assert.ok(posts.length > 2);
+        assert.notEqual(expected, "");
+        assert.notEqual(translatedTexts[0], "");
+        assert.equal(translatedTexts[0], expected);
     } finally {
         globalThis.$ctx = originalContext;
     }

@@ -13,11 +13,11 @@
                 "@dj_trakt_boxjs_configs.fakeVipEnabled",
                 "@dj_trakt_boxjs_configs.posterImageMode",
                 "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
-                "@dj_trakt_boxjs_configs.googleTranslationEnabled",
+                "@dj_trakt_boxjs_configs.translationEngine",
                 "@dj_trakt_boxjs_configs.characterTranslationEnabled",
-                "@dj_trakt_boxjs_configs.eplayerxOrder",
-                "@dj_trakt_boxjs_configs.forwardOrder",
-                "@dj_trakt_boxjs_configs.infuseOrder",
+                "@dj_trakt_boxjs_configs.eplayerxButtonOrder",
+                "@dj_trakt_boxjs_configs.forwardButtonOrder",
+                "@dj_trakt_boxjs_configs.infuseButtonOrder",
                 "@dj_trakt_boxjs_configs.backendBaseUrl",
                 "@dj_trakt_boxjs_configs.debugEnabled"
             ],
@@ -64,11 +64,25 @@
                     "desc": "启用后会将历史页面电视剧类别的观看记录按电视剧合并"
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.googleTranslationEnabled",
-                    "name": "用 DeepLX 翻译部分文本",
-                    "val": true,
-                    "type": "boolean",
-                    "desc": "启用后会翻译评论、社区情绪、冷知识、演员、片单等 DeepLX 翻译场景"
+                    "id": "@dj_trakt_boxjs_configs.translationEngine",
+                    "name": "翻译部分文本",
+                    "val": "google",
+                    "type": "select",
+                    "desc": "选择翻译引擎：谷歌翻译（快，需翻墙）、DeepLX（慢，可直连）、关闭",
+                    "items": [
+                        {
+                            "key": "google",
+                            "label": "谷歌翻译"
+                        },
+                        {
+                            "key": "deeplx",
+                            "label": "DeepLX"
+                        },
+                        {
+                            "key": "off",
+                            "label": "关闭"
+                        }
+                    ]
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.characterTranslationEnabled",
@@ -78,17 +92,13 @@
                     "desc": "启用后会用豆瓣翻译角色名"
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.eplayerxOrder",
+                    "id": "@dj_trakt_boxjs_configs.eplayerxButtonOrder",
                     "name": "EplayerX 跳转按钮",
                     "val": 1,
                     "type": "select",
                     "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 1",
                     "items": [
                         {
-                            "key": 0,
-                            "label": "0"
-                        },
-                        {
                             "key": 1,
                             "label": "1"
                         },
@@ -99,21 +109,21 @@
                         {
                             "key": 3,
                             "label": "3"
+                        },
+                        {
+                            "key": 0,
+                            "label": "0"
                         }
                     ]
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.forwardOrder",
+                    "id": "@dj_trakt_boxjs_configs.forwardButtonOrder",
                     "name": "Forward 跳转按钮",
                     "val": 2,
                     "type": "select",
                     "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 2",
                     "items": [
                         {
-                            "key": 0,
-                            "label": "0"
-                        },
-                        {
                             "key": 1,
                             "label": "1"
                         },
@@ -124,21 +134,21 @@
                         {
                             "key": 3,
                             "label": "3"
+                        },
+                        {
+                            "key": 0,
+                            "label": "0"
                         }
                     ]
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.infuseOrder",
+                    "id": "@dj_trakt_boxjs_configs.infuseButtonOrder",
                     "name": "Infuse 跳转按钮",
                     "val": 3,
                     "type": "select",
                     "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 3",
                     "items": [
                         {
-                            "key": 0,
-                            "label": "0"
-                        },
-                        {
                             "key": 1,
                             "label": "1"
                         },
@@ -149,6 +159,10 @@
                         {
                             "key": 3,
                             "label": "3"
+                        },
+                        {
+                            "key": 0,
+                            "label": "0"
                         }
                     ]
                 },
