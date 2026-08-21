@@ -224,9 +224,9 @@ test("people-names GET 返回 google 来源条目并丢弃缺字段的存储条�
                 42: googleEntry,
             },
         });
-        // 请求 2 条仅命中 1 条：部分命中使用短 TTL，避免客户端回写后 CDN 持续返回旧响应
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
+        // 请求 2 条仅命中 1 条：部分命中不缓存
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.equal(res.headers["Vercel-CDN-Cache-Control"], undefined);
     });
 });
 
@@ -248,9 +248,9 @@ test("people-names GET 部分命中时使用 PARTIAL_FOUND 短缓存头", async 
                 42: createPersonNameEntry(),
             },
         });
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.equal(res.headers["CDN-Cache-Control"], undefined);
+        assert.equal(res.headers["Vercel-CDN-Cache-Control"], undefined);
     });
 });
 

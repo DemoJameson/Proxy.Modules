@@ -181,9 +181,9 @@ test("list-translations GET 部分命中时使用 PARTIAL_FOUND 短缓存头", a
                 42: createListTranslationEntry(),
             },
         });
-        // 部分命中说明客户端即将回写缺失条目，CDN 不能长缓存
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60, stale-while-revalidate=600");
+        // 部分命中说明客户端即将回写缺失条目，不缓存
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.equal(res.headers["Vercel-CDN-Cache-Control"], undefined);
     });
 });
 
