@@ -1410,6 +1410,10 @@ function isDetailTranslationIncomplete(entry) {
     if (entry.complete === true) {
         return false;
     }
+    // 负缓存（NOT_FOUND）也视为不完整：详情页访问时强制重新请求中文翻译，使其有机会自愈
+    if (entry.status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        return true;
+    }
     const translation = entry.translation;
     if (!translation) {
         return false;
@@ -1632,6 +1636,11 @@ async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) 
                 }),
             );
 
+            // 任一 region 请求失败（无 token / 5xx / 超时）时，无法确认确实没有中文翻译，
+            // 此时不能下 NOT_FOUND 结论，否则会把上游实际有中文的条目误判为 NOT_FOUND 并负缓存。
+            // 仅当所有 region 都成功返回且确实无标题时，才负缓存为 NOT_FOUND。
+            const anyRegionFailed = BULK_API_COUNTRIES.some((country) => resultsByRegion[country] == null);
+
             const merged = mergeBulkResultsByRegion(resultsByRegion);
             Object.keys(mediaConfig).forEach((mediaType) => {
                 commonUtils.ensureArray(refsInChunkByType[mediaType]).forEach((ref) => {
@@ -1641,14 +1650,22 @@ async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) 
                     }
                     const titlesByRegion = merged[`${mediaType}:${bulkId}`];
                     const bestTitle = pickBestBulkTitle(titlesByRegion);
-                    const entry = bestTitle
-                        ? {
-                              status: translationCache.CACHE_STATUS.PARTIAL_FOUND,
-                              translation: { title: bestTitle },
-                          }
-                        : {
-                              status: translationCache.CACHE_STATUS.NOT_FOUND,
-                          };
+                    if (!bestTitle) {
+                        if (anyRegionFailed) {
+                            // 抓取失败：保持 missing，交给逐条 /translations/zh 路径回源，避免误判 NOT_FOUND
+                            return;
+                        }
+                        const entry = { status: translationCache.CACHE_STATUS.NOT_FOUND };
+                        if (storeTranslationEntry(cache, mediaType, ref, entry)) {
+                            cacheChanged = true;
+                        }
+                        queueBackendWrite(backendState, mediaType, ref, entry);
+                        return;
+                    }
+                    const entry = {
+                        status: translationCache.CACHE_STATUS.PARTIAL_FOUND,
+                        translation: { title: bestTitle },
+                    };
                     if (storeTranslationEntry(cache, mediaType, ref, entry)) {
                         cacheChanged = true;
                     }

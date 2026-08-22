@@ -4,6 +4,7 @@ import test from "node:test";
 import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
+import * as translationCache from "../trakt_simplified_chinese/src/shared/translation-cache.mjs";
 
 import {
     computeStringHash,
@@ -725,14 +726,16 @@ test("/movies/:id 缓存字段齐全时不会发起直查", async () => {
     assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
 });
 
-test("/movies/:id NOT_FOUND 负缓存时不会发起直查", async () => {
-    const { result, httpLogs } = await runResponseCase({
+test("/movies/:id NOT_FOUND 负缓存时详情页强制直查中文翻译并自愈", async () => {
+    // 持久化里写成 status:0，加载时会被归一化为 NOT_FOUND(3)，等价于一条负缓存记录
+    const { result, httpLogs, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
         body: readFixture("movie-detail.json"),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
         },
         httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
             [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
         },
         persistentData: createUnifiedPersistentData({
@@ -745,8 +748,43 @@ test("/movies/:id NOT_FOUND 负缓存时不会发起直查", async () => {
     });
 
     const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "Original Title");
-    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
+    assert.equal(payload.title, "港版标题");
+    assert.ok(hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL), "NOT_FOUND 负缓存时详情页应强制直查中文翻译");
+
+    const entry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    assert.ok(entry);
+    assert.equal(entry.status, translationCache.CACHE_STATUS.FOUND, "回源后应自愈为 FOUND");
+    assert.equal(entry.complete, true);
+});
+
+test("/movies/:id NOT_FOUND 负缓存（显式 status:3）时详情页同样强制回源自愈", async () => {
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
+        },
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(
+                createMediaTranslationCache({
+                    "movie:123": { status: 3 },
+                }),
+            ),
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "港版标题");
+    assert.ok(hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL), "NOT_FOUND 负缓存时详情页应强制直查中文翻译");
+
+    const entry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    assert.ok(entry);
+    assert.equal(entry.status, translationCache.CACHE_STATUS.FOUND, "回源后应自愈为 FOUND");
+    assert.equal(entry.complete, true);
 });
 
 test("/shows/:id/seasons/:n/episodes/:m 无缓存时会直查集翻译并应用", async () => {
@@ -4163,6 +4201,77 @@ test("四区均返回英文时标记 NOT_FOUND 且不触发 per-item", async () 
     const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
     assert.equal(bulkLogs.length, 4);
     assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
+});
+
+test("批量四区全部失败时不再误判 NOT_FOUND，留空交给 per-item 回源", async () => {
+    const movieCount = 11;
+    const httpGetMocks = {
+        [BULK_API_COUNTRY_REGEX("CN")]: { error: new Error("bulk CN failed") },
+        [BULK_API_COUNTRY_REGEX("SG")]: { error: new Error("bulk SG failed") },
+        [BULK_API_COUNTRY_REGEX("TW")]: { error: new Error("bulk TW failed") },
+        [BULK_API_COUNTRY_REGEX("HK")]: { error: new Error("bulk HK failed") },
+    };
+    for (let index = 0; index < movieCount; index += 1) {
+        const traktId = 1000 + index;
+        httpGetMocks[createPerItemMovieTranslationUrl(traktId)] = createPerItemMovieTranslationBody(`中文电影 ${traktId}`);
+    }
+
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { authorization: "Bearer test-token" },
+        httpGetMocks,
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文电影 1000");
+    assert.equal(payload[10].movie.title, "中文电影 1010");
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    // bulk 失败后应回落到逐条 /translations/zh 回源（这正是能正确取回中文的可靠路径）
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), movieCount);
+
+    const translationEntries = parseUnifiedCache(persistentData).trakt.translation;
+    for (let index = 0; index < movieCount; index += 1) {
+        const entry = translationEntries[`movie:${1000 + index}`];
+        assert.ok(entry, `movie:${1000 + index} 应被逐条回源写入`);
+        assert.notEqual(entry.status, translationCache.CACHE_STATUS.NOT_FOUND, `movie:${1000 + index} 不应被误判为 NOT_FOUND`);
+        assert.equal(entry.translation.title, `中文电影 ${1000 + index}`);
+    }
+});
+
+test("批量四区全部失败且 per-item 也无结果时，不写入任何 NOT_FOUND 条目", async () => {
+    const movieCount = 11;
+    // 仅让 bulk 四区全部失败；不提供 per-item mock，逐条回源也会失败（被 try/catch 吞掉，不写、不污染）
+    const httpGetMocks = {
+        [BULK_API_COUNTRY_REGEX("CN")]: { error: new Error("bulk CN failed") },
+        [BULK_API_COUNTRY_REGEX("SG")]: { error: new Error("bulk SG failed") },
+        [BULK_API_COUNTRY_REGEX("TW")]: { error: new Error("bulk TW failed") },
+        [BULK_API_COUNTRY_REGEX("HK")]: { error: new Error("bulk HK failed") },
+    };
+
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { authorization: "Bearer test-token" },
+        httpGetMocks,
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "Original Movie 1000");
+    assert.equal(payload[10].movie.title, "Original Movie 1010");
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), movieCount);
+
+    const translationEntries = parseUnifiedCache(persistentData).trakt.translation;
+    assert.deepEqual(Object.keys(translationEntries), [], "bulk 与 per-item 均失败时不应写入任何 NOT_FOUND 负缓存");
 });
 
 test("未命中 ref 总数 ≤ 10 时不触发批量，走 per-item 拿全字段", async () => {
