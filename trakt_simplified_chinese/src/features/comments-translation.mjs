@@ -52,6 +52,14 @@ function resolveCommentRequestTarget() {
         };
     }
 
+    match = normalizedPath.match(/^shows\/(\d+)\/seasons\/(\d+)\/comments\/[^/]+$/i);
+    if (match) {
+        return {
+            mediaType: mediaTypes.MEDIA_TYPE.SHOW,
+            traktId: match[1],
+        };
+    }
+
     match = normalizedPath.match(/^shows\/(\d+)\/seasons\/(\d+)\/episodes\/(\d+)\/comments\/[^/]+$/i);
     return match
         ? {

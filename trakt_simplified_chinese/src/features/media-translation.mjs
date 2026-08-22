@@ -52,12 +52,31 @@ async function handleMediaDetail() {
         return { type: "passThrough" };
     }
 
-    const mediaType = context.url.shortPathname.includes("/seasons/")
-        ? mediaTypes.MEDIA_TYPE.EPISODE
-        : context.url.shortPathname.startsWith("shows/")
-          ? mediaTypes.MEDIA_TYPE.SHOW
-          : mediaTypes.MEDIA_TYPE.MOVIE;
-    const ref = traktTranslationHelper.resolveMediaDetailTarget(context.url, data, mediaType);
+    const seasonInfoMatch = context.url.shortPathname.match(/^shows\/(\d+)\/seasons\/(\d+)\/info$/);
+    const isSeasonInfo = !!seasonInfoMatch;
+
+    let mediaType;
+    if (isSeasonInfo) {
+        mediaType = mediaTypes.MEDIA_TYPE.SEASON;
+    } else if (context.url.shortPathname.includes("/seasons/")) {
+        mediaType = mediaTypes.MEDIA_TYPE.EPISODE;
+    } else if (context.url.shortPathname.startsWith("shows/")) {
+        mediaType = mediaTypes.MEDIA_TYPE.SHOW;
+    } else {
+        mediaType = mediaTypes.MEDIA_TYPE.MOVIE;
+    }
+
+    let ref;
+    if (isSeasonInfo && commonUtils.isNonNullish(data?.ids?.trakt)) {
+        ref = {
+            mediaType: mediaTypes.MEDIA_TYPE.SEASON,
+            showId: seasonInfoMatch[1],
+            seasonNumber: Number(seasonInfoMatch[2]),
+            traktId: data.ids.trakt,
+        };
+    } else {
+        ref = traktTranslationHelper.resolveMediaDetailTarget(context.url, data, mediaType);
+    }
     if (!ref || !traktTranslationHelper.buildMediaCacheLookupKey(mediaType, ref)) {
         return { type: "passThrough" };
     }
@@ -205,65 +224,80 @@ async function handleSeasonEpisodesList() {
     const targetSeason = seasons.find((item) => {
         return commonUtils.ensureArray(item?.episodes).some((episode) => Number(episode?.season) === currentSeasonNumber);
     });
-    if (!targetSeason) {
-        await seasonImagePromise;
-        try {
-            return { type: "respond", body: JSON.stringify(seasons) };
-        } finally {
-            cacheUtils.clearCurrentSeason(context.env);
-        }
-    }
 
     const backendState = traktTranslationHelper.createBackendState(traktTranslationHelper.MEDIA_CONFIG);
 
     const cache = cacheUtils.loadCache(context.env);
-    const allEpisodeRefs = seasons
-        .flatMap((item) => {
-            return commonUtils.ensureArray(item?.episodes).map((episode) => ({
-                mediaType: mediaTypes.MEDIA_TYPE.EPISODE,
-                showId: target.showId,
-                seasonNumber: episode?.season ?? null,
-                episodeNumber: episode?.number ?? null,
-                episodeTraktId: episode?.ids?.trakt ?? null,
-                backendLookupKey: traktTranslationHelper.buildEpisodeCompositeKey(target.showId, episode?.season ?? null, episode?.number ?? null),
-                sourceTitle: episode?.title ?? null,
-                availableTranslations: commonUtils.isArray(episode?.available_translations) ? episode.available_translations : null,
-                seasonFirstAired: item?.first_aired ?? null,
-                episodeFirstAired: episode?.first_aired ?? null,
-            }));
-        })
-        .filter((ref) => !!traktTranslationHelper.buildMediaCacheLookupKey(mediaTypes.MEDIA_TYPE.EPISODE, ref));
+    const allSeasonRefs = seasons
+        .filter((season) => commonUtils.isNonNullish(season?.number))
+        .map((season) => ({
+            mediaType: mediaTypes.MEDIA_TYPE.SEASON,
+            showId: target.showId,
+            seasonNumber: season.number,
+            backendLookupKey: traktTranslationHelper.buildSeasonCompositeKey(target.showId, season.number),
+        }))
+        .filter((ref) => !!traktTranslationHelper.buildMediaCacheLookupKey(mediaTypes.MEDIA_TYPE.SEASON, ref));
 
-    let cacheChanged = await traktTranslationHelper.hydrateFromBackend(cache, { show: [], movie: [], episode: allEpisodeRefs }, traktTranslationHelper.MEDIA_CONFIG, backendState);
+    const allEpisodeRefs = targetSeason
+        ? seasons
+              .flatMap((item) => {
+                  return commonUtils.ensureArray(item?.episodes).map((episode) => ({
+                      mediaType: mediaTypes.MEDIA_TYPE.EPISODE,
+                      showId: target.showId,
+                      seasonNumber: episode?.season ?? null,
+                      episodeNumber: episode?.number ?? null,
+                      episodeTraktId: episode?.ids?.trakt ?? null,
+                      backendLookupKey: traktTranslationHelper.buildEpisodeCompositeKey(target.showId, episode?.season ?? null, episode?.number ?? null),
+                      sourceTitle: episode?.title ?? null,
+                      availableTranslations: commonUtils.isArray(episode?.available_translations) ? episode.available_translations : null,
+                      seasonFirstAired: item?.first_aired ?? null,
+                      episodeFirstAired: episode?.first_aired ?? null,
+                  }));
+              })
+              .filter((ref) => !!traktTranslationHelper.buildMediaCacheLookupKey(mediaTypes.MEDIA_TYPE.EPISODE, ref))
+        : [];
 
-    const missingEpisodeRefs = traktTranslationHelper.getMissingRefs(cache, mediaTypes.MEDIA_TYPE.EPISODE, allEpisodeRefs).filter((ref) => {
-        return commonUtils.isNonNullish(ref?.seasonFirstAired) && commonUtils.isNonNullish(ref?.episodeFirstAired);
-    });
-    const prioritizedEpisodeRefs = missingEpisodeRefs
-        .map((ref, index) => ({ ref, index }))
-        .sort((left, right) => {
-            const leftSeason = Number(left.ref?.seasonNumber);
-            const rightSeason = Number(right.ref?.seasonNumber);
-            const leftBucket = leftSeason === currentSeasonNumber ? 0 : leftSeason > currentSeasonNumber ? 1 : 2;
-            const rightBucket = rightSeason === currentSeasonNumber ? 0 : rightSeason > currentSeasonNumber ? 1 : 2;
-            if (leftBucket !== rightBucket) {
-                return leftBucket - rightBucket;
-            }
-            if (leftBucket === 2 && leftSeason !== rightSeason) {
-                return rightSeason - leftSeason;
-            }
-            if (leftSeason !== rightSeason) {
-                return leftSeason - rightSeason;
-            }
-            return left.index - right.index;
-        })
-        .map((item) => item.ref)
-        .slice(0, traktTranslationHelper.SEASON_EPISODE_TRANSLATION_LIMIT);
+    let cacheChanged = await traktTranslationHelper.hydrateFromBackend(
+        cache,
+        { show: [], movie: [], season: allSeasonRefs, episode: allEpisodeRefs },
+        traktTranslationHelper.MEDIA_CONFIG,
+        backendState,
+    );
 
-    const bulkResult = await traktTranslationHelper.fetchBulkTranslationsForMissing(cache, { show: [], movie: [], episode: prioritizedEpisodeRefs }, backendState);
-    cacheChanged = bulkResult.cacheChanged || cacheChanged;
-    const remainingEpisodeRefs = traktTranslationHelper.getMissingRefs(cache, mediaTypes.MEDIA_TYPE.EPISODE, prioritizedEpisodeRefs);
-    cacheChanged = (await traktTranslationHelper.fetchAndPersistMissing(cache, mediaTypes.MEDIA_TYPE.EPISODE, remainingEpisodeRefs, backendState)) || cacheChanged;
+    const missingSeasonRefs = traktTranslationHelper.getMissingRefs(cache, mediaTypes.MEDIA_TYPE.SEASON, allSeasonRefs);
+    cacheChanged = (await traktTranslationHelper.fetchAndPersistMissing(cache, mediaTypes.MEDIA_TYPE.SEASON, missingSeasonRefs, backendState)) || cacheChanged;
+
+    if (targetSeason) {
+        const missingEpisodeRefs = traktTranslationHelper.getMissingRefs(cache, mediaTypes.MEDIA_TYPE.EPISODE, allEpisodeRefs).filter((ref) => {
+            return commonUtils.isNonNullish(ref?.seasonFirstAired) && commonUtils.isNonNullish(ref?.episodeFirstAired);
+        });
+        const prioritizedEpisodeRefs = missingEpisodeRefs
+            .map((ref, index) => ({ ref, index }))
+            .sort((left, right) => {
+                const leftSeason = Number(left.ref?.seasonNumber);
+                const rightSeason = Number(right.ref?.seasonNumber);
+                const leftBucket = leftSeason === currentSeasonNumber ? 0 : leftSeason > currentSeasonNumber ? 1 : 2;
+                const rightBucket = rightSeason === currentSeasonNumber ? 0 : rightSeason > currentSeasonNumber ? 1 : 2;
+                if (leftBucket !== rightBucket) {
+                    return leftBucket - rightBucket;
+                }
+                if (leftBucket === 2 && leftSeason !== rightSeason) {
+                    return rightSeason - leftSeason;
+                }
+                if (leftSeason !== rightSeason) {
+                    return leftSeason - rightSeason;
+                }
+                return left.index - right.index;
+            })
+            .map((item) => item.ref)
+            .slice(0, traktTranslationHelper.SEASON_EPISODE_TRANSLATION_LIMIT);
+
+        const bulkResult = await traktTranslationHelper.fetchBulkTranslationsForMissing(cache, { show: [], movie: [], episode: prioritizedEpisodeRefs }, backendState);
+        cacheChanged = bulkResult.cacheChanged || cacheChanged;
+        const remainingEpisodeRefs = traktTranslationHelper.getMissingRefs(cache, mediaTypes.MEDIA_TYPE.EPISODE, prioritizedEpisodeRefs);
+        cacheChanged = (await traktTranslationHelper.fetchAndPersistMissing(cache, mediaTypes.MEDIA_TYPE.EPISODE, remainingEpisodeRefs, backendState)) || cacheChanged;
+    }
+
     if (cacheChanged) {
         cacheUtils.saveCache(context.env, cache);
     }
@@ -277,6 +311,17 @@ async function handleSeasonEpisodesList() {
     }
 
     seasons.forEach((season) => {
+        const seasonRef = allSeasonRefs.find((ref) => ref.seasonNumber === season.number);
+        if (seasonRef) {
+            traktTranslationHelper.applyTranslation(
+                context.userAgent,
+                season,
+                traktTranslationHelper.getCachedTranslation(cache, mediaTypes.MEDIA_TYPE.SEASON, seasonRef),
+                mediaTypes.MEDIA_TYPE.SEASON,
+            );
+            traktTranslationHelper.applyOverrideToTarget(season, traktTranslationHelper.getOverrideFromTable(overridesTable, seasonRef));
+        }
+
         commonUtils.ensureArray(season?.episodes).forEach((episode) => {
             const ref = {
                 mediaType: mediaTypes.MEDIA_TYPE.EPISODE,

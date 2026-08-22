@@ -18,6 +18,9 @@ function buildTranslationUrl(mediaType, ref) {
     if (mediaType === mediaTypes.MEDIA_TYPE.MOVIE && commonUtils.isNonNullish(ref?.traktId)) {
         return `${traktApiBaseUrl}/movies/${ref.traktId}/translations/zh?extended=all`;
     }
+    if (mediaType === mediaTypes.MEDIA_TYPE.SEASON && commonUtils.isNonNullish(ref?.showId) && commonUtils.isNonNullish(ref?.seasonNumber)) {
+        return `${traktApiBaseUrl}/shows/${ref.showId}/seasons/${ref.seasonNumber}/translations/zh?extended=all`;
+    }
     if (
         mediaType === mediaTypes.MEDIA_TYPE.EPISODE &&
         commonUtils.isNonNullish(ref?.showId) &&

@@ -388,6 +388,11 @@ function resolvePeopleListTarget() {
         return { mediaType: mediaTypes.MEDIA_TYPE.SHOW, traktId: match[1] };
     }
 
+    match = normalizedPath.match(/^shows\/(\d+)\/seasons\/(\d+)\/people$/);
+    if (match) {
+        return { mediaType: mediaTypes.MEDIA_TYPE.SHOW, traktId: match[1] };
+    }
+
     match = normalizedPath.match(/^shows\/(\d+)\/seasons\/(\d+)\/episodes\/(\d+)\/people$/);
     return match
         ? {

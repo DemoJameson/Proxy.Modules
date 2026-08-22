@@ -26,6 +26,13 @@ const MEDIA_CONFIG = {
                 : "";
         },
     },
+    [mediaTypes.MEDIA_TYPE.SEASON]: {
+        buildTranslationPath(ref) {
+            return ref && commonUtils.isNonNullish(ref.showId) && commonUtils.isNonNullish(ref.seasonNumber)
+                ? `/shows/${ref.showId}/seasons/${ref.seasonNumber}/translations/zh?extended=all`
+                : "";
+        },
+    },
 };
 
 const REQUEST_BATCH_SIZE = 10;
@@ -94,6 +101,9 @@ function getOverrideGroupName(mediaType) {
     if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
         return "episodes";
     }
+    if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
+        return "shows";
+    }
     return "";
 }
 
@@ -137,12 +147,22 @@ function buildEpisodeCompositeKey(showId, seasonNumber, episodeNumber) {
     return `${showId}:${seasonNumber}:${episodeNumber}`;
 }
 
+function buildSeasonCompositeKey(showId, seasonNumber) {
+    if (commonUtils.isNullish(showId) || commonUtils.isNullish(seasonNumber)) {
+        return "";
+    }
+    return `${showId}:${seasonNumber}`;
+}
+
 function buildMediaCacheLookupKey(mediaType, ref) {
     if (!ref || typeof ref !== "object") {
         return "";
     }
     if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
         return buildEpisodeCompositeKey(ref.showId, ref.seasonNumber, ref.episodeNumber);
+    }
+    if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
+        return buildSeasonCompositeKey(ref.showId, ref.seasonNumber);
     }
     return commonUtils.isNonNullish(ref.traktId) ? String(ref.traktId) : "";
 }
@@ -845,6 +865,18 @@ function compareBackendFieldIds(mediaType, left, right) {
         }
     }
 
+    if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
+        const leftSeason = parseSeasonLookupKey(left);
+        const rightSeason = parseSeasonLookupKey(right);
+        if (leftSeason && rightSeason) {
+            const showDiff = Number(leftSeason.showId) - Number(rightSeason.showId);
+            if (showDiff !== 0) {
+                return showDiff;
+            }
+            return Number(leftSeason.seasonNumber) - Number(rightSeason.seasonNumber);
+        }
+    }
+
     const leftNumber = Number(left);
     const rightNumber = Number(right);
     if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
@@ -877,9 +909,19 @@ function parseEpisodeLookupKey(value) {
               showId: match[1],
               seasonNumber: match[2],
               episodeNumber: match[3],
-              backendLookupKey: match[0],
           }
-        : null;
+        : { traktId: value };
+}
+
+function parseSeasonLookupKey(value) {
+    const match = String(value ?? "").match(/^(\d+):(\d+)$/);
+    return match
+        ? {
+              mediaType: mediaTypes.MEDIA_TYPE.SEASON,
+              showId: match[1],
+              seasonNumber: match[2],
+          }
+        : { traktId: value };
 }
 
 async function fetchTranslationsFromBackend(backendState, cache, refsByType) {
@@ -910,7 +952,14 @@ async function fetchTranslationsFromBackend(backendState, cache, refsByType) {
     Object.keys(backendState.mediaConfig).forEach((mediaType) => {
         const entries = commonUtils.ensureObject(payload?.[getMediaBackendField(mediaType)]);
         Object.keys(entries).forEach((id) => {
-            const ref = mediaType === mediaTypes.MEDIA_TYPE.EPISODE ? parseEpisodeLookupKey(id) : { traktId: id };
+            let ref;
+            if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
+                ref = parseEpisodeLookupKey(id);
+            } else if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
+                ref = parseSeasonLookupKey(id);
+            } else {
+                ref = { traktId: id };
+            }
             cacheChanged = !!storeTranslationEntry(cache, mediaType, ref, entries[id]) || cacheChanged;
         });
     });
@@ -1386,7 +1435,14 @@ async function ensureDetailTranslation(cache, mediaType, ref, backendState) {
         return false;
     }
 
-    const detailRef = mediaType === mediaTypes.MEDIA_TYPE.EPISODE ? { ...ref, backendLookupKey: buildEpisodeCompositeKey(ref.showId, ref.seasonNumber, ref.episodeNumber) } : ref;
+    let detailRef;
+    if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
+        detailRef = { ...ref, backendLookupKey: buildEpisodeCompositeKey(ref.showId, ref.seasonNumber, ref.episodeNumber) };
+    } else if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
+        detailRef = { ...ref, backendLookupKey: buildSeasonCompositeKey(ref.showId, ref.seasonNumber) };
+    } else {
+        detailRef = ref;
+    }
     if (!isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
         return false;
     }
@@ -1701,6 +1757,7 @@ export {
     BACKEND_WRITE_BATCH_SIZE,
     buildEpisodeCompositeKey,
     buildMediaCacheLookupKey,
+    buildSeasonCompositeKey,
     createBackendState,
     ensureDetailTranslation,
     fetchAndPersistMissing,

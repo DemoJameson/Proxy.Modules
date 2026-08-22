@@ -131,12 +131,22 @@ function createResponsePhaseRoutes() {
         createRoute({ pattern: /^watchnow\/sources$/i, id: "watchnow.sources", handler: playerInjectionTraktHandler.handleWatchnowSources }),
         createRoute({ pattern: /^(movies|shows)\/[^/]+\/people$/i, id: "media.people", handler: peopleTranslationHandler.handleMediaPeopleList }),
         createRoute({
+            pattern: /^shows\/[^/]+\/seasons\/\d+\/people$/i,
+            id: "shows.season.people",
+            handler: peopleTranslationHandler.handleMediaPeopleList,
+        }),
+        createRoute({
             pattern: /^shows\/[^/]+\/seasons\/\d+\/episodes\/\d+\/people$/i,
             id: "shows.episode.people",
             handler: peopleTranslationHandler.handleMediaPeopleList,
         }),
 
         createRoute({ pattern: /^(movies|shows)\/[^/]+\/comments\/[^/]+$/i, id: "media.comments", handler: commentsTranslationHandler.handleComments }),
+        createRoute({
+            pattern: /^shows\/[^/]+\/seasons\/\d+\/comments\/[^/]+$/i,
+            id: "shows.season.comments",
+            handler: commentsTranslationHandler.handleComments,
+        }),
         createRoute({
             pattern: /^shows\/[^/]+\/seasons\/\d+\/episodes\/\d+\/comments\/[^/]+$/i,
             id: "shows.episode.comments",
@@ -174,6 +184,7 @@ function createResponsePhaseRoutes() {
             id: "movies.summary",
             handler: mediaTranslationHandler.handleMediaDetail,
         }),
+        createRoute({ pattern: /^shows\/[^/]+\/seasons\/\d+\/info$/i, id: "shows.season.info", handler: mediaTranslationHandler.handleMediaDetail }),
         createRoute({ pattern: /^shows\/[^/]+\/seasons\/\d+\/episodes\/\d+$/i, id: "shows.episode.summary", handler: mediaTranslationHandler.handleMediaDetail }),
         createRoute({ pattern: /^people\/[a-z0-9-]+$/i, id: "people.summary", handler: peopleTranslationHandler.handlePeopleDetail }),
     ];
