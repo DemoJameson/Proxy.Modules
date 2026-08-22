@@ -19,7 +19,7 @@
                 "@dj_trakt_boxjs_configs.forwardButtonOrder",
                 "@dj_trakt_boxjs_configs.infuseButtonOrder",
                 "@dj_trakt_boxjs_configs.backendBaseUrl",
-                "@dj_trakt_boxjs_configs.debugEnabled"
+                "@dj_trakt_boxjs_configs.debugMode"
             ],
             "author": "@DemoJameson",
             "repo": "https://github.com/DemoJameson/Proxy.Modules/tree/main/trakt_simplified_chinese",
@@ -174,11 +174,29 @@
                     "desc": "用于批量获取 Trakt 的中文翻译，一般留空即可"
                 },
                 {
-                    "id": "@dj_trakt_boxjs_configs.debugEnabled",
+                    "id": "@dj_trakt_boxjs_configs.debugMode",
                     "name": "调试模式",
-                    "val": false,
-                    "type": "boolean",
-                    "desc": "启用后每次都会刷新 translation-overrides 覆盖数据"
+                    "val": "off",
+                    "type": "select",
+                    "desc": "禁用本地缓存：不读写持久化存储；禁用远端缓存：不请求后端缓存接口；禁用所有缓存：两者皆禁用",
+                    "items": [
+                        {
+                            "key": "off",
+                            "label": "关闭"
+                        },
+                        {
+                            "key": "disableLocal",
+                            "label": "禁用本地缓存"
+                        },
+                        {
+                            "key": "disableRemote",
+                            "label": "禁用远端缓存"
+                        },
+                        {
+                            "key": "disableAll",
+                            "label": "禁用所有缓存"
+                        }
+                    ]
                 }
             ],
             "descs_html": [

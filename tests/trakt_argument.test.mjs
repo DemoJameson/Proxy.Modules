@@ -81,6 +81,24 @@ test("posterImageMode 支持中文选项标签", () => {
     assert.equal(defaultParsed.posterImageMode, "default");
 });
 
+test("debugMode 非法值回退 off", () => {
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,bogus]"));
+
+    assert.equal(parsed.debugMode, "off");
+});
+
+test("debugMode 支持中文选项标签", () => {
+    const offParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,关闭]"));
+    const localParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用本地缓存]"));
+    const remoteParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用远端缓存]"));
+    const allParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用所有缓存]"));
+
+    assert.equal(offParsed.debugMode, "off");
+    assert.equal(localParsed.debugMode, "disableLocal");
+    assert.equal(remoteParsed.debugMode, "disableRemote");
+    assert.equal(allParsed.debugMode, "disableAll");
+});
+
 test("historyEpisodesMergedByShow=false 时历史剧集请求不改写 limit", async () => {
     const { result } = await runRequestCase({
         url: "https://api.trakt.tv/users/me/history/episodes?page=1&limit=10",

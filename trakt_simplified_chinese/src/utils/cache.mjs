@@ -24,6 +24,11 @@ const PRUNE_PRIORITY = {
     "google.people": 9,
 };
 
+function isLocalCacheDisabled() {
+    const mode = globalThis.$ctx?.argument?.debugMode;
+    return mode === "disableLocal" || mode === "disableAll";
+}
+
 function buildFieldTranslationCacheKey(id) {
     return commonUtils.isNullish(id) ? "" : String(id);
 }
@@ -735,7 +740,12 @@ function loadUnifiedCache(
     unifiedCacheSchemaVersion = UNIFIED_CACHE_SCHEMA_VERSION,
     unifiedCacheMaxBytes = UNIFIED_CACHE_MAX_BYTES,
     unifiedCacheRevKey = UNIFIED_CACHE_REV_KEY,
+    options = {},
 ) {
+    if (!options.force && isLocalCacheDisabled()) {
+        return createEmptyUnifiedCache(unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
+    }
+
     const memo = getUnifiedCacheMemo(env);
     if (memo?.cache) {
         return memo.cache;
@@ -775,6 +785,10 @@ function saveUnifiedCache(
     unifiedCacheMaxBytes = UNIFIED_CACHE_MAX_BYTES,
     options = {},
 ) {
+    if (!options.force && isLocalCacheDisabled()) {
+        return;
+    }
+
     try {
         const unifiedCacheRevKey = options.unifiedCacheRevKey ?? UNIFIED_CACHE_REV_KEY;
         const latestRev = readUnifiedCacheRev(env, unifiedCacheRevKey);
@@ -1028,7 +1042,7 @@ function getAuthToken(env, apiKey) {
         return "";
     }
     try {
-        const authTokens = loadUnifiedCache(env).persistent.authTokens;
+        const authTokens = loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true }).persistent.authTokens;
         return String(authTokens?.[apiKey] ?? "");
     } catch (error) {
         env.log(`Trakt auth token cache load failed: ${error}`);
@@ -1043,12 +1057,13 @@ function saveAuthToken(env, apiKey, authorization) {
     if (getAuthToken(env, apiKey) === authorization) {
         return;
     }
-    const unifiedCache = loadUnifiedCache(env);
+    const unifiedCache = loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true });
     unifiedCache.persistent.authTokens = {
         ...commonUtils.ensureObject(unifiedCache.persistent.authTokens),
         [apiKey]: authorization,
     };
     saveUnifiedCache(env, unifiedCache, UNIFIED_CACHE_KEY, UNIFIED_CACHE_SCHEMA_VERSION, UNIFIED_CACHE_MAX_BYTES, {
+        force: true,
         owner: {
             path: ["persistent", "authTokens"],
             value: unifiedCache.persistent.authTokens,

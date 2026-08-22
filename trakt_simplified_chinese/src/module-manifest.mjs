@@ -96,11 +96,13 @@ const argumentFields = [
         desc: "用于批量获取 Trakt 的中文翻译，一般留空即可",
     },
     {
-        key: "debugEnabled",
-        defaultValue: false,
-        type: "boolean",
+        key: "debugMode",
+        defaultValue: "off",
+        type: "select",
+        options: ["关闭", "禁用本地缓存", "禁用远端缓存", "禁用所有缓存"],
+        optionValues: ["off", "disableLocal", "disableRemote", "disableAll"],
         tag: "调试模式",
-        desc: "启用后每次都会刷新 translation-overrides 覆盖数据",
+        desc: "禁用本地缓存：不读写持久化存储；禁用远端缓存：不请求后端缓存接口；禁用所有缓存：两者皆禁用",
     },
 ];
 

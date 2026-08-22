@@ -36,7 +36,6 @@ const PREFERRED_TRANSLATION_LANGUAGE = "zh-CN";
 const BACKEND_FETCH_MIN_REFS = 3;
 const BACKEND_WRITE_BATCH_SIZE = 50;
 const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS_DEBUG = 0;
 const IMAGE_PARTIAL_FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const IMAGE_NOT_FOUND_TTL_MS = 5 * 24 * 60 * 60 * 1000;
 const BULK_API_MAX_IDS_PER_CATEGORY = 100;
@@ -113,7 +112,7 @@ async function loadTranslationOverrides(env) {
         return cached;
     }
 
-    const refreshInterval = globalThis.$ctx.argument?.debugEnabled ? TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS_DEBUG : TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS;
+    const refreshInterval = TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS;
     if (Date.now() - Number(cached.fetchedAt || 0) < refreshInterval) {
         return cached;
     }

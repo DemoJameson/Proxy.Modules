@@ -1580,7 +1580,7 @@ test("handleMediaDetail translationOverrides 在刷新周期内直接读本地�
     );
 });
 
-test("debugEnabled=true 时每次都会刷新 translationOverrides", async () => {
+test("debugMode=disableLocal 时禁用本地缓存，每次从远端获取 translationOverrides", async () => {
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
         body: readFixture("movie-detail.json"),
@@ -1597,7 +1597,7 @@ test("debugEnabled=true 时每次都会刷新 translationOverrides", async () =>
         }),
         argument: {
             backendBaseUrl: "https://backend.example",
-            debugEnabled: true,
+            debugMode: "disableLocal",
         },
         httpGetMocks: {
             "https://backend.example/api/trakt/translation-overrides": createBackendTranslationOverridesBody(
@@ -1614,6 +1614,121 @@ test("debugEnabled=true 时每次都会刷新 translationOverrides", async () =>
         httpLogs.some((item) => item.method === "GET" && item.url === "https://backend.example/api/trakt/translation-overrides"),
         true,
     );
+});
+
+test("debugMode=disableLocal 时不读写本地持久化缓存", async () => {
+    const initialPersistentData = createUnifiedPersistentData({
+        traktTranslation: JSON.parse(createMovieTranslationCache()),
+        translationOverrides: {
+            fetchedAt: Date.now(),
+            shows: {},
+            movies: {
+                123: createTranslationOverrideEntry({ title: "旧缓存标题" }),
+            },
+            episodes: {},
+        },
+    });
+    const initialCacheSnapshot = JSON.stringify(initialPersistentData);
+
+    const { persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: initialPersistentData,
+        argument: {
+            backendBaseUrl: "https://backend.example",
+            debugMode: "disableLocal",
+        },
+        httpGetMocks: {
+            "https://backend.example/api/trakt/translation-overrides": createBackendTranslationOverridesBody(
+                "movies",
+                "123",
+                createTranslationOverrideEntry({ title: "远端最新标题" }),
+            ),
+        },
+    });
+
+    assert.equal(JSON.stringify(persistentData), initialCacheSnapshot);
+});
+
+test("debugMode=disableRemote 时不请求远端后端，本地缓存正常读写", async () => {
+    const initialPersistentData = createUnifiedPersistentData({
+        traktTranslation: JSON.parse(createMovieTranslationCache()),
+        translationOverrides: {
+            fetchedAt: 0,
+            shows: {},
+            movies: {
+                123: createTranslationOverrideEntry({ title: "本地覆盖标题" }),
+            },
+            episodes: {},
+        },
+    });
+    const initialCacheSnapshot = JSON.stringify(initialPersistentData);
+
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: initialPersistentData,
+        argument: {
+            backendBaseUrl: "https://backend.example",
+            debugMode: "disableRemote",
+        },
+        httpGetMocks: {
+            "https://backend.example/api/trakt/translation-overrides": createBackendTranslationOverridesBody(
+                "movies",
+                "123",
+                createTranslationOverrideEntry({ title: "远端最新标题" }),
+            ),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(
+        httpLogs.some((item) => item.url?.startsWith("https://backend.example")),
+        false,
+    );
+    assert.notEqual(payload.title, "远端最新标题");
+    assert.notEqual(JSON.stringify(persistentData), initialCacheSnapshot);
+});
+
+test("debugMode=disableAll 时既不请求远端也不读写本地", async () => {
+    const initialPersistentData = createUnifiedPersistentData({
+        traktTranslation: JSON.parse(createMovieTranslationCache()),
+        translationOverrides: {
+            fetchedAt: 0,
+            shows: {},
+            movies: {
+                123: createTranslationOverrideEntry({ title: "本地覆盖标题" }),
+            },
+            episodes: {},
+        },
+    });
+    const initialCacheSnapshot = JSON.stringify(initialPersistentData);
+
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: initialPersistentData,
+        argument: {
+            backendBaseUrl: "https://backend.example",
+            debugMode: "disableAll",
+        },
+        httpGetMocks: {
+            "https://backend.example/api/trakt/translation-overrides": createBackendTranslationOverridesBody(
+                "movies",
+                "123",
+                createTranslationOverrideEntry({ title: "远端最新标题" }),
+            ),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(
+        httpLogs.some((item) => item.url?.startsWith("https://backend.example")),
+        false,
+    );
+    assert.notEqual(payload.title, "本地覆盖标题");
+    assert.notEqual(payload.title, "远端最新标题");
+    assert.equal(JSON.stringify(persistentData), initialCacheSnapshot);
 });
 
 test("handleSentiments 覆盖原生 sentiments 与代理兼容路由", async (t) => {

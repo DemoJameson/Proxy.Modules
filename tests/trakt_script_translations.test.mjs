@@ -4313,3 +4313,32 @@ test("源请求带 Authorization 时会写入 authTokens 缓存", async () => {
     const cache = JSON.parse(String(persistentData[UNIFIED_CACHE_KEY]));
     assert.equal(cache.persistent.authTokens[apiKey], authorization);
 });
+
+test("debugMode=disableAll 时 authToken 仍可读写，bulk 接口正常调用", async () => {
+    const movieCount = 11;
+    const cachedApiKey = "cached-api-key-disable-all";
+    const cachedToken = "Bearer cached-token-disable-all";
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL, debugMode: "disableAll" },
+        headers: { "trakt-api-key": cachedApiKey },
+        persistentData: createUnifiedPersistentData({
+            authTokens: { [cachedApiKey]: cachedToken },
+        }),
+        httpGetMocks: {
+            [BULK_API_COUNTRY_REGEX("CN")]: createBulkMovieResponse(movieCount, "中文标题"),
+            [BULK_API_COUNTRY_REGEX("SG")]: createBulkMovieResponse(movieCount, "English SG"),
+            [BULK_API_COUNTRY_REGEX("TW")]: createBulkMovieResponse(movieCount, "賣房子"),
+            [BULK_API_COUNTRY_REGEX("HK")]: createBulkMovieResponse(movieCount, "English HK"),
+        },
+        httpPostMocks: createPendingBackendPostMocks(),
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].movie.title, "中文标题");
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
+});

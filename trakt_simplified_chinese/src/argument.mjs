@@ -114,6 +114,20 @@ function normalizePosterImageMode(value) {
     return ["default", "chinese", "original"].includes(normalized) ? normalized : "original";
 }
 
+function normalizeDebugMode(value) {
+    const normalized = String(value ?? "").trim();
+    const labelMap = {
+        关闭: "off",
+        禁用本地缓存: "disableLocal",
+        禁用远端缓存: "disableRemote",
+        禁用所有缓存: "disableAll",
+    };
+    if (labelMap[normalized]) {
+        return labelMap[normalized];
+    }
+    return ["off", "disableLocal", "disableRemote", "disableAll"].includes(normalized) ? normalized : "off";
+}
+
 function normalizeArgument(argument) {
     const orderMap = argument.playerButtonOrder;
     const orderOf = (source) => (Number(orderMap[source]) > 0 ? Number(orderMap[source]) : 0);
@@ -139,6 +153,7 @@ function normalizeArgument(argument) {
         ...argument,
         posterImageMode: normalizePosterImageMode(argument.posterImageMode),
         translationEngine: normalizeTranslationEngine(argument.translationEngine),
+        debugMode: normalizeDebugMode(argument.debugMode),
         backendBaseUrl: normalizeBackendBaseUrl(argument),
         playerButtonOrder: orderMap,
         orderedPlayerTypes,
