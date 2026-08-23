@@ -4451,3 +4451,224 @@ test("debugMode=disableAll 时 authToken 仍可读写，bulk 接口正常调用"
     assert.equal(bulkLogs.length, 4);
     assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
 });
+
+// ---------- 谷歌兜底翻译（引擎为谷歌、不落任何缓存） ----------
+
+const GOOGLE_JS_KEY_URL_REGEX = "regex:translate.googleapis.com/_/translate_http";
+const GOOGLE_PA_TRANSLATE_URL = "https://translate-pa.googleapis.com/v1/translateHtml";
+const GOOGLE_PA_TRANSLATE_URL_REGEX = "regex:translate-pa.googleapis.com";
+const TEST_DIRECT_SEASON_TRANSLATION_URL = "https://api.trakt.tv/shows/555/seasons/1/translations/zh?extended=all";
+const TEST_BACKEND_OVERRIDES_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/translation-overrides`;
+
+function createGoogleJsKeyMock() {
+    return createHttpStatusMock(200, `"X-goog-api-key":"${"AIzaSy".padEnd(39, "A")}"`);
+}
+
+function createGooglePaTranslateMock(translatedTexts) {
+    return createHttpStatusMock(200, JSON.stringify([translatedTexts]));
+}
+
+function findGooglePaTranslateLog(httpLogs) {
+    return httpLogs.find((entry) => entry.method === "POST" && entry.url.startsWith(GOOGLE_PA_TRANSLATE_URL));
+}
+
+test("详情页引擎为谷歌时 overview/tagline 非中文会谷歌兜底且不落缓存", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+            translationEngine: "google",
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
+            [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
+        },
+        httpPostMocks: {
+            [GOOGLE_PA_TRANSLATE_URL_REGEX]: createGooglePaTranslateMock(["谷歌简介", "谷歌标语"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.overview, "谷歌简介");
+    assert.equal(payload.tagline, "谷歌标语");
+    assert.ok(findGooglePaTranslateLog(httpLogs), "应调用谷歌 translate-pa 端点");
+
+    // 兜底译文不落本地缓存：条目保持 NOT_FOUND 终态且无译文
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    assert.equal(cacheEntry.status, translationCache.CACHE_STATUS.NOT_FOUND);
+    assert.equal(cacheEntry.translation, undefined);
+});
+
+test("详情页引擎为 DeepLX 或关闭时不做谷歌兜底，overview/tagline 保留原文", async () => {
+    for (const translationEngine of ["deeplx", "off"]) {
+        const { result, httpLogs } = await runResponseCase({
+            url: "https://api.trakt.tv/movies/123",
+            body: readFixture("movie-detail.json"),
+            argument: {
+                backendBaseUrl: TEST_BACKEND_BASE_URL,
+                translationEngine,
+            },
+            httpGetMocks: {
+                [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+                [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
+            },
+        });
+
+        const payload = JSON.parse(result.body);
+        assert.equal(payload.overview, "Original Overview");
+        assert.equal(payload.tagline, "Original Tagline");
+        assert.equal(findGooglePaTranslateLog(httpLogs), undefined);
+    }
+});
+
+test("详情页 overview/tagline 已是中文时不触发谷歌兜底", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+            translationEngine: "google",
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
+            [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.overview, "港版简介");
+    assert.equal(payload.tagline, "港版标语");
+    assert.equal(findGooglePaTranslateLog(httpLogs), undefined);
+});
+
+test("详情页仅 tagline 缺中文时只兜底缺失字段", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+            translationEngine: "google",
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, JSON.stringify([{ language: "zh", country: "cn", title: "中文标题", overview: "中文简介" }])),
+            [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
+        },
+        httpPostMocks: {
+            [GOOGLE_PA_TRANSLATE_URL_REGEX]: createGooglePaTranslateMock(["谷歌标语"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.overview, "中文简介");
+    assert.equal(payload.tagline, "谷歌标语");
+
+    const paLog = findGooglePaTranslateLog(httpLogs);
+    assert.ok(paLog, "应调用谷歌 translate-pa 端点");
+    assert.ok(paLog.body.includes("Original Tagline"));
+    assert.ok(!paLog.body.includes("Original Overview"));
+});
+
+test("详情页 override 已覆盖 overview 时不对其谷歌兜底", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+            translationEngine: "google",
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
+            [TEST_BACKEND_OVERRIDES_URL]: createHttpStatusMock(200, JSON.stringify({ movies: { 123: { translation: { overview: "管理员修订简介" } } } })),
+            [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
+        },
+        httpPostMocks: {
+            [GOOGLE_PA_TRANSLATE_URL_REGEX]: createGooglePaTranslateMock(["谷歌标语"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.overview, "管理员修订简介");
+    assert.equal(payload.tagline, "谷歌标语");
+
+    const paLog = findGooglePaTranslateLog(httpLogs);
+    assert.ok(paLog);
+    assert.ok(!paLog.body.includes("Original Overview"), "override 覆盖的字段不应送谷歌翻译");
+});
+
+test("季集列表引擎为谷歌时季与每集 overview 兜底翻译且不落缓存", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/shows/555/seasons",
+        body: readFixture("season-list.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+            translationEngine: "google",
+        },
+        httpGetMocks: {
+            [TEST_DIRECT_SEASON_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
+            [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
+        },
+        httpPostMocks: {
+            [GOOGLE_PA_TRANSLATE_URL_REGEX]: createGooglePaTranslateMock(["第一季简介", "第一集简介", "第二集简介"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].overview, "第一季简介");
+    assert.equal(payload[0].episodes[0].overview, "第一集简介");
+    assert.equal(payload[0].episodes[1].overview, "第二集简介");
+    assert.ok(findGooglePaTranslateLog(httpLogs), "应调用谷歌 translate-pa 端点");
+
+    // 兜底译文不落本地缓存：季条目保持 NOT_FOUND，集条目不产生缓存
+    const translationCacheSections = parseUnifiedCache(persistentData).trakt.translation;
+    assert.equal(translationCacheSections["season:555:1"].translation, undefined);
+    assert.equal(translationCacheSections["episode:555:1:1"], undefined);
+    assert.equal(translationCacheSections["episode:555:1:2"], undefined);
+});
+
+test("media.videos 引擎为谷歌时翻译非中文标题且不落缓存", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://apiz.trakt.tv/movies/1048396/videos",
+        body: readFixture("videos.json"),
+        argument: { translationEngine: "google" },
+        httpGetMocks: {
+            [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
+        },
+        httpPostMocks: {
+            [GOOGLE_PA_TRANSLATE_URL_REGEX]: createGooglePaTranslateMock(["官方预告片", "复仇计划，你加入吗？", "幕后特辑"]),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload[0].title, "官方预告片");
+    assert.equal(payload[1].title, "复仇计划，你加入吗？");
+    assert.equal(payload[2].title, "幕后特辑");
+    assert.equal(payload[3].title, "中文抢先看");
+
+    const paLog = findGooglePaTranslateLog(httpLogs);
+    assert.ok(paLog, "应调用谷歌 translate-pa 端点");
+    assert.ok(!paLog.body.includes("中文抢先看"), "已是中文的标题不应送谷歌翻译");
+
+    assert.deepEqual(parseUnifiedCache(persistentData).trakt.translation, {});
+});
+
+test("media.videos 引擎非谷歌时原样返回，非数组响应直接透传", async () => {
+    const deeplxRun = await runResponseCase({
+        url: "https://apiz.trakt.tv/movies/1048396/videos",
+        body: readFixture("videos.json"),
+        argument: { translationEngine: "deeplx" },
+    });
+    assert.deepEqual(JSON.parse(deeplxRun.result.body), JSON.parse(readFixture("videos.json")));
+    assert.equal(findGooglePaTranslateLog(deeplxRun.httpLogs), undefined);
+
+    const passThroughRun = await runResponseCase({
+        url: "https://apiz.trakt.tv/movies/1048396/videos",
+        body: "{}",
+        argument: { translationEngine: "google" },
+    });
+    assert.equal(passThroughRun.result.body, undefined);
+});

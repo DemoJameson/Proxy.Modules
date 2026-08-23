@@ -8,7 +8,8 @@ function normalizeTranslation(value) {
 async function translateTextFieldTargets(targets, options = {}) {
     const normalizedTargets = commonUtils.ensureArray(targets);
     const engineEnabled = translationEngine.isTranslationEnabled(options.translationEngine);
-    // 注入的 translateTexts（测试用）不套回退；否则 google 引擎失败后自动回退 DeepLX。
+    // 显式注入的 translateTexts 不套回退：测试注入与需要精确控制回退行为的调用方（如无缓存谷歌兜底）共用此入口；
+    // 未注入时 google 引擎失败后自动回退 DeepLX。
     const translateTexts = options.translateTexts || translationEngine.selectTranslateTextsWithFallback(options.translationEngine);
     const pendingByLanguage = {};
     let changed = false;

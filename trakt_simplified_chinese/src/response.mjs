@@ -1,4 +1,5 @@
 import * as commentsTranslationHandler from "./features/comments-translation.mjs";
+import * as googleFallbackTranslationHandler from "./features/google-fallback-translation.mjs";
 import * as historyEpisodesMergedByShowHandler from "./features/history-episodes-merged-by-show.mjs";
 import * as listsTranslationHandler from "./features/lists-translation.mjs";
 import * as mediaTranslationHandler from "./features/media-translation.mjs";
@@ -164,6 +165,7 @@ function createResponsePhaseRoutes() {
 
         createRoute({ pattern: /^(movies|shows)\/\d+\/watchnow$/i, id: "media.watchnow", handler: playerInjectionTraktHandler.handleWatchnow }),
         createRoute({ pattern: /^episodes\/\d+\/watchnow$/i, id: "episodes.watchnow", handler: playerInjectionTraktHandler.handleWatchnow }),
+        createRoute({ pattern: /^(movies|shows)\/\d+\/videos$/i, id: "media.videos", handler: googleFallbackTranslationHandler.handleMediaVideos }),
 
         createRoute({ pattern: /^shows\/[^/]+\/seasons$/i, id: "shows.seasons", handler: mediaTranslationHandler.handleSeasonEpisodesList }),
 

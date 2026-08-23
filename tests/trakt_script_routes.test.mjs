@@ -1871,6 +1871,8 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["media.watchnow", "https://api.trakt.tv/movies/123/watchnow"],
         ["media.watchnow", "https://api.trakt.tv/shows/123/watchnow"],
         ["episodes.watchnow", "https://api.trakt.tv/episodes/123/watchnow"],
+        ["media.videos", "https://api.trakt.tv/movies/123/videos"],
+        ["media.videos", "https://apiz.trakt.tv/shows/123/videos"],
         ["shows.seasons", "https://api.trakt.tv/shows/123/seasons"],
         ["media.proxySentiments", "https://apiz.trakt.tv/v3/media/movie/123/info/5/version/1"],
         ["media.proxySentiments", "https://apiz.trakt.tv/v3/media/show/123/info/5/version/1"],

@@ -4,6 +4,11 @@ import * as traktTranslationHelper from "../shared/trakt-translation-helper.mjs"
 import * as translationCache from "../shared/translation-cache.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
+import * as googleFallbackTranslation from "./google-fallback-translation.mjs";
+
+function isFieldOverridden(override, field) {
+    return !translationCache.isEmptyTranslationValue(override?.translation?.[field]);
+}
 
 async function handleCurrentSeasonRequest() {
     const context = globalThis.$ctx;
@@ -108,12 +113,18 @@ async function handleMediaDetail() {
     traktTranslationHelper.flushBackendWrites(backendState);
     traktTranslationHelper.applyTranslation(context.userAgent, data, traktTranslationHelper.getCachedTranslation(cache, mediaType, ref), mediaType);
 
+    let override = null;
     try {
-        traktTranslationHelper.applyOverrideToTarget(data, await traktTranslationHelper.getOverrideForTarget(context.env, ref));
+        override = await traktTranslationHelper.getOverrideForTarget(context.env, ref);
+        traktTranslationHelper.applyOverrideToTarget(data, override);
     } catch (error) {
         context.env.log(`Trakt backend override read failed: ${error}`);
     }
 
+    const fallbackPromise = googleFallbackTranslation.applyUncachedGoogleTranslation(context, [
+        { target: data, field: "overview", skip: isFieldOverridden(override, "overview") },
+        { target: data, field: "tagline", skip: isFieldOverridden(override, "tagline") },
+    ]);
     if (traktTranslationHelper.shouldReplaceImages()) {
         await traktTranslationHelper.replaceImagesInPlace(data, mediaType, {
             ...ref,
@@ -123,6 +134,7 @@ async function handleMediaDetail() {
             country: data?.country ?? null,
         });
     }
+    await fallbackPromise;
 
     return { type: "respond", body: JSON.stringify(data) };
 }
@@ -338,7 +350,32 @@ async function handleSeasonEpisodesList() {
             traktTranslationHelper.applyOverrideToTarget(episode, traktTranslationHelper.getOverrideFromTable(overridesTable, ref));
         });
     });
-    await seasonImagePromise;
+    const fallbackFieldTargets = [];
+    seasons.forEach((season) => {
+        const seasonRef = allSeasonRefs.find((ref) => ref.seasonNumber === season.number);
+        if (seasonRef) {
+            fallbackFieldTargets.push({
+                target: season,
+                field: "overview",
+                skip: isFieldOverridden(traktTranslationHelper.getOverrideFromTable(overridesTable, seasonRef), "overview"),
+            });
+        }
+
+        commonUtils.ensureArray(season?.episodes).forEach((episode) => {
+            const ref = {
+                mediaType: mediaTypes.MEDIA_TYPE.EPISODE,
+                showId: target.showId,
+                seasonNumber: episode?.season ?? null,
+                episodeNumber: episode?.number ?? null,
+            };
+            fallbackFieldTargets.push({
+                target: episode,
+                field: "overview",
+                skip: isFieldOverridden(traktTranslationHelper.getOverrideFromTable(overridesTable, ref), "overview"),
+            });
+        });
+    });
+    await Promise.all([googleFallbackTranslation.applyUncachedGoogleTranslation(context, fallbackFieldTargets), seasonImagePromise]);
 
     try {
         return { type: "respond", body: JSON.stringify(seasons) };
