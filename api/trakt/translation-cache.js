@@ -10,21 +10,26 @@ const IMAGE_GROUPS = ["shows", "movies", "seasons"];
 const IMAGE_FIELDS = ["poster", "logo"];
 const TRANSLATION_OVERRIDES_KEY = "trakt:translation:overrides";
 const PARTIAL_FOUND_TTL_SECONDS = 30 * 24 * 60 * 60;
-const NOT_FOUND_TTL_SECONDS = 5 * 24 * 60 * 60;
+const IMAGE_NOT_FOUND_TTL_SECONDS = 3 * 24 * 60 * 60;
+const NOT_FOUND_TTL_SECONDS = 1 * 24 * 60 * 60;
 const DOUBAN_TARGET_TYPES = ["movies", "shows"];
 const DOUBAN_TTL_SECONDS = 30 * 24 * 60 * 60;
 
 const RESPONSE_CACHE_HEADERS = {
     [CACHE_STATUS.FOUND]: {
         "Cache-Control": "public, max-age=300",
-        "CDN-Cache-Control": "public, s-maxage=3600, stale-while-revalidate=86400",
-        "Vercel-CDN-Cache-Control": "public, s-maxage=86400, stale-while-revalidate=86400",
+        "CDN-Cache-Control": "public, s-maxage=86400",
+        "Vercel-CDN-Cache-Control": "public, s-maxage=86400",
     },
     [CACHE_STATUS.PARTIAL_FOUND]: {
-        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Cache-Control": "public, max-age=60",
+        "CDN-Cache-Control": "public, s-maxage=60",
+        "Vercel-CDN-Cache-Control": "public, s-maxage=60",
     },
     [CACHE_STATUS.NOT_FOUND]: {
-        "Cache-Control": "public, max-age=0, must-revalidate",
+        "Cache-Control": "public, max-age=60",
+        "CDN-Cache-Control": "public, s-maxage=60",
+        "Vercel-CDN-Cache-Control": "public, s-maxage=60",
     },
 };
 
@@ -147,7 +152,7 @@ function normalizeImageField(entry, now = Date.now()) {
         const expiresAt = Number.isFinite(Number(entry?.expiresAt)) ? Number(entry.expiresAt) : now + PARTIAL_FOUND_TTL_SECONDS * 1000;
         return { status, url, expiresAt };
     }
-    const expiresAt = Number.isFinite(Number(entry?.expiresAt)) ? Number(entry.expiresAt) : now + NOT_FOUND_TTL_SECONDS * 1000;
+    const expiresAt = Number.isFinite(Number(entry?.expiresAt)) ? Number(entry.expiresAt) : now + IMAGE_NOT_FOUND_TTL_SECONDS * 1000;
     return { status: CACHE_STATUS.NOT_FOUND, expiresAt };
 }
 
@@ -765,7 +770,7 @@ function buildWriteManyImageCommands(group, entriesById, mode = "chinese") {
         const hasNotFound = fields.some((field) => field?.status === CACHE_STATUS.NOT_FOUND);
         const hasPartialFound = fields.some((field) => field?.status === CACHE_STATUS.PARTIAL_FOUND);
         if (hasNotFound) {
-            ttlCommands.push(["EXPIRE", key, NOT_FOUND_TTL_SECONDS]);
+            ttlCommands.push(["EXPIRE", key, IMAGE_NOT_FOUND_TTL_SECONDS]);
         } else if (hasPartialFound) {
             ttlCommands.push(["EXPIRE", key, PARTIAL_FOUND_TTL_SECONDS]);
         }

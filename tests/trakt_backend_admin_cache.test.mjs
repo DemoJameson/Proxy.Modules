@@ -487,8 +487,8 @@ test("backend images POST 写入 FOUND/NOT_FOUND 并为任一 NOT_FOUND 设置 5
         assert.equal(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).poster.status, 3);
         assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).poster.expiresAt));
         assert.equal(getJsonValue(store, ORIGINAL_IMAGE_MOVIE_123).poster.url, "https://image.tmdb.org/t/p/original/original-movie.jpg");
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 5 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 5 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 3 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 3 * 24 * 60 * 60));
     });
 });
 
@@ -542,7 +542,7 @@ test("backend images POST 为 PARTIAL_FOUND 设置 30 天 TTL，NOT_FOUND 优先
         assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.expiresAt));
         assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 30 * 24 * 60 * 60));
         assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 30 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SHOW_555 && command[2] === 5 * 24 * 60 * 60));
+        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SHOW_555 && command[2] === 3 * 24 * 60 * 60));
     });
 });
 
@@ -820,7 +820,7 @@ test("backend POST writes grouped auto entries with JSON.MSET and keeps TTL rule
         assert.equal(store.persistCommands, undefined);
         assert.deepEqual(store.expireCommands, [
             ["EXPIRE", "trakt:translation:movies:201", 2592000],
-            ["EXPIRE", "trakt:translation:episodes:301:1:1", 432000],
+            ["EXPIRE", "trakt:translation:episodes:301:1:1", 86400],
         ]);
         assert.equal(store.setCommands, undefined);
         assert.equal(getJsonValue(store, "trakt:translation:shows:101").expiresAt, null);

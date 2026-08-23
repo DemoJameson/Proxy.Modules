@@ -175,7 +175,7 @@ test("comment-translations GET 全部未命中时返回空对象并设置 NOT_FO
         assert.deepEqual(res.jsonBody, {
             comments: {},
         });
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
     });
 });
 

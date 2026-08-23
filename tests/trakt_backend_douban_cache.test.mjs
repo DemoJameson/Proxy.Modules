@@ -190,7 +190,7 @@ test("douban GET 全部未命中时返回空对象并设置 NOT_FOUND 缓存头"
             movies: {},
             shows: {},
         });
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
     });
 });
 
@@ -464,7 +464,7 @@ test("douban GET 丢弃 subject.targetType 与键 targetType 不一致的 entry"
 
         assert.equal(res.statusCode, 200);
         assert.deepEqual(res.jsonBody, { movies: {}, shows: {} });
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
     });
 });
 

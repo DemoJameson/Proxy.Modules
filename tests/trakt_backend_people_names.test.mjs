@@ -178,7 +178,7 @@ test("people-names GET 全部未命中时返回空对象并设置 NOT_FOUND 缓�
         assert.deepEqual(res.jsonBody, {
             people: {},
         });
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
     });
 });
 
@@ -224,9 +224,9 @@ test("people-names GET 返回 google 来源条目并丢弃缺字段的存储条�
                 42: googleEntry,
             },
         });
-        // 请求 2 条仅命中 1 条：部分命中不缓存
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
-        assert.equal(res.headers["Vercel-CDN-Cache-Control"], undefined);
+        // 请求 2 条仅命中 1 条：部分命中仅允许 60 秒短缓存
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60");
     });
 });
 
@@ -248,9 +248,9 @@ test("people-names GET 部分命中时使用 PARTIAL_FOUND 短缓存头", async 
                 42: createPersonNameEntry(),
             },
         });
-        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=0, must-revalidate");
-        assert.equal(res.headers["CDN-Cache-Control"], undefined);
-        assert.equal(res.headers["Vercel-CDN-Cache-Control"], undefined);
+        assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
+        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=60");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60");
     });
 });
 
@@ -277,7 +277,7 @@ test("people-names GET 完整命中时使用 FOUND 长缓存头", async () => {
             },
         });
         assert.deepEqual(res.headers["Cache-Control"], "public, max-age=300");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=86400, stale-while-revalidate=86400");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=86400");
     });
 });
 

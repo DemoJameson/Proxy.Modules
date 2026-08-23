@@ -95,9 +95,23 @@ function normalizeMediaTranslationValue(translation) {
 
 function normalizeMediaTranslationEntry(entry) {
     const translation = normalizeMediaTranslationValue(entry?.translation);
-    const normalized = {
-        status: translationCache.normalizeTranslationStatus(entry?.status),
-    };
+    const status = translationCache.normalizeTranslationStatus(entry?.status);
+    if (status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        // 负缓存条目依赖未过期的 expiresAt，过期或缺失（旧版本数据）时直接丢弃
+        const expiresAt = Number(entry?.expiresAt);
+        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+            return null;
+        }
+        const normalized = { status, expiresAt };
+        if (translation) {
+            normalized.translation = translation;
+        }
+        if (entry?.complete === true) {
+            normalized.complete = true;
+        }
+        return normalized;
+    }
+    const normalized = { status };
     if (translation) {
         normalized.translation = translation;
     }

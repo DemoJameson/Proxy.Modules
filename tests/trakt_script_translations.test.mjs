@@ -727,7 +727,7 @@ test("/movies/:id 缓存字段齐全时不会发起直查", async () => {
 });
 
 test("/movies/:id NOT_FOUND 负缓存时详情页强制直查中文翻译并自愈", async () => {
-    // 持久化里写成 status:0，加载时会被归一化为 NOT_FOUND(3)，等价于一条负缓存记录
+    // 持久化里写成 status:0，加载时会被归一化为 NOT_FOUND(3)，等价于一条未过期的负缓存记录
     const { result, httpLogs, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
         body: readFixture("movie-detail.json"),
@@ -741,7 +741,7 @@ test("/movies/:id NOT_FOUND 负缓存时详情页强制直查中文翻译并自�
         persistentData: createUnifiedPersistentData({
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "movie:123": { status: 0 },
+                    "movie:123": { status: 0, expiresAt: Date.now() + 24 * 60 * 60 * 1000 },
                 }),
             ),
         }),
@@ -771,7 +771,7 @@ test("/movies/:id NOT_FOUND 负缓存（显式 status:3）时详情页同样强�
         persistentData: createUnifiedPersistentData({
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "movie:123": { status: 3 },
+                    "movie:123": { status: 3, expiresAt: Date.now() + 24 * 60 * 60 * 1000 },
                 }),
             ),
         }),
@@ -2075,7 +2075,7 @@ test("TMDb poster 缓存命中时不会重复请求", async () => {
                     },
                     logo: {
                         status: 3,
-                        expiresAt: Date.now() + 5 * 24 * 60 * 60 * 1000,
+                        expiresAt: Date.now() + 3 * 24 * 60 * 60 * 1000,
                     },
                 },
             },

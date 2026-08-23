@@ -44,7 +44,8 @@ const BACKEND_FETCH_MIN_REFS = 3;
 const BACKEND_WRITE_BATCH_SIZE = 50;
 const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const IMAGE_PARTIAL_FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const IMAGE_NOT_FOUND_TTL_MS = 5 * 24 * 60 * 60 * 1000;
+const IMAGE_NOT_FOUND_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const TRANSLATION_NOT_FOUND_TTL_MS = 1 * 24 * 60 * 60 * 1000;
 const BULK_API_MAX_IDS_PER_CATEGORY = 100;
 const BULK_API_MIN_REFS = 10;
 const BULK_API_COUNTRIES = ["cn", "sg", "tw", "hk"];
@@ -180,16 +181,30 @@ function storeTranslationEntry(cache, mediaType, ref, entry) {
     const translation = translationCache.normalizeTranslationPayload(entry?.translation ?? null);
     const status = translationCache.normalizeTranslationStatus(entry?.status);
     const complete = entry?.complete === true;
-    cache[cacheKey] =
+    const storedEntry =
         (status === translationCache.CACHE_STATUS.FOUND || status === translationCache.CACHE_STATUS.PARTIAL_FOUND) && translation
             ? buildTranslationCacheEntry(status, translation, complete)
             : buildTranslationCacheEntry(translationCache.CACHE_STATUS.NOT_FOUND, translation, complete);
+    if (storedEntry.status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        storedEntry.expiresAt = Date.now() + TRANSLATION_NOT_FOUND_TTL_MS;
+    }
+    cache[cacheKey] = storedEntry;
     return cache[cacheKey];
 }
 
 function getCachedTranslation(cache, mediaType, ref) {
     const cacheKey = buildMediaCacheKey(mediaType, ref);
-    return cacheKey ? cache[cacheKey] : null;
+    if (!cacheKey) {
+        return null;
+    }
+    const entry = cache[cacheKey];
+    if (entry?.status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        const expiresAt = Number(entry.expiresAt);
+        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+            return null;
+        }
+    }
+    return entry ?? null;
 }
 
 function buildImageCacheLookupKey(mediaType, ref) {
