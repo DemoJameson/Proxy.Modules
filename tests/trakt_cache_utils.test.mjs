@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { storeTranslationEntry } from "../trakt_simplified_chinese/src/shared/media-translation-backend.mjs";
 import { containsChineseText } from "../trakt_simplified_chinese/src/shared/translation-cache.mjs";
 import {
+    clearCurrentSeason,
     createEmptyUnifiedCache,
     GOOGLE_PEOPLE_CACHE_MAX_BYTES,
     getAuthToken,
@@ -13,6 +15,7 @@ import {
     saveAuthToken,
     saveCache,
     saveCommentTranslationCache,
+    setCurrentSeason,
     setHashedFieldTranslation,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_REV_KEY,
@@ -685,4 +688,100 @@ test("cache utils: normalizeUnifiedCache 过滤 authTokens 中的非法条目", 
     assert.equal(normalized.persistent.authTokens[""], undefined);
     assert.equal(normalized.persistent.authTokens["app-key-empty"], undefined);
     assert.equal(normalized.persistent.authTokens.invalid, undefined);
+});
+
+test("cache utils: storeTranslationEntry 对相同条目不重复标记变更", () => {
+    const cache = {};
+    const ref = { traktId: 101 };
+
+    const first = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "标题" } });
+    assert.equal(first.status, 1);
+
+    const second = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "标题" } });
+    assert.equal(second, first);
+    assert.equal(Object.keys(cache).length, 1);
+
+    const third = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "标题" }, complete: true });
+    assert.notEqual(third, first);
+    assert.equal(third.complete, true);
+});
+
+test("cache utils: storeTranslationEntry 未过期负缓存判同，过期则刷新 TTL", () => {
+    const cache = {};
+    const ref = { traktId: 102 };
+
+    const first = storeTranslationEntry(cache, "movie", ref, { status: 3 });
+    const second = storeTranslationEntry(cache, "movie", ref, { status: 3 });
+    assert.equal(second, first);
+    assert.ok(second.expiresAt > Date.now());
+
+    cache["movie:102"].expiresAt = Date.now() - 1;
+    const refreshed = storeTranslationEntry(cache, "movie", ref, { status: 3 });
+    assert.notEqual(refreshed, first);
+    assert.ok(refreshed.expiresAt > Date.now());
+});
+
+test("cache utils: storeTranslationEntry 翻译内容或状态变化判变", () => {
+    const cache = {};
+    const ref = { traktId: 103 };
+
+    const first = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "旧标题" } });
+    const renamed = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "新标题" } });
+    assert.notEqual(renamed, first);
+
+    const partial = storeTranslationEntry(cache, "movie", ref, { status: 2, translation: { title: "新标题" } });
+    assert.equal(partial.status, 2);
+});
+
+test("cache utils: setCurrentSeason 相同季度不触发整缓存写回", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    setCurrentSeason(env, "123", 2);
+    const storedAfterFirst = env.data[UNIFIED_CACHE_KEY];
+    assert.ok(storedAfterFirst);
+    assert.equal(readStoredUnifiedCache(env).persistent.currentSeason.seasonNumber, 2);
+
+    setCurrentSeason(env, "123", 2);
+    assert.equal(env.data[UNIFIED_CACHE_KEY], storedAfterFirst);
+
+    setCurrentSeason(env, "123", 3);
+    assert.notEqual(env.data[UNIFIED_CACHE_KEY], storedAfterFirst);
+    assert.equal(readStoredUnifiedCache(env).persistent.currentSeason.seasonNumber, 3);
+});
+
+test("cache utils: clearCurrentSeason 已为空时不再写回", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    clearCurrentSeason(env);
+    assert.equal(env.data[UNIFIED_CACHE_REV_KEY], JSON.stringify(100));
+});
+
+test("cache utils: 加载时丢弃过期负缓存条目并触发修复写回", () => {
+    const stored = createStoredUnifiedCache(100);
+    stored.trakt.translation["movie:1"] = { status: 3, expiresAt: Date.now() - 1000 };
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: stored,
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    const cache = loadCache(env);
+    assert.equal(cache["movie:1"], undefined);
+    assert.equal(readStoredUnifiedCache(env).trakt.translation["movie:1"], undefined);
+});
+
+test("cache utils: 正常缓存加载不触发修复写回", () => {
+    const env = createEnv({
+        [UNIFIED_CACHE_KEY]: createStoredUnifiedCache(100),
+        [UNIFIED_CACHE_REV_KEY]: 100,
+    });
+
+    loadUnifiedCache(env);
+    assert.equal(env.data[UNIFIED_CACHE_KEY], JSON.stringify(createStoredUnifiedCache(100)));
+    assert.equal(env.getjsonCallsFor(UNIFIED_CACHE_KEY), 1);
 });

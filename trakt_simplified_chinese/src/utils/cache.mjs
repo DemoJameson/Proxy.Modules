@@ -9,6 +9,7 @@ const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
+const PRUNE_SAFETY_REMEASURE_INTERVAL = 16;
 const PRUNE_PRIORITY = {
     "google.comments": 1,
     "google.sentiments": 1,
@@ -451,6 +452,47 @@ function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VE
     return nextCache;
 }
 
+// 漂移检测：以键数/引用/标量比较代替整缓存双重序列化。
+// 条目内同键数的字段漂移不在此处触发加载期修复，读取仍走归一化视图，下一次保存必然收敛。
+function detectUnifiedCacheDrift(rawCache, nextCache) {
+    const sourceTrakt = commonUtils.ensureObject(rawCache.trakt);
+    const sourceGoogle = commonUtils.ensureObject(rawCache.google);
+    const sourcePersistent = commonUtils.ensureObject(rawCache.persistent);
+
+    const entryBucketPairs = [
+        [sourceTrakt.translation, nextCache.trakt.translation],
+        [sourceTrakt.linkIds, nextCache.trakt.linkIds],
+        [sourceTrakt.image, nextCache.trakt.image],
+        [sourceGoogle.comments, nextCache.google.comments],
+        [sourceGoogle.sentiments, nextCache.google.sentiments],
+        [sourceGoogle.people, nextCache.google.people],
+        [sourceGoogle.list, nextCache.google.list],
+        [sourcePersistent.historyShows, nextCache.persistent.historyShows],
+        [rawCache.douban, nextCache.douban],
+    ];
+    if (entryBucketPairs.some(([source, normalized]) => Object.keys(commonUtils.ensureObject(source)).length !== Object.keys(normalized).length)) {
+        return true;
+    }
+
+    const sourceAuthTokens = commonUtils.ensureObject(sourcePersistent.authTokens);
+    const nextAuthTokens = nextCache.persistent.authTokens;
+    const sourceAuthTokenKeys = Object.keys(sourceAuthTokens);
+    if (sourceAuthTokenKeys.length !== Object.keys(nextAuthTokens).length || sourceAuthTokenKeys.some((key) => sourceAuthTokens[key] !== nextAuthTokens[key])) {
+        return true;
+    }
+
+    const sourceOverrides = commonUtils.ensureObject(sourcePersistent.translationOverrides);
+    if (
+        ["shows", "movies", "episodes"].some(
+            (group) => Object.keys(commonUtils.ensureObject(sourceOverrides[group])).length !== Object.keys(nextCache.persistent.translationOverrides[group]).length,
+        )
+    ) {
+        return true;
+    }
+
+    return rawCache.rev !== nextCache.rev || rawCache.maxBytes !== nextCache.maxBytes;
+}
+
 function estimateCacheBytes(env, value) {
     const serialized = env.toStr(value, "");
     return serialized ? serialized.length : 0;
@@ -541,7 +583,7 @@ function loadUnifiedCacheSnapshot(
             sidecarRev: bodyRev,
             loadedRev: bodyRev,
             isValid: true,
-            needsRepair: env.toStr(rawCache, "") !== env.toStr(normalizedCache, ""),
+            needsRepair: detectUnifiedCacheDrift(rawCache, normalizedCache),
             snapshotConsistent: true,
         };
     }
@@ -553,7 +595,7 @@ function loadUnifiedCacheSnapshot(
         sidecarRev,
         loadedRev: bodyRev,
         isValid: true,
-        needsRepair: env.toStr(rawCache, "") !== env.toStr(normalizedCache, ""),
+        needsRepair: detectUnifiedCacheDrift(rawCache, normalizedCache),
         snapshotConsistent: bodyRev === sidecarRev,
     };
 }
@@ -567,7 +609,7 @@ function persistUnifiedCache(
     unifiedCacheRevKey = UNIFIED_CACHE_REV_KEY,
     baseRev = 0,
 ) {
-    const nextCache = pruneUnifiedCacheToLimit(env, cache, unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
+    const nextCache = pruneNormalizedCacheToLimit(env, cache, unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
     const nextRev = buildNextUnifiedCacheRev(baseRev);
     nextCache.rev = nextRev;
     env.setjson(nextCache, unifiedCacheKey);
@@ -704,6 +746,11 @@ function prunePeopleCacheToQuota(env, cache, maxBytes = GOOGLE_PEOPLE_CACHE_MAX_
         return;
     }
 
+    // 未超配额时整桶估算一次即可，避免每次保存的逐条序列化
+    if (estimateCacheBytes(env, cache.google.people) <= limit) {
+        return;
+    }
+
     const peopleEntries = sortPrunableEntries(
         Object.entries(commonUtils.ensureObject(cache.google.people)).map(([key, entry]) => ({
             scope: "google",
@@ -721,31 +768,115 @@ function prunePeopleCacheToQuota(env, cache, maxBytes = GOOGLE_PEOPLE_CACHE_MAX_
         estimatedBytes = Math.max(estimatedBytes - target.estimatedBytes, 0);
     }
 
-    while (estimateEntryMapBytes(env, cache.google.people) > limit && peopleEntries.length > 0) {
+    // 安全网以真实序列化复核估算偏差，按间隔批量重测避免每删一条全量序列化
+    if (estimateCacheBytes(env, cache.google.people) <= limit) {
+        return;
+    }
+    let deletionsSinceMeasure = 0;
+    while (peopleEntries.length > 0) {
         deletePrunableEntry(cache, peopleEntries.shift());
+        deletionsSinceMeasure += 1;
+        if (deletionsSinceMeasure < PRUNE_SAFETY_REMEASURE_INTERVAL) {
+            continue;
+        }
+        deletionsSinceMeasure = 0;
+        if (estimateCacheBytes(env, cache.google.people) <= limit) {
+            return;
+        }
     }
 }
 
-function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
-    const nextCache = normalizeUnifiedCache(cache, schemaVersion, maxBytes);
-    const limit = Number.isFinite(Number(nextCache.maxBytes)) ? Number(nextCache.maxBytes) : maxBytes;
+function isUnifiedCacheSkeletonValid(cache) {
+    return (
+        commonUtils.isPlainObject(cache) &&
+        commonUtils.isPlainObject(cache.trakt) &&
+        commonUtils.isPlainObject(cache.trakt.translation) &&
+        commonUtils.isPlainObject(cache.trakt.linkIds) &&
+        commonUtils.isPlainObject(cache.trakt.image) &&
+        commonUtils.isPlainObject(cache.google) &&
+        commonUtils.isPlainObject(cache.google.comments) &&
+        commonUtils.isPlainObject(cache.google.sentiments) &&
+        commonUtils.isPlainObject(cache.google.people) &&
+        commonUtils.isPlainObject(cache.google.list) &&
+        commonUtils.isPlainObject(cache.douban) &&
+        commonUtils.isPlainObject(cache.persistent)
+    );
+}
 
+// 逐出只做结构性浅克隆：删除不能泄漏到调用方仍持有的桶对象上，
+// 否则"保存时被裁剪"的条目会从当前请求的内存缓存中消失。
+function cloneUnifiedCacheForPrune(cache) {
+    return {
+        ...cache,
+        trakt: {
+            ...cache.trakt,
+            translation: { ...cache.trakt.translation },
+            linkIds: { ...cache.trakt.linkIds },
+            image: { ...cache.trakt.image },
+        },
+        google: {
+            ...cache.google,
+            comments: { ...cache.google.comments },
+            sentiments: { ...cache.google.sentiments },
+            people: { ...cache.google.people },
+            list: { ...cache.google.list },
+        },
+        douban: { ...cache.douban },
+        persistent: {
+            ...cache.persistent,
+            historyShows: { ...cache.persistent.historyShows },
+        },
+    };
+}
+
+// 调用方缓存恒为归一化产物（load 返回归一化视图、saveX 先归一化各自桶、
+// storeTranslationEntry 写入即规范形状）：跳过整缓存重归一化，
+// 未超限时也不再逐条估算，仅超限时克隆并构建逐出清单。
+function pruneNormalizedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
+    if (!isUnifiedCacheSkeletonValid(cache)) {
+        return pruneUnifiedCacheToLimit(env, cache, schemaVersion, maxBytes);
+    }
+
+    const peopleOverQuota = estimateCacheBytes(env, cache.google.people) > GOOGLE_PEOPLE_CACHE_MAX_BYTES;
+    const estimatedBytes = estimateCacheBytes(env, cache);
+    if (estimatedBytes <= (Number.isFinite(Number(cache.maxBytes)) ? Number(cache.maxBytes) : maxBytes) && !peopleOverQuota) {
+        return cache;
+    }
+
+    const nextCache = cloneUnifiedCacheForPrune(cache);
     prunePeopleCacheToQuota(env, nextCache);
 
+    const limit = Number.isFinite(Number(nextCache.maxBytes)) ? Number(nextCache.maxBytes) : maxBytes;
     const prunableEntries = buildPrunableEntries(env, nextCache);
-
-    let estimatedBytes = estimateCacheBytes(env, nextCache);
-    while (estimatedBytes > limit && prunableEntries.length > 0) {
+    let remainingBytes = estimateCacheBytes(env, nextCache);
+    while (remainingBytes > limit && prunableEntries.length > 0) {
         const target = prunableEntries.shift();
         deletePrunableEntry(nextCache, target);
-        estimatedBytes = Math.max(estimatedBytes - target.estimatedBytes, 0);
+        remainingBytes = Math.max(remainingBytes - target.estimatedBytes, 0);
     }
 
-    while (estimateCacheBytes(env, nextCache) > limit && prunableEntries.length > 0) {
+    // 安全网以真实序列化复核估算偏差，按间隔批量重测避免每删一条全量序列化
+    if (estimateCacheBytes(env, nextCache) <= limit) {
+        return nextCache;
+    }
+    let deletionsSinceMeasure = 0;
+    while (prunableEntries.length > 0) {
         deletePrunableEntry(nextCache, prunableEntries.shift());
+        deletionsSinceMeasure += 1;
+        if (deletionsSinceMeasure < PRUNE_SAFETY_REMEASURE_INTERVAL) {
+            continue;
+        }
+        deletionsSinceMeasure = 0;
+        if (estimateCacheBytes(env, nextCache) <= limit) {
+            return nextCache;
+        }
     }
-
     return nextCache;
+}
+
+function pruneUnifiedCacheToLimit(env, cache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
+    const normalizedCache = normalizeUnifiedCache(cache, schemaVersion, maxBytes);
+    return pruneNormalizedCacheToLimit(env, normalizedCache, schemaVersion, maxBytes);
 }
 
 function loadUnifiedCache(
@@ -1009,6 +1140,15 @@ function setCurrentSeason(env, showId, seasonNumber) {
         showId: String(showId),
         seasonNumber: Number(seasonNumber),
     };
+    const currentSeason = unifiedCache.persistent.currentSeason;
+    // seasons 请求每个请求都会走到这里：相同季度直接跳过整缓存写回
+    if (
+        commonUtils.isPlainObject(currentSeason) &&
+        String(currentSeason.showId) === nextCurrentSeason.showId &&
+        Number(currentSeason.seasonNumber) === nextCurrentSeason.seasonNumber
+    ) {
+        return;
+    }
     unifiedCache.persistent.currentSeason = {
         ...nextCurrentSeason,
     };
@@ -1022,6 +1162,9 @@ function setCurrentSeason(env, showId, seasonNumber) {
 
 function clearCurrentSeason(env) {
     const unifiedCache = loadUnifiedCache(env);
+    if (unifiedCache.persistent.currentSeason === null) {
+        return;
+    }
     unifiedCache.persistent.currentSeason = null;
     saveUnifiedCache(env, unifiedCache, UNIFIED_CACHE_KEY, UNIFIED_CACHE_SCHEMA_VERSION, UNIFIED_CACHE_MAX_BYTES, {
         owner: {

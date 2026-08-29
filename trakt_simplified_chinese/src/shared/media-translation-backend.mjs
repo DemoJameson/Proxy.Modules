@@ -137,23 +137,49 @@ function buildMediaCacheKey(mediaType, ref) {
     return lookupKey ? `${mediaType}:${lookupKey}` : "";
 }
 
+// 相同条目不重复标记缓存变更：status/complete/translation 一致即视为相同。
+// 负缓存的 expiresAt 承载 TTL：未过期视为相同；已过期必须重写刷新 TTL，
+// 否则会陷入"过期→重取→判同→不保存→再过期"的循环。
+function isSameStoredTranslationEntry(current, next) {
+    if (!commonUtils.isPlainObject(current)) {
+        return false;
+    }
+    if (current.status !== next.status || (current.complete === true) !== (next.complete === true)) {
+        return false;
+    }
+    if (!translationCache.areTranslationsEqual(current.translation, next.translation)) {
+        return false;
+    }
+    if (next.status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        const expiresAt = Number(current.expiresAt);
+        return Number.isFinite(expiresAt) && expiresAt > Date.now();
+    }
+    return true;
+}
+
 function storeTranslationEntry(cache, mediaType, ref, entry) {
     const cacheKey = buildMediaCacheKey(mediaType, ref);
     if (!cacheKey) {
         return null;
     }
     const translation = translationCache.normalizeTranslationPayload(entry?.translation ?? null);
+    // normalizeTranslationPayload 保留 null 字段，落盘前剥离空值，与加载期归一化的产出形状保持一致
+    const canonicalTranslation = translation ? Object.fromEntries(Object.entries(translation).filter(([, value]) => !translationCache.isEmptyTranslationValue(value))) : null;
     const status = translationCache.normalizeTranslationStatus(entry?.status);
     const complete = entry?.complete === true;
     const storedEntry =
-        (status === translationCache.CACHE_STATUS.FOUND || status === translationCache.CACHE_STATUS.PARTIAL_FOUND) && translation
-            ? buildTranslationCacheEntry(status, translation, complete)
-            : buildTranslationCacheEntry(translationCache.CACHE_STATUS.NOT_FOUND, translation, complete);
+        (status === translationCache.CACHE_STATUS.FOUND || status === translationCache.CACHE_STATUS.PARTIAL_FOUND) && canonicalTranslation
+            ? buildTranslationCacheEntry(status, canonicalTranslation, complete)
+            : buildTranslationCacheEntry(translationCache.CACHE_STATUS.NOT_FOUND, canonicalTranslation, complete);
     if (storedEntry.status === translationCache.CACHE_STATUS.NOT_FOUND) {
         storedEntry.expiresAt = Date.now() + TRANSLATION_NOT_FOUND_TTL_MS;
     }
+    const current = cache[cacheKey];
+    if (isSameStoredTranslationEntry(current, storedEntry)) {
+        return current;
+    }
     cache[cacheKey] = storedEntry;
-    return cache[cacheKey];
+    return storedEntry;
 }
 
 function getCachedTranslation(cache, mediaType, ref) {
