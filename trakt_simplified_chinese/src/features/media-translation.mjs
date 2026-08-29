@@ -24,7 +24,7 @@ async function handleCurrentSeasonRequest() {
 async function handleDirectMediaList() {
     const context = globalThis.$ctx;
     const sourceBody = context.responseBody;
-    const parsed = JSON.parse(sourceBody);
+    const parsed = commonUtils.parseJsonBody(sourceBody);
     if (commonUtils.isNotArray(parsed) || parsed.length === 0) {
         return { type: "respond", body: sourceBody };
     }
@@ -40,7 +40,7 @@ async function handleWrapperMediaList() {
 async function handleWrapperMediaObject() {
     const context = globalThis.$ctx;
     const sourceBody = context.responseBody;
-    const parsed = JSON.parse(sourceBody);
+    const parsed = commonUtils.parseJsonBody(sourceBody);
     if (!commonUtils.isPlainObject(parsed) || (!parsed.show && !parsed.episode && !parsed.movie)) {
         return { type: "respond", body: sourceBody };
     }
@@ -52,7 +52,7 @@ async function handleWrapperMediaObject() {
 
 async function handleMediaDetail() {
     const context = globalThis.$ctx;
-    const data = JSON.parse(context.responseBody);
+    const data = commonUtils.parseJsonBody(context.responseBody);
     if (!commonUtils.isPlainObject(data)) {
         return { type: "passThrough" };
     }
@@ -141,7 +141,7 @@ async function handleMediaDetail() {
 
 async function handleTranslations() {
     const context = globalThis.$ctx;
-    const arr = JSON.parse(context.responseBody);
+    const arr = commonUtils.parseJsonBody(context.responseBody);
     if (commonUtils.isNotArray(arr) || arr.length === 0) {
         return { type: "passThrough" };
     }
@@ -183,7 +183,7 @@ async function handleTranslations() {
 async function handleSeasonEpisodesList() {
     const context = globalThis.$ctx;
     const target = traktTranslationHelper.resolveSeasonListTarget(context.url);
-    const seasons = JSON.parse(context.responseBody);
+    const seasons = commonUtils.parseJsonBody(context.responseBody);
     if (!target || commonUtils.isNotArray(seasons) || seasons.length === 0) {
         return { type: "passThrough" };
     }
@@ -385,7 +385,7 @@ async function handleSeasonEpisodesList() {
 }
 
 async function handleMonthlyReview() {
-    const data = JSON.parse(globalThis.$ctx.responseBody);
+    const data = commonUtils.parseJsonBody(globalThis.$ctx.responseBody);
     const firstWatched = data?.first_watched;
     if (!commonUtils.isPlainObject(data) || !commonUtils.isPlainObject(firstWatched) || (!firstWatched.show && !firstWatched.movie && !firstWatched.episode)) {
         return { type: "passThrough" };

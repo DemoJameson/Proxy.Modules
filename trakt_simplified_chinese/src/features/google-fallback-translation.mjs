@@ -51,7 +51,7 @@ async function applyUncachedGoogleTranslation(context, fieldTargets) {
 
 async function handleMediaVideos() {
     const context = globalThis.$ctx;
-    const videos = JSON.parse(context.responseBody);
+    const videos = commonUtils.parseJsonBody(context.responseBody);
     if (commonUtils.isNotArray(videos) || videos.length === 0) {
         return { type: "passThrough" };
     }

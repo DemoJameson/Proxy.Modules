@@ -364,7 +364,7 @@ async function translateCommentsInPlace(payload, options = {}) {
 }
 
 async function handleComments() {
-    const comments = JSON.parse(globalThis.$ctx.responseBody);
+    const comments = commonUtils.parseJsonBody(globalThis.$ctx.responseBody);
     const hasCommentPayload =
         (commonUtils.isArray(comments) && comments.length > 0) ||
         (commonUtils.isPlainObject(comments) && commonUtils.isNonNullish(comments.id) && typeof comments.comment === "string");
@@ -380,7 +380,7 @@ async function handleComments() {
 }
 
 async function handleRecentCommentsList() {
-    const data = JSON.parse(globalThis.$ctx.responseBody);
+    const data = commonUtils.parseJsonBody(globalThis.$ctx.responseBody);
     if (commonUtils.isNotArray(data) || data.length === 0) {
         return { type: "passThrough" };
     }

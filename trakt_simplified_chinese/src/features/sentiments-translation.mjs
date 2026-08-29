@@ -407,7 +407,7 @@ function applyTranslatedCacheMetadata(items) {
 
 async function handleSentiments() {
     const context = globalThis.$ctx;
-    const data = JSON.parse(context.responseBody);
+    const data = commonUtils.parseJsonBody(context.responseBody);
     if (!commonUtils.isPlainObject(data)) {
         return { type: "passThrough" };
     }

@@ -340,7 +340,10 @@ function resolveDirectRedirectLocation(url) {
 
 async function handleWatchnow() {
     const context = globalThis.$ctx;
-    const payload = JSON.parse(context.responseBody);
+    const payload = commonUtils.parseJsonBody(context.responseBody);
+    if (!payload || typeof payload !== "object") {
+        return { type: "passThrough" };
+    }
     const target = resolveWatchnowTarget(context.url);
     if (!target) {
         return { type: "passThrough" };
@@ -355,7 +358,10 @@ async function handleWatchnow() {
 }
 
 async function handleWatchnowSources() {
-    const payload = JSON.parse(globalThis.$ctx.responseBody);
+    const payload = commonUtils.parseJsonBody(globalThis.$ctx.responseBody);
+    if (!payload || typeof payload !== "object") {
+        return { type: "passThrough" };
+    }
     const orderedPlayerTypes = globalThis.$ctx.argument?.orderedPlayerTypes;
     return {
         type: "respond",
@@ -364,7 +370,7 @@ async function handleWatchnowSources() {
 }
 
 async function handleUserSettings() {
-    const data = JSON.parse(globalThis.$ctx.responseBody);
+    const data = commonUtils.parseJsonBody(globalThis.$ctx.responseBody);
     const argument = globalThis.$ctx.argument;
     const orderedPlayerTypes = argument?.orderedPlayerTypes;
     const fakeVipEnabled = argument?.fakeVipEnabled ?? true;

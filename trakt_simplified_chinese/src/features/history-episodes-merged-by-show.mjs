@@ -176,7 +176,7 @@ function processMergedHistoryEpisodeListBody(sourceBody, url) {
     }
 
     try {
-        return JSON.stringify(filterHistoryPagesWithCache(mergeHistoryEpisodesByShow(JSON.parse(sourceBody)), resolvedUrl));
+        return JSON.stringify(filterHistoryPagesWithCache(mergeHistoryEpisodesByShow(commonUtils.parseJsonBody(sourceBody)), resolvedUrl));
     } catch (error) {
         context.env.log(`Trakt history episodes merge-by-show failed: ${error}`);
         return sourceBody;

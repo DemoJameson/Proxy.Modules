@@ -134,7 +134,10 @@ async function handleTmdbProviderCatalog() {
         return { type: "passThrough" };
     }
 
-    const payload = JSON.parse(globalThis.$ctx.responseBody);
+    const payload = commonUtils.parseJsonBody(globalThis.$ctx.responseBody);
+    if (!payload || typeof payload !== "object") {
+        return { type: "passThrough" };
+    }
     const orderedPlayerTypes = globalThis.$ctx.argument?.orderedPlayerTypes;
     return {
         type: "respond",
@@ -163,7 +166,7 @@ async function handleTmdbDetailWatchProviders() {
         return { type: "passThrough" };
     }
 
-    const payload = JSON.parse(context.responseBody);
+    const payload = commonUtils.parseJsonBody(context.responseBody);
     if (!injectTmdbWatchProviders(payload, source, target)) {
         return { type: "passThrough" };
     }

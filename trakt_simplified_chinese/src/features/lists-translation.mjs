@@ -119,7 +119,7 @@ function collectListTranslationEntries(lists) {
 
 async function handleList() {
     const context = globalThis.$ctx;
-    const lists = JSON.parse(context.responseBody);
+    const lists = commonUtils.parseJsonBody(context.responseBody);
     if (commonUtils.isNotArray(lists) || lists.length === 0) {
         return { type: "passThrough" };
     }

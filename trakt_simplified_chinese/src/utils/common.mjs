@@ -142,6 +142,19 @@ function computeStringHash(value) {
     return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+function parseJsonBody(body, fallbackValue = null) {
+    if (typeof body !== "string" || body.length === 0) {
+        return fallbackValue;
+    }
+
+    try {
+        return JSON.parse(body);
+    } catch (e) {
+        void e;
+        return fallbackValue;
+    }
+}
+
 function decodeBase64Value(value) {
     if (typeof value !== "string" || !value) {
         return "";
@@ -186,6 +199,7 @@ export {
     normalizePathname,
     parseArgumentValue,
     parseBooleanArgument,
+    parseJsonBody,
     parseNumberArgument,
     parseQueryParams,
     parseUrlParts,
