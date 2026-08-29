@@ -32,12 +32,22 @@ function normalizeImageLanguage(language) {
     return languages.length > 0 ? languages.join(",") : "zh";
 }
 
+function normalizeDetailMediaType(mediaType) {
+    if (mediaType === mediaTypes.MEDIA_TYPE.MOVIE) {
+        return "movie";
+    }
+    if (mediaType === mediaTypes.MEDIA_TYPE.SHOW) {
+        return "tv";
+    }
+    return "";
+}
+
 function fetchDetails(mediaType, tmdbId) {
     if (commonUtils.isNullish(tmdbId)) {
         return Promise.resolve(null);
     }
 
-    const normalizedMediaType = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "movie" : mediaType === mediaTypes.MEDIA_TYPE.SHOW ? "tv" : "";
+    const normalizedMediaType = normalizeDetailMediaType(mediaType);
     if (!normalizedMediaType) {
         return Promise.resolve(null);
     }
@@ -45,12 +55,34 @@ function fetchDetails(mediaType, tmdbId) {
     return httpUtils.fetchJson(`${TMDB_API_BASE_URL}/${normalizedMediaType}/${tmdbId}?api_key=${TMDB_API_KEY}`, null, false);
 }
 
+function fetchDetailsWithImages(mediaType, tmdbId) {
+    if (commonUtils.isNullish(tmdbId)) {
+        return Promise.resolve(null);
+    }
+
+    const normalizedMediaType = normalizeDetailMediaType(mediaType);
+    if (!normalizedMediaType) {
+        return Promise.resolve(null);
+    }
+
+    // 不带 language 参数：附加的 images 为全量，交由客户端按偏好语言本地过滤。
+    return httpUtils.fetchJson(`${TMDB_API_BASE_URL}/${normalizedMediaType}/${tmdbId}?append_to_response=images&api_key=${TMDB_API_KEY}`, null, false);
+}
+
+function extractTmdbImagesPayload(detailPayload) {
+    const images = commonUtils.isPlainObject(detailPayload?.images) ? detailPayload.images : {};
+    return {
+        posters: commonUtils.ensureArray(images.posters),
+        logos: commonUtils.ensureArray(images.logos),
+    };
+}
+
 function fetchImages(mediaType, tmdbId, language = "zh") {
     if (commonUtils.isNullish(tmdbId)) {
         return Promise.resolve(null);
     }
 
-    const normalizedMediaType = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "movie" : mediaType === mediaTypes.MEDIA_TYPE.SHOW ? "tv" : "";
+    const normalizedMediaType = normalizeDetailMediaType(mediaType);
     if (!normalizedMediaType) {
         return Promise.resolve(null);
     }
@@ -96,4 +128,15 @@ function buildPosterImageUrl(filePath, size = "w780") {
     return buildImageUrl(filePath, size);
 }
 
-export { buildImageUrl, buildPosterImageUrl, fetchCredits, fetchDetails, fetchImages, fetchPerson, fetchSeasonImages, resizeImageUrl };
+export {
+    buildImageUrl,
+    buildPosterImageUrl,
+    extractTmdbImagesPayload,
+    fetchCredits,
+    fetchDetails,
+    fetchDetailsWithImages,
+    fetchImages,
+    fetchPerson,
+    fetchSeasonImages,
+    resizeImageUrl,
+};

@@ -127,7 +127,7 @@ async function translateOversizedText(text, sourceLanguage) {
             }
             try {
                 return await translateDeepLxText(payloadText, sourceLanguage, [item.context]);
-            } catch (e) {
+            } catch {
                 // 分段失败以空串兜底，不再因单段失败丢弃整条译文（其余分段仍保留）。
                 return "";
             }

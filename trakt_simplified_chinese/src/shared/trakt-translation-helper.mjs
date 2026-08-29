@@ -295,18 +295,25 @@ function collectImageTargets(items, mediaConfig) {
 }
 
 async function filterReplaceableImageTargets(targets) {
+    // skip 检查彼此独立，并行解析避免列表流逐条串行等待详情请求。
+    const checks = await Promise.all(
+        targets.map(async (target) => ({
+            target,
+            key: buildImageCacheKey(target.mediaType, target.ref),
+            skipped: await shouldSkipCurrentOriginalImages(target.mediaType, target.ref),
+        })),
+    );
     const skippedKeys = {};
     const filteredTargets = [];
-    for (const target of targets) {
-        const key = buildImageCacheKey(target.mediaType, target.ref);
-        if (await shouldSkipCurrentOriginalImages(target.mediaType, target.ref)) {
+    checks.forEach(({ target, key, skipped }) => {
+        if (skipped) {
             if (key) {
                 skippedKeys[key] = true;
             }
-            continue;
+            return;
         }
         filteredTargets.push(target);
-    }
+    });
     return { skippedKeys, targets: filteredTargets };
 }
 

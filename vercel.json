@@ -1,36 +1,36 @@
 {
-  "rewrites": [
-    {
-      "source": "/admin",
-      "destination": "/admin.html"
+    "rewrites": [
+        {
+            "source": "/admin",
+            "destination": "/admin.html"
+        },
+        {
+            "source": "/admin/",
+            "destination": "/admin.html"
+        }
+    ],
+    "functions": {
+        "api/redirect.js": {
+            "maxDuration": 10
+        },
+        "api/trakt/translations.js": {
+            "maxDuration": 30
+        },
+        "api/trakt/images.js": {
+            "maxDuration": 30
+        },
+        "api/trakt/credits.js": {
+            "maxDuration": 30
+        },
+        "api/trakt/people-names.js": {
+            "maxDuration": 30
+        },
+        "api/trakt/comment-translations.js": {
+            "maxDuration": 30
+        },
+        "api/trakt/list-translations.js": {
+            "maxDuration": 30
+        }
     },
-    {
-      "source": "/admin/",
-      "destination": "/admin.html"
-    }
-  ],
-  "functions": {
-    "api/redirect.js": {
-      "maxDuration": 10
-    },
-    "api/trakt/translations.js": {
-      "maxDuration": 30
-    },
-    "api/trakt/images.js": {
-      "maxDuration": 30
-    },
-    "api/trakt/credits.js": {
-      "maxDuration": 30
-    },
-    "api/trakt/people-names.js": {
-      "maxDuration": 30
-    },
-    "api/trakt/comment-translations.js": {
-      "maxDuration": 30
-    },
-    "api/trakt/list-translations.js": {
-      "maxDuration": 30
-    }
-  },
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- api/ lib/ public/ vercel.json"
+    "ignoreCommand": "git diff --quiet HEAD^ HEAD -- api/ lib/ public/ vercel.json"
 }

@@ -9,6 +9,8 @@ import * as translationCache from "./translation-cache.mjs";
 
 const IMAGE_PARTIAL_FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const IMAGE_NOT_FOUND_TTL_MS = 3 * 24 * 60 * 60 * 1000;
+const IMAGE_PREFERENCE_DETAIL_MEMO_TTL_MS = 30 * 1000;
+const IMAGE_PREFERENCE_DETAIL_MEMO_LIMIT = 200;
 
 const IMAGE_REGION_PRIORITY = ["cn", "sg", "tw", "hk"];
 const IMAGE_FIELD = {
@@ -252,6 +254,61 @@ function buildImageFieldEntry(image, preference) {
     };
 }
 
+const IMAGE_PREFERENCE_DETAIL_MEMO = new Map();
+const IMAGE_PREFERENCE_DETAIL_EMPTY = Object.freeze({ original_language: undefined, origin_country: [], production_countries: [] });
+
+// memo 值是进行中的 Promise：并发同 key 调用（如多季列表共享同一 show 详情）只发一次请求；Promise 永不 reject，失败以 EMPTY 负缓存。
+function readImagePreferenceDetailMemo(detailMediaType, tmdbId) {
+    const memoKey = `${detailMediaType}:${tmdbId}`;
+    const entry = IMAGE_PREFERENCE_DETAIL_MEMO.get(memoKey);
+    if (!entry) {
+        return null;
+    }
+    if (entry.expiresAt <= Date.now()) {
+        IMAGE_PREFERENCE_DETAIL_MEMO.delete(memoKey);
+        return null;
+    }
+    return entry.promise;
+}
+
+function writeImagePreferenceDetailMemo(detailMediaType, tmdbId, promise) {
+    const memoKey = `${detailMediaType}:${tmdbId}`;
+    if (!IMAGE_PREFERENCE_DETAIL_MEMO.has(memoKey) && IMAGE_PREFERENCE_DETAIL_MEMO.size >= IMAGE_PREFERENCE_DETAIL_MEMO_LIMIT) {
+        IMAGE_PREFERENCE_DETAIL_MEMO.delete(IMAGE_PREFERENCE_DETAIL_MEMO.keys().next().value);
+    }
+    IMAGE_PREFERENCE_DETAIL_MEMO.set(memoKey, { promise, expiresAt: Date.now() + IMAGE_PREFERENCE_DETAIL_MEMO_TTL_MS });
+    return promise;
+}
+
+function createImagePreferenceDetailSnapshot(detail) {
+    return {
+        original_language: detail?.original_language,
+        origin_country: commonUtils.ensureArray(detail?.origin_country),
+        production_countries: commonUtils.ensureArray(detail?.production_countries),
+    };
+}
+
+async function fetchImagePreferenceDetail(detailMediaType, tmdbId) {
+    const cached = readImagePreferenceDetailMemo(detailMediaType, tmdbId);
+    if (cached) {
+        return cached;
+    }
+    return writeImagePreferenceDetailMemo(
+        detailMediaType,
+        tmdbId,
+        (async () => {
+            try {
+                const detail = await tmdbClientModule.fetchDetails(detailMediaType, tmdbId);
+                return createImagePreferenceDetailSnapshot(detail);
+            } catch (error) {
+                // 失败也负缓存：同一次运行内不重试必败的详情请求（合并请求失败回退时同样受益）。
+                globalThis.$ctx.env.log(`Trakt TMDb image preference detail failed for key=${detailMediaType}:${tmdbId}: ${error}`);
+                return IMAGE_PREFERENCE_DETAIL_EMPTY;
+            }
+        })(),
+    );
+}
+
 async function resolveImagePreference(mediaType, ref) {
     const mode = ref?.imageMode ?? getPosterImageMode();
     if (mode === POSTER_IMAGE_MODE.CHINESE) {
@@ -266,13 +323,9 @@ async function resolveImagePreference(mediaType, ref) {
     if (!language || !country) {
         const tmdbId = mediaType === "season" ? ref?.showTmdbId : ref?.tmdbId;
         const detailMediaType = mediaType === "season" ? mediaTypes.MEDIA_TYPE.SHOW : mediaType;
-        try {
-            const detail = await tmdbClientModule.fetchDetails(detailMediaType, tmdbId);
-            language ||= normalizeImageLanguage(detail?.original_language);
-            country ||= getTmdbDetailCountry(detail);
-        } catch (error) {
-            globalThis.$ctx.env.log(`Trakt TMDb image preference detail failed for key=${buildImageCacheKey(mediaType, ref)}: ${error}`);
-        }
+        const detail = await fetchImagePreferenceDetail(detailMediaType, tmdbId);
+        language ||= normalizeImageLanguage(detail?.original_language);
+        country ||= getTmdbDetailCountry(detail);
     }
 
     return language
@@ -302,6 +355,33 @@ function buildImageEntryFromPayload(payload, mediaType, preference, fields) {
     return entry;
 }
 
+function needsMergedImageDetail(mediaType, ref) {
+    if (mediaType !== mediaTypes.MEDIA_TYPE.MOVIE && mediaType !== mediaTypes.MEDIA_TYPE.SHOW) {
+        return false;
+    }
+    // 与 resolveImagePreference 的补查条件一致：ref 自带 language+country 或偏好已记忆化时，无需详情，保持单独图片请求。
+    if (normalizeImageLanguage(ref?.language) && normalizeImageCountry(ref?.country)) {
+        return false;
+    }
+    return !readImagePreferenceDetailMemo(mediaType, ref?.tmdbId);
+}
+
+async function loadMergedImageDetail(mediaType, ref) {
+    try {
+        const detail = await tmdbClientModule.fetchDetailsWithImages(mediaType, ref?.tmdbId);
+        if (!detail) {
+            writeImagePreferenceDetailMemo(mediaType, ref?.tmdbId, Promise.resolve(IMAGE_PREFERENCE_DETAIL_EMPTY));
+            return null;
+        }
+        writeImagePreferenceDetailMemo(mediaType, ref?.tmdbId, Promise.resolve(createImagePreferenceDetailSnapshot(detail)));
+        return tmdbClientModule.extractTmdbImagesPayload(detail);
+    } catch (error) {
+        writeImagePreferenceDetailMemo(mediaType, ref?.tmdbId, Promise.resolve(IMAGE_PREFERENCE_DETAIL_EMPTY));
+        globalThis.$ctx.env.log(`Trakt TMDb merged detail images failed for key=${buildImageCacheKey(mediaType, ref)}: ${error}`);
+        return null;
+    }
+}
+
 async function fetchImageEntries(mediaType, ref, fields) {
     const requestedFields =
         mediaType === mediaTypes.MEDIA_TYPE.MOVIE || mediaType === mediaTypes.MEDIA_TYPE.SHOW
@@ -310,6 +390,13 @@ async function fetchImageEntries(mediaType, ref, fields) {
     if (requestedFields.length === 0) {
         return [];
     }
+
+    // 仅当 original 偏好必须补查 TMDb 详情时才改用合并请求一次拿回详情与图片；其余场景维持单独图片 API。
+    let mergedImagesPayload = null;
+    if (needsMergedImageDetail(mediaType, ref)) {
+        mergedImagesPayload = await loadMergedImageDetail(mediaType, ref);
+    }
+
     const preferences = (
         await Promise.all(
             getImageFetchModes().map(async (mode) => {
@@ -328,16 +415,21 @@ async function fetchImageEntries(mediaType, ref, fields) {
         return [];
     }
 
-    const languages = preferences
-        .map(({ preference }) => preference?.language)
-        .filter(Boolean)
-        .filter((language, index, array) => array.indexOf(language) === index);
-    const payload =
-        languages.length === 0
-            ? null
-            : mediaType === "season"
-              ? await tmdbClientModule.fetchSeasonImages(ref?.showTmdbId, ref?.seasonNumber, languages.join(","))
-              : await tmdbClientModule.fetchImages(mediaType, ref?.tmdbId, languages.join(","));
+    let payload = null;
+    if (mergedImagesPayload) {
+        payload = mergedImagesPayload;
+    } else {
+        const languages = preferences
+            .map(({ preference }) => preference?.language)
+            .filter(Boolean)
+            .filter((language, index, array) => array.indexOf(language) === index);
+        payload =
+            languages.length === 0
+                ? null
+                : mediaType === "season"
+                  ? await tmdbClientModule.fetchSeasonImages(ref?.showTmdbId, ref?.seasonNumber, languages.join(","))
+                  : await tmdbClientModule.fetchImages(mediaType, ref?.tmdbId, languages.join(","));
+    }
 
     return preferences.map(({ ref: modeRef, preference, fields: missingFields }) => ({
         ref: modeRef,

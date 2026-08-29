@@ -280,7 +280,7 @@ function Env(name, opts) {
       const val = this.getdata(key)
       if (val) {
         try {
-          json = JSON.parse(this.getdata(key))
+          json = JSON.parse(val)
         } catch {}
       }
       return json
