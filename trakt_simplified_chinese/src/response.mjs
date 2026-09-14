@@ -33,8 +33,18 @@ function createResponsePhaseRoutes() {
             handler: mediaTranslationHandler.handleWrapperMediaList,
         }),
         createRoute({
-            pattern: /^calendars\/(my\/(shows|movies)|all\/(movies|dvd|shows(\/(new|premieres|finales))?))\/\d{4}-\d{2}-\d{2}\/\d+$/i,
-            id: "calendars.entries",
+            pattern: /^calendars\/(my|all)\/shows(\/(new|premieres|finales))?\/\d{4}-\d{2}-\d{2}\/\d+$/i,
+            id: "calendars.shows",
+            handler: mediaTranslationHandler.handleWrapperMediaList,
+        }),
+        createRoute({
+            pattern: /^calendars\/(my|all)\/(media|movies|dvd|streaming)\/\d{4}-\d{2}-\d{2}\/\d+$/i,
+            id: "calendars.media",
+            handler: mediaTranslationHandler.handleWrapperMediaList,
+        }),
+        createRoute({
+            pattern: /^calendars\/releases\/hot(\/(new|premieres|finales))?\/\d{4}-\d{2}-\d{2}\/\d+$/i,
+            id: "calendars.releases",
             handler: mediaTranslationHandler.handleWrapperMediaList,
         }),
         createRoute({ pattern: /^users\/hidden\/[^/]+$/i, id: "users.hidden.section", handler: mediaTranslationHandler.handleWrapperMediaList }),

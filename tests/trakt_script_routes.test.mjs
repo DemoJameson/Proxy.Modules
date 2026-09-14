@@ -226,6 +226,60 @@ function createListWrapperBody() {
     ]);
 }
 
+function createCalendarMediaBody() {
+    return JSON.stringify([
+        {
+            first_aired: "2026-09-13T00:00:00.000Z",
+            released: null,
+            show: {
+                title: "Original Show Title",
+                overview: "Original Show Overview",
+                first_aired: "2025-01-01T00:00:00.000Z",
+                network: "HBO",
+                tagline: "Original Show Tagline",
+                ids: {
+                    trakt: 456,
+                },
+            },
+            episode: {
+                season: 1,
+                number: 2,
+                title: "Original Episode Title",
+                overview: "Original Episode Overview",
+                ids: {
+                    trakt: 1001,
+                },
+            },
+        },
+        {
+            released: "2026-09-13",
+            movie: JSON.parse(readFixture("recommendations-movies.json"))[0],
+        },
+    ]);
+}
+
+function createCalendarPersistentData() {
+    return createUnifiedPersistentData({
+        traktTranslation: {
+            ...JSON.parse(createMovieTranslationCache()),
+            "show:456": createMediaTranslationEntry({
+                translation: {
+                    title: "中文剧名",
+                    overview: "中文剧集简介",
+                    tagline: "中文剧集标语",
+                },
+            }),
+            "episode:456:1:2": createMediaTranslationEntry({
+                translation: {
+                    title: "第二集中文",
+                    overview: "第二集中文简介",
+                    tagline: "第二集中文标语",
+                },
+            }),
+        },
+    });
+}
+
 function createProminentListBody() {
     return JSON.stringify([
         {
@@ -947,6 +1001,29 @@ test("handleWrapperMediaList 按 wrapper 路由分组生效", async (t) => {
             persistentData: createEpisodePersistentData(),
             assertPayload(payload) {
                 assert.equal(payload[0].progress.next_episode.title, "第二集中文");
+            },
+        },
+        {
+            name: "my media calendar mixed route",
+            url: "https://apiz.trakt.tv/calendars/my/media/2026-09-13/9?extended=full",
+            body: createCalendarMediaBody(),
+            persistentData: createCalendarPersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].show.title, "中文剧名");
+                assert.equal(payload[0].episode.title, "第二集中文");
+                assert.equal(payload[0].first_aired, "2026-09-13T00:00:00.000Z");
+                assert.equal(payload[1].movie.title, "中文电影");
+                assert.equal(payload[1].released, "2026-09-13");
+            },
+        },
+        {
+            name: "releases hot calendar mixed route",
+            url: "https://apiz.trakt.tv/calendars/releases/hot/2026-09-13/7?extended=full,images",
+            body: createCalendarMediaBody(),
+            persistentData: createCalendarPersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].episode.title, "第二集中文");
+                assert.equal(payload[1].movie.title, "中文电影");
             },
         },
         {
@@ -1846,6 +1923,18 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["wrapperMedia.popularNext", "https://api.trakt.tv/media/popular/next"],
         ["users.hidden.section", "https://apiz.trakt.tv/users/hidden/dropped?extended=full,images&limit=15&page=1"],
         ["users.history.mediaTyped", "https://api.trakt.tv/users/me/history/shows?extended=full&limit=50&page=2"],
+        ["calendars.media", "https://apiz.trakt.tv/calendars/my/media/2026-09-13/9?extended=full"],
+        ["calendars.media", "https://api.trakt.tv/calendars/all/movies/2026-01-01/7"],
+        ["calendars.media", "https://api.trakt.tv/calendars/all/dvd/2026-01-01/7"],
+        ["calendars.media", "https://api.trakt.tv/calendars/my/streaming/2026-01-01/7"],
+        ["calendars.shows", "https://api.trakt.tv/calendars/my/shows/2026-01-01/7"],
+        ["calendars.shows", "https://api.trakt.tv/calendars/all/shows/new/2026-01-01/7"],
+        ["calendars.shows", "https://api.trakt.tv/calendars/all/shows/premieres/2026-01-01/7"],
+        ["calendars.shows", "https://api.trakt.tv/calendars/all/shows/finales/2026-01-01/7"],
+        ["calendars.releases", "https://apiz.trakt.tv/calendars/releases/hot/2026-09-13/7?extended=full,images"],
+        ["calendars.releases", "https://api.trakt.tv/calendars/releases/hot/new/2026-09-13/7"],
+        ["calendars.releases", "https://api.trakt.tv/calendars/releases/hot/premieres/2026-09-13/7"],
+        ["calendars.releases", "https://api.trakt.tv/calendars/releases/hot/finales/2026-09-13/7"],
         ["users.watching", "https://apiz.trakt.tv/users/me/watching?extended=cloud9,full"],
         ["search.media", "https://apiz.trakt.tv/search/movie,show?extended=cloud9,full&limit=100&page=1&query=%E5%AE%B6%E5%BC%91%E6%9C%8D%E5%8A%A1"],
         ["search.media", "https://apiz.trakt.tv/search/movie,show/exact?extended=cloud9,full&limit=100&page=1&query=%E5%AE%B6%E5%BC%91%E6%9C%8D%E5%8A%A1"],
@@ -1891,6 +1980,33 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
             matchedRoutes.map((route) => route.id),
             [expectedId],
             `Expected exactly one route match for ${url}`,
+        );
+    }
+});
+
+test("calendars 路由剔除 Trakt 返回 405 的不存在类型组合", () => {
+    const routes = createResponseRouteStubs();
+    const invalidPaths = [];
+    for (const target of ["my", "all"]) {
+        for (const type of ["media", "movies", "dvd", "streaming"]) {
+            for (const subType of ["new", "premieres", "finales"]) {
+                invalidPaths.push(`calendars/${target}/${type}/${subType}/2026-09-13/7`);
+            }
+        }
+    }
+    for (const type of ["movies", "dvd", "shows"]) {
+        invalidPaths.push(`calendars/releases/${type}/2026-09-13/7`);
+        for (const subType of ["new", "premieres", "finales"]) {
+            invalidPaths.push(`calendars/releases/${type}/${subType}/2026-09-13/7`);
+        }
+    }
+
+    for (const pathname of invalidPaths) {
+        const matchedRoutes = routes.filter((route) => route.test({ url: new URL(`https://api.trakt.tv/${pathname}`) }));
+        assert.deepEqual(
+            matchedRoutes.map((route) => route.id),
+            [],
+            `Expected no route match for ${pathname}`,
         );
     }
 });

@@ -1027,6 +1027,22 @@ test("live script: response route coverage matrix covers all response phase rout
             },
         },
         {
+            url: "https://apiz.trakt.tv/calendars/my/media/2026-09-13/9?extended=full",
+            body: JSON.stringify(wrappedMovieItems),
+            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload[0].movie.title, "覆盖中文电影");
+            },
+        },
+        {
+            url: "https://apiz.trakt.tv/calendars/releases/hot/2026-09-13/7?extended=full,images",
+            body: JSON.stringify(wrappedMovieItems),
+            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload[0].movie.title, "覆盖中文电影");
+            },
+        },
+        {
             url: "https://api.trakt.tv/users/me/history/episodes?page=1&limit=10",
             body: JSON.stringify(episodeItems),
             persistentData: createUnifiedPersistentData({ traktTranslation: episodeTranslation }),
