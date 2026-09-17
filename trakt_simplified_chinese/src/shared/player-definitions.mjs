@@ -6,6 +6,7 @@ const PLAYER_TYPE = {
     EPLAYERX: "eplayerx",
     FORWARD: "forward",
     INFUSE: "infuse",
+    REX: "rex",
 };
 
 // biome-ignore format: keep region codes compact for module readability.
@@ -43,12 +44,20 @@ const PLAYER_DEFINITIONS = {
         logo: "infuse_logo.webp",
         color: "#ff8000",
     },
+    [PLAYER_TYPE.REX]: {
+        type: PLAYER_TYPE.REX,
+        name: "Rex",
+        homePage: "https://rexnow.tv",
+        logo: "rex_logo.webp",
+        color: "#000000",
+    },
 };
 
 const PLAYER_LAUNCHERS = {
     [PLAYER_TYPE.EPLAYERX]: buildEplayerXDeeplink,
     [PLAYER_TYPE.FORWARD]: buildForwardDeeplink,
     [PLAYER_TYPE.INFUSE]: buildInfuseDeeplink,
+    [PLAYER_TYPE.REX]: buildRexDeeplink,
 };
 
 function buildInfuseDeeplink(target, deeplinkContext) {
@@ -82,6 +91,35 @@ function buildForwardDeeplink(target, deeplinkContext) {
     }
 
     const baseUrl = "https://fwds.cc/tmdb";
+
+    if (target.mediaType === mediaTypes.MEDIA_TYPE.MOVIE && commonUtils.isNonNullish(deeplinkContext.tmdbId)) {
+        return `${baseUrl}?type=movie&id=${deeplinkContext.tmdbId}`;
+    }
+
+    if (
+        (target.mediaType === mediaTypes.MEDIA_TYPE.SHOW || target.mediaType === mediaTypes.MEDIA_TYPE.EPISODE) &&
+        commonUtils.isNonNullish(deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId)
+    ) {
+        const link = `${baseUrl}?type=tv&id=${deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId}`;
+        if (commonUtils.isNonNullish(deeplinkContext.seasonNumber)) {
+            const seasonLink = `${link}&season=${deeplinkContext.seasonNumber}`;
+            if (commonUtils.isNonNullish(deeplinkContext.episodeNumber)) {
+                return `${seasonLink}&episode=${deeplinkContext.episodeNumber}`;
+            }
+            return seasonLink;
+        }
+        return link;
+    }
+
+    return "";
+}
+
+function buildRexDeeplink(target, deeplinkContext) {
+    if (!target || !deeplinkContext) {
+        return "";
+    }
+
+    const baseUrl = "https://rexnow.tv/tmdb";
 
     if (target.mediaType === mediaTypes.MEDIA_TYPE.MOVIE && commonUtils.isNonNullish(deeplinkContext.tmdbId)) {
         return `${baseUrl}?type=movie&id=${deeplinkContext.tmdbId}`;

@@ -98,6 +98,7 @@ test("/watchnow/sources 在全部序号为 0 时仍会保留自定义 source 定
             eplayerxButtonOrder: 0,
             infuseButtonOrder: 0,
             forwardButtonOrder: 0,
+            rexButtonOrder: 0,
         },
     });
 
@@ -179,6 +180,29 @@ test("/movies/:id/watchnow 默认使用 Forward Universal Link", async () => {
     assert.equal(entry.link, "https://fwds.cc/tmdb?type=movie&id=278");
 });
 
+test("/movies/:id/watchnow 默认使用 Rex Universal Link", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123/watchnow",
+        body: readFixture("movie-watchnow.json"),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: JSON.parse(
+                createWatchnowIdsCache({
+                    123: createWatchnowIdsEntry({
+                        ids: {
+                            tmdb: 278,
+                            imdb: "tt123",
+                        },
+                    }),
+                }),
+            ),
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    const entry = payload.us.free.find((item) => item.source === "rex");
+    assert.equal(entry.link, "https://rexnow.tv/tmdb?type=movie&id=278");
+});
+
 test("/episodes/:id/watchnow 默认使用 EplayerX Universal Link 并追加季集参数", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/episodes/1001/watchnow",
@@ -227,6 +251,31 @@ test("/episodes/:id/watchnow 默认使用 Forward Universal Link 并追加季集
     assert.equal(entry.link, "https://fwds.cc/tmdb?type=tv&id=250307&season=2&episode=3");
 });
 
+test("/episodes/:id/watchnow 默认使用 Rex Universal Link 并追加季集参数", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/episodes/1001/watchnow",
+        body: readFixture("movie-watchnow.json"),
+        persistentData: createUnifiedPersistentData({
+            traktLinkIds: JSON.parse(
+                createWatchnowIdsCache({
+                    1001: createEpisodeWatchnowIdsEntry({
+                        showIds: {
+                            trakt: 555,
+                            tmdb: 250307,
+                        },
+                        seasonNumber: 2,
+                        episodeNumber: 3,
+                    }),
+                }),
+            ),
+        }),
+    });
+
+    const payload = JSON.parse(result.body);
+    const entry = payload.us.free.find((item) => item.source === "rex");
+    assert.equal(entry.link, "https://rexnow.tv/tmdb?type=tv&id=250307&season=2&episode=3");
+});
+
 test("/movies/:id/watchnow 在部分序号为 0 时只注入序号非 0 的播放器", async () => {
     const { result } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123/watchnow",
@@ -235,6 +284,7 @@ test("/movies/:id/watchnow 在部分序号为 0 时只注入序号非 0 的播�
             eplayerxButtonOrder: 0,
             infuseButtonOrder: 0,
             forwardButtonOrder: 1,
+            rexButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(
@@ -273,6 +323,7 @@ test("/movies/:id/watchnow 在全部序号为 0 时会保留原始 watchnow 响�
             eplayerxButtonOrder: 0,
             infuseButtonOrder: 0,
             forwardButtonOrder: 0,
+            rexButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(

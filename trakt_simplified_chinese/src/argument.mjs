@@ -7,6 +7,7 @@ const PLAYER_BUTTON_ARGUMENT_GROUP_KEYS = {
     eplayerxButtonOrder: "eplayerx",
     forwardButtonOrder: "forward",
     infuseButtonOrder: "infuse",
+    rexButtonOrder: "rex",
 };
 
 const ARGUMENT_FIELDS = argumentFields.map((field) => {
@@ -19,6 +20,7 @@ function createDefaultPlayerButtonOrderConfig() {
         eplayerx: 1,
         forward: 2,
         infuse: 3,
+        rex: 4,
     };
 }
 

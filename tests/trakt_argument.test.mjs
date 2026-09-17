@@ -7,8 +7,8 @@ import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../trakt_simpl
 
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
-test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 posterImageMode，第 5-7 位解析为 *Order 数字", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,2,1,3]"));
+test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 posterImageMode，第 5-8 位解析为 *Order 数字", () => {
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,2,1,3,4]"));
 
     assert.equal(parsed.fakeVipEnabled, true);
     assert.equal(parsed.posterImageMode, "original");
@@ -18,8 +18,9 @@ test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 post
     assert.equal(parsed.playerButtonOrder.eplayerx, 2);
     assert.equal(parsed.playerButtonOrder.forward, 1);
     assert.equal(parsed.playerButtonOrder.infuse, 3);
-    assert.deepEqual(parsed.orderedPlayerTypes, ["forward", "eplayerx", "infuse"]);
-    assert.deepEqual(parsed.enabledPlayerTypes, ["forward", "eplayerx", "infuse"]);
+    assert.equal(parsed.playerButtonOrder.rex, 4);
+    assert.deepEqual(parsed.orderedPlayerTypes, ["forward", "eplayerx", "infuse", "rex"]);
+    assert.deepEqual(parsed.enabledPlayerTypes, ["forward", "eplayerx", "infuse", "rex"]);
 });
 
 test("translationEngine 默认 google，且位于 characterTranslationEnabled 前一位", () => {
@@ -30,29 +31,32 @@ test("translationEngine 默认 google，且位于 characterTranslationEnabled �
     assert.equal(parsed.translationEngine, "google");
     assert.equal(parsed.characterTranslationEnabled, false);
     assert.equal(parsed.playerButtonOrder.eplayerx, 1);
-    assert.deepEqual(parsed.orderedPlayerTypes, ["eplayerx", "forward", "infuse"]);
-    assert.deepEqual(parsed.enabledPlayerTypes, ["eplayerx", "forward", "infuse"]);
+    assert.deepEqual(parsed.orderedPlayerTypes, ["eplayerx", "forward", "infuse", "rex"]);
+    assert.deepEqual(parsed.enabledPlayerTypes, ["eplayerx", "forward", "infuse", "rex"]);
 });
 
-test("*Order 默认值为 1/2/3，非法值回落到默认序号", () => {
+test("*Order 默认值为 1/2/3/4，非法值回落到默认序号", () => {
     const defaults = normalizeArgument(createDefaultArgumentConfig());
     assert.equal(defaults.playerButtonOrder.eplayerx, 1);
     assert.equal(defaults.playerButtonOrder.forward, 2);
     assert.equal(defaults.playerButtonOrder.infuse, 3);
+    assert.equal(defaults.playerButtonOrder.rex, 4);
 
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,abc,NaN,2.5]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,abc,NaN,2.5,bogus]"));
     assert.equal(parsed.playerButtonOrder.eplayerx, 1);
     assert.equal(parsed.playerButtonOrder.forward, 2);
     assert.equal(parsed.playerButtonOrder.infuse, 2);
+    assert.equal(parsed.playerButtonOrder.rex, 4);
 });
 
 test("序号 0 在 enabledPlayerTypes 中隐藏，但仍保留在 orderedPlayerTypes 末尾", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,0,2,1]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,0,2,1,4]"));
     assert.equal(parsed.playerButtonOrder.eplayerx, 0);
     assert.equal(parsed.playerButtonOrder.forward, 2);
     assert.equal(parsed.playerButtonOrder.infuse, 1);
-    assert.deepEqual(parsed.orderedPlayerTypes, ["infuse", "forward", "eplayerx"]);
-    assert.deepEqual(parsed.enabledPlayerTypes, ["infuse", "forward"]);
+    assert.equal(parsed.playerButtonOrder.rex, 4);
+    assert.deepEqual(parsed.orderedPlayerTypes, ["infuse", "forward", "rex", "eplayerx"]);
+    assert.deepEqual(parsed.enabledPlayerTypes, ["infuse", "forward", "rex"]);
 });
 
 test("全部序号相同（含 0）时按 PLAYER_TYPE 声明顺序稳定排序", () => {
@@ -61,10 +65,11 @@ test("全部序号相同（含 0）时按 PLAYER_TYPE 声明顺序稳定排序",
             eplayerxButtonOrder: 5,
             forwardButtonOrder: 5,
             infuseButtonOrder: 0,
+            rexButtonOrder: 5,
         }),
     );
-    assert.deepEqual(parsed.orderedPlayerTypes, ["eplayerx", "forward", "infuse"]);
-    assert.deepEqual(parsed.enabledPlayerTypes, ["eplayerx", "forward"]);
+    assert.deepEqual(parsed.orderedPlayerTypes, ["eplayerx", "forward", "rex", "infuse"]);
+    assert.deepEqual(parsed.enabledPlayerTypes, ["eplayerx", "forward", "rex"]);
 });
 
 test("posterImageMode 非法值回退 original", () => {
@@ -82,16 +87,20 @@ test("posterImageMode 支持中文选项标签", () => {
 });
 
 test("debugMode 非法值回退 off", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,bogus]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,4,https://backend.example,bogus]"));
 
     assert.equal(parsed.debugMode, "off");
 });
 
 test("debugMode 支持中文选项标签", () => {
-    const offParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,关闭]"));
-    const localParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用本地缓存]"));
-    const remoteParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用远端缓存]"));
-    const allParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用所有缓存]"));
+    const offParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,4,https://backend.example,关闭]"));
+    const localParsed = normalizeArgument(
+        applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,4,https://backend.example,禁用本地缓存]"),
+    );
+    const remoteParsed = normalizeArgument(
+        applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,4,https://backend.example,禁用远端缓存]"),
+    );
+    const allParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,4,https://backend.example,禁用所有缓存]"));
 
     assert.equal(offParsed.debugMode, "off");
     assert.equal(localParsed.debugMode, "disableLocal");
@@ -180,6 +189,7 @@ test("全部序号为 0 时 /movies/:id/watchnow 不注入自定义播放器条�
             eplayerxButtonOrder: 0,
             forwardButtonOrder: 0,
             infuseButtonOrder: 0,
+            rexButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {
@@ -208,6 +218,7 @@ test("仅 forward 序号非 0 时 /movies/:id/watchnow 只注入 forward 条目"
             eplayerxButtonOrder: 0,
             forwardButtonOrder: 1,
             infuseButtonOrder: 0,
+            rexButtonOrder: 0,
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {

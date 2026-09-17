@@ -413,6 +413,7 @@ test("TMDB 详情在全部序号为 0 时不注入任何播放器", async () => 
             eplayerxButtonOrder: 0,
             forwardButtonOrder: 0,
             infuseButtonOrder: 0,
+            rexButtonOrder: 0,
         },
     });
 
@@ -543,6 +544,7 @@ test("TMDb provider catalog 在全部序号为 0 时仍保留全部自定义 pro
             eplayerxButtonOrder: 0,
             forwardButtonOrder: 0,
             infuseButtonOrder: 0,
+            rexButtonOrder: 0,
         },
     });
 

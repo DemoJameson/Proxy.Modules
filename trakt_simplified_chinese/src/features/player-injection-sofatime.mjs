@@ -7,6 +7,7 @@ const TMDB_PROVIDER_ID_BY_SOURCE = {
     [playerDefinitions.PLAYER_TYPE.EPLAYERX]: 1,
     [playerDefinitions.PLAYER_TYPE.FORWARD]: 2,
     [playerDefinitions.PLAYER_TYPE.INFUSE]: 3,
+    [playerDefinitions.PLAYER_TYPE.REX]: 4,
 };
 
 function createZeroPriorityMap(regionCodes) {
