@@ -8,7 +8,7 @@ const DEFAULT_BACKEND_BASE_URL = "https://proxy-modules.demojameson.de5.net";
 const metadata = {
     name: "Trakt 增强",
     description:
-        "Trakt App 各页面从英文改为简体中文，支持中文标题、简介和海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 和 SofaTime 的影片详情页添加 EplayerX、Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
+        "Trakt App 各页面从英文改为简体中文，支持中文标题、简介和海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 和 SofaTime 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
     icon: `${RAW_BASE_URL}/${TRAKT_MODULE_PATH}/images/trakt.webp`,
     homepage: REPOSITORY_URL,
     openUrl: "https://apps.apple.com/app/id1514873602",
@@ -60,15 +60,6 @@ const argumentFields = [
         type: "boolean",
         tag: "用豆瓣翻译角色名",
         desc: "启用后会用豆瓣翻译角色名",
-    },
-    {
-        key: "eplayerxButtonOrder",
-        defaultValue: 1,
-        type: "select",
-        options: ["1", "2", "3", "4", "0"],
-        optionValues: [1, 2, 3, 4, 0],
-        tag: "EplayerX 跳转按钮",
-        desc: "序号代表在 Trakt 中的排序位置，0 不显示，默认 1",
     },
     {
         key: "forwardButtonOrder",

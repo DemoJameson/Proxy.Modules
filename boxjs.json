@@ -15,7 +15,6 @@
                 "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
                 "@dj_trakt_boxjs_configs.translationEngine",
                 "@dj_trakt_boxjs_configs.characterTranslationEnabled",
-                "@dj_trakt_boxjs_configs.eplayerxButtonOrder",
                 "@dj_trakt_boxjs_configs.forwardButtonOrder",
                 "@dj_trakt_boxjs_configs.infuseButtonOrder",
                 "@dj_trakt_boxjs_configs.rexButtonOrder",
@@ -91,35 +90,6 @@
                     "val": true,
                     "type": "boolean",
                     "desc": "启用后会用豆瓣翻译角色名"
-                },
-                {
-                    "id": "@dj_trakt_boxjs_configs.eplayerxButtonOrder",
-                    "name": "EplayerX 跳转按钮",
-                    "val": 1,
-                    "type": "select",
-                    "desc": "序号代表在 Trakt 中的排序位置，0 不显示，默认 1",
-                    "items": [
-                        {
-                            "key": 1,
-                            "label": "1"
-                        },
-                        {
-                            "key": 2,
-                            "label": "2"
-                        },
-                        {
-                            "key": 3,
-                            "label": "3"
-                        },
-                        {
-                            "key": 4,
-                            "label": "4"
-                        },
-                        {
-                            "key": 0,
-                            "label": "0"
-                        }
-                    ]
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.forwardButtonOrder",
@@ -242,7 +212,7 @@
                 }
             ],
             "descs_html": [
-                "Trakt App 各页面从英文改为简体中文，支持中文标题、简介和海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 和 SofaTime 的影片详情页添加 EplayerX、Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
+                "Trakt App 各页面从英文改为简体中文，支持中文标题、简介和海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 和 SofaTime 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
                 "点此直达 <a href=\"https://github.com/DemoJameson/Proxy.Modules/tree/main/trakt_simplified_chinese\">项目目录</a>",
                 "Egern 安装：<a href=\"egern:/modules/new?name=%E4%BC%98%E5%8C%96%20Trakt%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%E4%BD%93%E9%AA%8C&amp;url=https%3A%2F%2Fraw.githubusercontent.com%2FDemoJameson%2FProxy.Modules%2Fmain%2Ftrakt_simplified_chinese%2Ftrakt_simplified_chinese.plugin\">安装模块</a>",
                 "Loon 安装：<a href=\"https://www.nsloon.com/openloon/import?plugin=https%3A%2F%2Fraw.githubusercontent.com%2FDemoJameson%2FProxy.Modules%2Fmain%2Ftrakt_simplified_chinese%2Ftrakt_simplified_chinese.plugin\">安装插件</a>",

@@ -291,9 +291,9 @@ test("live script: /movies/:id/watchnow 响应会注入自定义播放器条目"
         });
     });
 
-    assert.equal(allSources.includes("eplayerx"), true);
     assert.equal(allSources.includes("forward"), true);
     assert.equal(allSources.includes("infuse"), true);
+    assert.equal(allSources.includes("rex"), true);
     assert.equal(
         httpLogs.some((log) => /\?extended=cloud9,full,watchnow$/.test(log.url)),
         true,
@@ -323,9 +323,9 @@ test("live script: /users/settings 响应会注入 vip、关闭广告并补 watc
     assert.equal(payload.user.vip, true);
     assert.equal(payload.account.display_ads, false);
     assert.ok(Array.isArray(payload.browsing?.watchnow?.favorites));
-    assert.equal(payload.browsing.watchnow.favorites.includes("us-eplayerx"), true);
     assert.equal(payload.browsing.watchnow.favorites.includes("us-forward"), true);
     assert.equal(payload.browsing.watchnow.favorites.includes("us-infuse"), true);
+    assert.equal(payload.browsing.watchnow.favorites.includes("us-rex"), true);
 });
 
 test("live script: /users/me/watchlist/movies 会走登录态列表翻译链路", async (t) => {

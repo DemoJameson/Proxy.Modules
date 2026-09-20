@@ -3,7 +3,6 @@ import * as commonUtils from "../utils/common.mjs";
 import * as mediaTypes from "./media-types.mjs";
 
 const PLAYER_TYPE = {
-    EPLAYERX: "eplayerx",
     FORWARD: "forward",
     INFUSE: "infuse",
     REX: "rex",
@@ -23,13 +22,6 @@ const REGION_CODES = [
 const PLAYER_LOGO_ASSET_BASE_URL = "https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/images";
 
 const PLAYER_DEFINITIONS = {
-    [PLAYER_TYPE.EPLAYERX]: {
-        type: PLAYER_TYPE.EPLAYERX,
-        name: "EplayerX",
-        homePage: "https://apps.apple.com/cn/app/eplayerx/id6747369377",
-        logo: "eplayerx_logo.webp",
-        color: "#33c1c0",
-    },
     [PLAYER_TYPE.FORWARD]: {
         type: PLAYER_TYPE.FORWARD,
         name: "Forward",
@@ -54,7 +46,6 @@ const PLAYER_DEFINITIONS = {
 };
 
 const PLAYER_LAUNCHERS = {
-    [PLAYER_TYPE.EPLAYERX]: buildEplayerXDeeplink,
     [PLAYER_TYPE.FORWARD]: buildForwardDeeplink,
     [PLAYER_TYPE.INFUSE]: buildInfuseDeeplink,
     [PLAYER_TYPE.REX]: buildRexDeeplink,
@@ -134,35 +125,6 @@ function buildRexDeeplink(target, deeplinkContext) {
             const seasonLink = `${link}&season=${deeplinkContext.seasonNumber}`;
             if (commonUtils.isNonNullish(deeplinkContext.episodeNumber)) {
                 return `${seasonLink}&episode=${deeplinkContext.episodeNumber}`;
-            }
-            return seasonLink;
-        }
-        return link;
-    }
-
-    return "";
-}
-
-function buildEplayerXDeeplink(target, deeplinkContext) {
-    if (!target || !deeplinkContext) {
-        return "";
-    }
-
-    const baseUrl = "https://eplayerx.com/tmdb-info/detail";
-
-    if (target.mediaType === mediaTypes.MEDIA_TYPE.MOVIE && commonUtils.isNonNullish(deeplinkContext.tmdbId)) {
-        return `${baseUrl}?type=movie&id=${deeplinkContext.tmdbId}`;
-    }
-
-    if (
-        (target.mediaType === mediaTypes.MEDIA_TYPE.SHOW || target.mediaType === mediaTypes.MEDIA_TYPE.EPISODE) &&
-        commonUtils.isNonNullish(deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId)
-    ) {
-        const link = `${baseUrl}?type=tv&id=${deeplinkContext.showTmdbId ?? deeplinkContext.tmdbId}`;
-        if (commonUtils.isNonNullish(deeplinkContext.seasonNumber)) {
-            const seasonLink = `${link}&traktSeason=${deeplinkContext.seasonNumber}`;
-            if (commonUtils.isNonNullish(deeplinkContext.episodeNumber)) {
-                return `${seasonLink}&traktEpisode=${deeplinkContext.episodeNumber}`;
             }
             return seasonLink;
         }
