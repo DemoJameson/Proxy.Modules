@@ -4,6 +4,8 @@
 
 - `trakt_argument.test.mjs`
   覆盖参数解析、开关项、请求 phase 改写与配置注入相关行为。
+- `trakt_module_manifest.test.mjs`
+  放模块清单相关测试：构建产物与 `module-manifest.mjs` 一致、BoxJs key/settings 生成、模块描述覆盖所有播放器跳转按钮且与 `public/index.html` 同步。
 - `trakt_script_*.test.mjs`
   覆盖构建后的单文件脚本在 Loon 运行时的 request/response 行为。
 
