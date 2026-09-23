@@ -3,7 +3,7 @@
 本仓库是个人代理模块与 Trakt 翻译后端的组合项目，主要面向 Loon、Surge、Quantumult X 和 Vercel。
 
 - `trakt_simplified_chinese/` 是核心模块目录，包含 Trakt 简体中文增强脚本、模块配置、图片资源和构建后的发布产物。
-- `trakt_simplified_chinese/src/` 是 Trakt 脚本源码，入口包括 `main.mjs`、`main-clear-cache.mjs`、`main-expand-cache.mjs`，请求/响应分派位于 `request.mjs`、`response.mjs`。
+- `trakt_simplified_chinese/src/` 是 Trakt 脚本源码，入口为 `main.mjs`，请求/响应分派位于 `request.mjs`、`response.mjs`。
 - `trakt_simplified_chinese/src/features/` 放具体行为，如翻译、人物信息、评论、播放源注入；`outbound/` 放外部服务客户端；`shared/` 放跨入口复用逻辑；`utils/` 放通用工具。
 - `api/` 是 Vercel Serverless Functions 后端，`api/trakt/translations.js`、`api/trakt/translations/admin.js` 等负责翻译缓存、修订和管理接口，`api/redirect.js` 负责跳转接口。
 - `public/` 放 Vercel 静态页面与素材，例如 `admin.html`、`index.html`、`trakt.webp`。
@@ -37,6 +37,8 @@
 
 `trakt_simplified_chinese/*.js`、`*.plugin`、`*.sgmodule`、`*.snippet` 以及根目录 `boxjs.json` 是发布/订阅相关产物或配置。修改 Trakt 源码、模块参数、资源链接或 Env 适配时，运行 `npm run build:trakt` 并检查这些文件是否随之变化。
 
+`trakt_simplified_chinese/trakt_simplified_chinese.js` 开头带 5 行中文元信息（名称/描述/主页/作者/生成时间，固定按 +08:00 精确到分钟），因此每次构建都会改动该产物的头部，属于预期行为；`.plugin`、`.sgmodule`、`.snippet` 与 `boxjs.json` 不含时间戳，保持逐字节可比对。同一次构建时间还会作为脚本版本号（`YYMMDDHHmm`）注入产物，用于自建后端请求的 UA 标识（`TraktSimplifiedChinese/<版本号>`）。
+
 发布链接在 `README.md` 中指向 GitHub raw 的 `main` 分支；调整目录名、产物名或新增模块时，同步更新 README 链接和对应平台配置。
 
 ## 测试规范
@@ -49,6 +51,7 @@
 - `tests/trakt_script_translations.test.mjs`：translations、媒体详情、history、comments、list descriptions、sentiments。
 - `tests/trakt_script_people.test.mjs`：people detail、media people list、person credits。
 - `tests/trakt_script_routes.test.mjs`：Sofa Time、TMDb provider、request/response route matrix 和其他 route smoke tests。
+- `tests/trakt_script_user_agent.test.mjs`：脚本出站请求的 UA 标识（仅自建后端追加 `TraktSimplifiedChinese/<版本号>`）。
 
 fixture 放在 `tests/fixtures/trakt/`，只保留断言真正依赖的字段。通用运行时模拟和 fixture helper 放在 `tests/helpers/`；至少两个测试复用的构造逻辑再抽 helper。新增 request phase 用例时，显式覆盖 `hasResponse: false`；涉及缓存未命中的正向链路，除了断言响应内容，也要断言缓存写回。
 

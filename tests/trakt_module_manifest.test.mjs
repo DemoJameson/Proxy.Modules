@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { renderGeneratedTargets } from "../scripts/build-trakt.mjs";
+import { formatBuildVersion, renderGeneratedTargets, renderScriptBanner } from "../scripts/build-trakt.mjs";
 import { argumentFields, BOXJS_CONFIG_KEY, metadata } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { PLAYER_DEFINITIONS } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
 
@@ -21,6 +21,51 @@ test("module manifest renders tracked Trakt subscription and BoxJs files", async
     for (const target of generatedTargets) {
         const actual = await readFile(path.join(rootDir, target.outputFile), "utf8");
         assert.equal(normalizeLineEndings(actual), normalizeLineEndings(target.content), `${target.outputFile} should be generated from module-manifest.mjs`);
+    }
+});
+
+test("build-trakt 头部元信息按 +08:00 分钟精度格式化，并与代码之间留出空行", () => {
+    const buildTime = new Date("2026-09-23T15:30:00+08:00");
+    const expectedLines = [
+        `// 名称：${metadata.name}`,
+        `// 描述：${metadata.description}`,
+        `// 主页：${metadata.homepage}`,
+        `// 作者：${metadata.author}`,
+        "// 生成时间：2026-09-23 15:30",
+    ];
+
+    assert.equal(renderScriptBanner(buildTime), `${expectedLines.join("\n")}\n\n`);
+    assert.equal(formatBuildVersion(buildTime), "2609231530");
+});
+
+test("构建产物带中文头部，且紧跟一个空行", async () => {
+    const script = normalizeLineEndings(await readFile(path.join(rootDir, "trakt_simplified_chinese", "trakt_simplified_chinese.js"), "utf8"));
+    const [nameLine, descriptionLine, homepageLine, authorLine, buildTimeLine, separatorLine] = script.split("\n");
+
+    assert.equal(nameLine, `// 名称：${metadata.name}`);
+    assert.equal(descriptionLine, `// 描述：${metadata.description}`);
+    assert.equal(homepageLine, `// 主页：${metadata.homepage}`);
+    assert.equal(authorLine, `// 作者：${metadata.author}`);
+    assert.match(buildTimeLine, /^\/\/ 生成时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);
+    assert.equal(separatorLine, "", "头部元信息与压缩代码之间应有一个空行");
+
+    // UA 版本号与头部生成时间取自同一次构建，理论上必须一致
+    const [datePart, timePart] = buildTimeLine.replace("// 生成时间：", "").split(" ");
+    const expectedVersion = `${datePart.slice(2).replaceAll("-", "")}${timePart.replace(":", "")}`;
+    assert.match(expectedVersion, /^\d{10}$/);
+    assert.ok(script.includes(`"${expectedVersion}"`), "产物内注入的 UA 版本号应与头部生成时间一致");
+});
+
+test("模块清单不再包含定时任务，产物里也没有 cron 行", async () => {
+    const plugin = normalizeLineEndings(await readFile(path.join(rootDir, "trakt_simplified_chinese", "trakt_simplified_chinese.plugin"), "utf8"));
+    const sgmodule = normalizeLineEndings(await readFile(path.join(rootDir, "trakt_simplified_chinese", "trakt_simplified_chinese.sgmodule"), "utf8"));
+
+    assert.equal(plugin.includes('cron "'), false);
+    assert.equal(sgmodule.includes('cron "'), false);
+
+    for (const targetFile of ["trakt_simplified_chinese_clear_cache.js", "trakt_simplified_chinese_expand_cache.js"]) {
+        assert.equal(plugin.includes(targetFile), false, `${targetFile} 不应再出现在插件里`);
+        await assert.rejects(readFile(path.join(rootDir, "trakt_simplified_chinese", targetFile), "utf8"));
     }
 });
 

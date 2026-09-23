@@ -19,6 +19,8 @@
   放 people detail、media people list、person credits 相关测试。
 - `trakt_script_routes.test.mjs`
   放 Sofa Time、TMDb provider、request/response route matrix、以及不适合归到其他主题的 route smoke tests。
+- `trakt_script_user_agent.test.mjs`
+  放脚本出站请求的 UA 标识测试：仅自建后端追加 `TraktSimplifiedChinese/<版本号>`，Trakt API 与 TMDb 保持原样。
 - `trakt_backend_*.test.mjs`
   直接测 Vercel 后端 `api/trakt/` 接口的 KV 读写行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）。
 

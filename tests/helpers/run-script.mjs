@@ -164,6 +164,7 @@ function runScript({
                     httpLogs.push({
                         method: "GET",
                         url: String(options.url ?? ""),
+                        headers: options.headers,
                     });
                     const mock = resolveHttpMock(httpGetMocks, String(options.url ?? ""));
                     if (mock) {
@@ -210,6 +211,7 @@ function runScript({
                         method: "POST",
                         url: postUrl,
                         body: String(options.body ?? ""),
+                        headers: options.headers,
                     });
                     const mock = resolveHttpMock(httpPostMocks, postUrl);
                     if (mock) {

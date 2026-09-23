@@ -13,21 +13,38 @@ const envSourceUrl = "https://github.com/DemoJameson/scripts/blob/feat-more-env/
 const externalModules = ["fs", "path", "got", "tough-cookie", "iconv-lite"];
 const isSyncEnvMode = process.argv.includes("--sync-env");
 const scriptBaseUrl = `${metadata.rawBaseUrl}/${metadata.modulePath}`;
+// 构建时间固定按 +08:00 格式化，避免产物头部随构建机器时区变化
+const BUILD_TIME_OFFSET_MS = 8 * 60 * 60 * 1000;
 
-const buildTargets = [
-    {
-        entryPoint: "trakt_simplified_chinese/src/main.mjs",
-        outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.js",
-    },
-    {
-        entryPoint: "trakt_simplified_chinese/src/main-clear-cache.mjs",
-        outputFile: "trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js",
-    },
-    {
-        entryPoint: "trakt_simplified_chinese/src/main-expand-cache.mjs",
-        outputFile: "trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js",
-    },
-];
+const buildTarget = {
+    entryPoint: "trakt_simplified_chinese/src/main.mjs",
+    outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.js",
+};
+
+function formatBuildTimeText(date) {
+    const shifted = new Date(date.getTime() + BUILD_TIME_OFFSET_MS);
+    const pad = (value) => String(value).padStart(2, "0");
+    return [shifted.getUTCFullYear(), "-", pad(shifted.getUTCMonth() + 1), "-", pad(shifted.getUTCDate()), " ", pad(shifted.getUTCHours()), ":", pad(shifted.getUTCMinutes())].join(
+        "",
+    );
+}
+
+// 产物 UA 使用的版本号：YYMMDDHHmm，与头部「生成时间」取自同一次构建
+function formatBuildVersion(date) {
+    return formatBuildTimeText(date).replace(/[-: ]/g, "").slice(2);
+}
+
+function renderScriptBanner(date) {
+    const metaLines = [
+        `// 名称：${metadata.name}`,
+        `// 描述：${metadata.description}`,
+        `// 主页：${metadata.homepage}`,
+        `// 作者：${metadata.author}`,
+        `// 生成时间：${formatBuildTimeText(date)}`,
+    ];
+
+    return `${metaLines.join("\n")}\n\n`;
+}
 
 async function fileExists(targetPath) {
     try {
@@ -88,7 +105,7 @@ async function ensureEnvSource(forceRefresh = false) {
     return envSource;
 }
 
-async function buildBundle(entryPoint) {
+async function buildBundle(entryPoint, define = {}) {
     const result = await esbuild.build({
         entryPoints: [entryPoint],
         absWorkingDir: rootDir,
@@ -102,6 +119,7 @@ async function buildBundle(entryPoint) {
         minify: true,
         treeShaking: true,
         external: externalModules,
+        define,
         write: false,
     });
 
@@ -272,11 +290,6 @@ function renderPlugin() {
         .filter((rule) => getRuleTargets(rule).includes("plugin"))
         .forEach((rule) => {
             lines.push(`# ${rule.comment}`);
-            if (rule.kind === "cron") {
-                lines.push(`cron "${rule.cron}" script-path=${buildScriptUrl(rule.scriptFile)}, timeout=${rule.timeout}, enable=${rule.enable}, tag=${rule.title}`);
-                return;
-            }
-
             const parts = [`${rule.phase} ${rule.pattern} script-path=${buildScriptUrl(rule.scriptFile)}`];
             if (rule.requiresBody) {
                 parts.push("requires-body=true");
@@ -310,7 +323,7 @@ function renderSgmodule() {
     ];
 
     scriptRules
-        .filter((rule) => rule.kind !== "cron" && getRuleTargets(rule).includes("sgmodule"))
+        .filter((rule) => getRuleTargets(rule).includes("sgmodule"))
         .forEach((rule) => {
             const parts = [`${rule.title} = type=${rule.phase}`, `pattern=${rule.pattern}`];
             if (rule.requiresBody) {
@@ -345,7 +358,7 @@ function renderSnippet() {
     ];
 
     scriptRules
-        .filter((rule) => rule.kind !== "cron" && getRuleTargets(rule).includes("snippet"))
+        .filter((rule) => getRuleTargets(rule).includes("snippet"))
         .forEach((rule) => {
             const snippetType = rule.phase === "http-request" ? "script-request-header" : "script-response-body";
             lines.push(`# ${rule.comment}`, `${rule.pattern} url ${snippetType} ${buildScriptUrl(rule.scriptFile)}`);
@@ -410,10 +423,12 @@ async function writeGeneratedTargets() {
 async function buildTrakt() {
     await ensureEnvSource(isSyncEnvMode);
 
-    for (const target of buildTargets) {
-        const scriptSource = await buildBundle(target.entryPoint);
-        await writeTarget(target.outputFile, scriptSource);
-    }
+    // 整次构建只取一次时间：头部「生成时间」与注入的 UA 版本号取自同一时刻
+    const buildTime = new Date();
+    const scriptSource = await buildBundle(buildTarget.entryPoint, {
+        "globalThis.__SCRIPT_BUILD_VERSION__": JSON.stringify(formatBuildVersion(buildTime)),
+    });
+    await writeTarget(buildTarget.outputFile, renderScriptBanner(buildTime) + scriptSource);
 
     await writeGeneratedTargets();
 }
@@ -425,4 +440,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
 }
 
-export { buildTrakt, renderBoxjs, renderGeneratedTargets, renderPlugin, renderSgmodule, renderSnippet };
+export { buildTrakt, formatBuildVersion, renderBoxjs, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSgmodule, renderSnippet };

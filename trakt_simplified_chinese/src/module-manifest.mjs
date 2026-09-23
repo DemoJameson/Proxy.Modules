@@ -110,16 +110,6 @@ const ALL_ARGUMENT_KEYS = argumentFields.map((field) => field.key);
 
 const scriptRules = [
     {
-        kind: "cron",
-        title: "手动清理本地缓存脚本",
-        comment: "手动清理本地缓存脚本",
-        cron: "0 0 1 1 1",
-        scriptFile: "trakt_simplified_chinese_clear_cache.js",
-        timeout: 10,
-        enable: false,
-        targets: ["plugin"],
-    },
-    {
         title: "Direct Redirect",
         comment: "处理播放器 DeepLink 跳转",
         phase: "http-request",
@@ -196,16 +186,6 @@ const scriptRules = [
         requiresBody: true,
         maxSize: 0,
         argumentKeys: ALL_ARGUMENT_KEYS,
-    },
-    {
-        kind: "cron",
-        title: "缓存压力测试脚本",
-        comment: "缓存压力测试脚本",
-        cron: "0 0 1 1 1",
-        scriptFile: "trakt_simplified_chinese_expand_cache.js",
-        timeout: 10,
-        enable: false,
-        targets: ["plugin"],
     },
 ];
 

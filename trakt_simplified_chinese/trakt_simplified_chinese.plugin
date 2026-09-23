@@ -18,8 +18,6 @@ backendBaseUrl = input, "https://proxy-modules.demojameson.de5.net", tag=翻译�
 debugMode = select,"关闭","禁用本地缓存","禁用远端缓存","禁用所有缓存",tag=调试模式,desc=禁用本地缓存：不读写持久化存储；禁用远端缓存：不请求后端缓存接口；禁用所有缓存：两者皆禁用
 
 [Script]
-# 手动清理本地缓存脚本
-cron "0 0 1 1 1" script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js, timeout=10, enable=false, tag=手动清理本地缓存脚本
 # 处理播放器 DeepLink 跳转
 http-request ^https:\/\/loon-plugins\.demojameson\.de5\.net\/api\/redirect\?.*$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, timeout=10, argument=[{fakeVipEnabled},{posterImageMode},{historyEpisodesMergedByShow},{translationEngine},{characterTranslationEnabled},{forwardButtonOrder},{infuseButtonOrder},{rexButtonOrder},{backendBaseUrl},{debugMode}], tag=Direct Redirect
 # SofaTime 中自定义播放器 Logo
@@ -36,8 +34,6 @@ http-response ^https:\/\/apiz?\.trakt\.tv\/.*$ script-path=https://raw.githubuse
 http-response ^https:\/\/api\.themoviedb\.org\/3\/watch\/providers\/(?:movie|tv)(\?.*)?$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{fakeVipEnabled},{posterImageMode},{historyEpisodesMergedByShow},{translationEngine},{characterTranslationEnabled},{forwardButtonOrder},{infuseButtonOrder},{rexButtonOrder},{backendBaseUrl},{debugMode}], tag=TMDB Provider Catalog
 # 仅拦截 SofaTime 的 TMDB 详情请求（append_to_response 含 watch/providers），清除原有观看来源并注入排序 1 播放器
 http-response ^https:\/\/api\.themoviedb\.org\/3\/(?:tv|movie)\/\d+\?.*watch(?:%2F|\/)providers.*$ script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js, requires-body=true, timeout=60, argument=[{fakeVipEnabled},{posterImageMode},{historyEpisodesMergedByShow},{translationEngine},{characterTranslationEnabled},{forwardButtonOrder},{infuseButtonOrder},{rexButtonOrder},{backendBaseUrl},{debugMode}], tag=TMDB Detail Watch Providers
-# 缓存压力测试脚本
-cron "0 0 1 1 1" script-path=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js, timeout=10, enable=false, tag=缓存压力测试脚本
 
 [MITM]
 hostname = apiz.trakt.tv, api.trakt.tv, api.themoviedb.org, image.tmdb.org, loon-plugins.demojameson.de5.net

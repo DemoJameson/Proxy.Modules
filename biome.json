@@ -13,8 +13,6 @@
             "!.tmp",
             "!*.min.js",
             "!trakt_simplified_chinese/trakt_simplified_chinese.js",
-            "!trakt_simplified_chinese/trakt_simplified_chinese_clear_cache.js",
-            "!trakt_simplified_chinese/trakt_simplified_chinese_expand_cache.js",
             "!scripts/vendor/Env.js",
             "!scripts/vendor/Env.module.mjs"
         ]
