@@ -1237,6 +1237,7 @@ export {
     getAuthToken,
     getCurrentSeason,
     getHashedFieldTranslation,
+    isLocalCacheDisabled,
     loadCache,
     loadCommentTranslationCache,
     loadDoubanCache,

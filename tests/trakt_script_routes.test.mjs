@@ -1726,7 +1726,7 @@ test("debugMode=disableLocal 时不读写本地持久化缓存", async () => {
     assert.equal(JSON.stringify(persistentData), initialCacheSnapshot);
 });
 
-test("debugMode=disableRemote 时不请求远端后端，本地缓存正常读写", async () => {
+test("debugMode=disableRemote 时不请求远端缓存接口，本地缓存正常读写", async () => {
     const initialPersistentData = createUnifiedPersistentData({
         traktTranslation: JSON.parse(createMovieTranslationCache()),
         translationOverrides: {
@@ -1758,15 +1758,16 @@ test("debugMode=disableRemote 时不请求远端后端，本地缓存正常读�
     });
 
     const payload = JSON.parse(result.body);
+    // apikeys 是配置下发而非缓存，debugMode 禁的是缓存，因此它是这里唯一允许的远端请求
     assert.equal(
-        httpLogs.some((item) => item.url?.startsWith("https://backend.example")),
+        httpLogs.some((item) => item.url?.startsWith("https://backend.example") && !item.url.includes("/api/trakt/apikeys")),
         false,
     );
     assert.notEqual(payload.title, "远端最新标题");
     assert.notEqual(JSON.stringify(persistentData), initialCacheSnapshot);
 });
 
-test("debugMode=disableAll 时既不请求远端也不读写本地", async () => {
+test("debugMode=disableAll 时既不请求远端缓存也不读写本地", async () => {
     const initialPersistentData = createUnifiedPersistentData({
         traktTranslation: JSON.parse(createMovieTranslationCache()),
         translationOverrides: {
@@ -1798,8 +1799,9 @@ test("debugMode=disableAll 时既不请求远端也不读写本地", async () =>
     });
 
     const payload = JSON.parse(result.body);
+    // apikeys 是配置下发而非缓存，不受 disableAll 影响
     assert.equal(
-        httpLogs.some((item) => item.url?.startsWith("https://backend.example")),
+        httpLogs.some((item) => item.url?.startsWith("https://backend.example") && !item.url.includes("/api/trakt/apikeys")),
         false,
     );
     assert.notEqual(payload.title, "本地覆盖标题");
