@@ -17,12 +17,14 @@
   放 translations、media detail、history、comments、list descriptions、sentiments 相关测试。
 - `trakt_script_people.test.mjs`
   放 people detail、media people list、person credits 相关测试。
+- `trakt_script_tmdb_api_key.test.mjs`
+  放 TMDb API key 下发链路测试：后端下发、本地缓存命中/过期、401 后自愈重取、拿不到 key 时跳过 TMDb 且不写图片负缓存。
 - `trakt_script_routes.test.mjs`
   放 Sofa Time、TMDb provider、request/response route matrix、以及不适合归到其他主题的 route smoke tests。
 - `trakt_script_user_agent.test.mjs`
   放脚本出站请求的 UA 标识测试：仅自建后端追加 `TraktSimplifiedChinese/<版本号>`，Trakt API 与 TMDb 保持原样。
 - `trakt_backend_*.test.mjs`
-  直接测 Vercel 后端 `api/trakt/` 接口的 KV 读写行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）。
+  直接测 Vercel 后端 `api/trakt/` 接口的行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）、`trakt_backend_api_keys.test.mjs`（API key 下发接口的环境变量与 UA 门槛）。
 
 新增脚本级测试时，优先按“行为域”归类，不按 URL 数量平均拆分。
 
@@ -95,6 +97,8 @@ npm run test:trakt:live
   用于 `/users/me/...`、`/users/settings`、真实 `watchnow` 等登录态接口；留空时相关 live case 会自动跳过
 - `LIVE_TEST_ALLOW_GOOGLE_TRANSLATE`
   设为 `true` 时，live harness 才允许脚本真实访问 DeepLX 翻译接口
+
+live 脚本测试依赖后端已配置 `TMDB_API_KEY`：中文海报、演职员翻译等用例会先请求 `TRAKT_BACKEND_BASE_URL/api/trakt/apikeys` 拿 TMDb key，后端未配置时这些用例会因拿不到 key 而跳过 TMDb 相关断言。
 
 ## 登录态测试
 

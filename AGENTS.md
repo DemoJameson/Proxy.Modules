@@ -33,6 +33,8 @@
 
 后端接口改动集中在 `api/trakt/`，管理页相关静态资源集中在 `public/admin.html`。不要引入 Next.js、Hono 或额外服务框架，除非任务明确要求迁移架构。
 
+脚本产物发布在公开仓库，因此第三方 API key 一律不写进脚本源码：TMDb key 由后端 `api/trakt/apikeys.js` 从 `TMDB_API_KEY` 环境变量下发，脚本侧在 `outbound/tmdb-client.mjs` 做「运行期单例 + `$persistentStore` 24 小时缓存 + 失效 key 拉黑并跨请求自愈」，取值链与降级行为见 `DEPLOY_VERCEL.md`。新增第三方 key 时沿用同一接口与同一取值链，不要在 `src/` 里硬编码。
+
 ## 生成产物与配置
 
 `trakt_simplified_chinese/*.js`、`*.plugin`、`*.sgmodule`、`*.snippet` 以及根目录 `boxjs.json` 是发布/订阅相关产物或配置。修改 Trakt 源码、模块参数、资源链接或 Env 适配时，运行 `npm run build:trakt` 并检查这些文件是否随之变化。
@@ -50,6 +52,7 @@
 - `tests/trakt_script_watchnow.test.mjs`：watchnow、用户设置、season request state、redirect/logo rewrite。
 - `tests/trakt_script_translations.test.mjs`：translations、媒体详情、history、comments、list descriptions、sentiments。
 - `tests/trakt_script_people.test.mjs`：people detail、media people list、person credits。
+- `tests/trakt_script_tmdb_api_key.test.mjs`：TMDb API key 下发链路（后端下发、本地缓存命中/过期、401 自愈重取、无 key 时跳过 TMDb 且不写图片负缓存）。
 - `tests/trakt_script_routes.test.mjs`：Sofa Time、TMDb provider、request/response route matrix 和其他 route smoke tests。
 - `tests/trakt_script_user_agent.test.mjs`：脚本出站请求的 UA 标识（仅自建后端追加 `TraktSimplifiedChinese/<版本号>`）。
 

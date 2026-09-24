@@ -391,6 +391,17 @@ async function fetchImageEntries(mediaType, ref, fields) {
         return [];
     }
 
+    // 未启用海报替换（原图模式或非 Trakt UA）时本函数后续也会返回空数组，先返回可避免无谓地取 TMDb key。
+    if (getImageFetchModes().length === 0) {
+        return [];
+    }
+
+    // 拿不到 TMDb key（后端不可用 / 未配置 / 远端缓存被禁用）时整体跳过：
+    // 否则下游会把"取不到图片"写成 NOT_FOUND 负缓存，后端恢复后仍要等缓存过期才自愈。
+    if (!(await tmdbClientModule.hasApiKey())) {
+        return [];
+    }
+
     // 仅当 original 偏好必须补查 TMDb 详情时才改用合并请求一次拿回详情与图片；其余场景维持单独图片 API。
     let mergedImagesPayload = null;
     if (needsMergedImageDetail(mediaType, ref)) {

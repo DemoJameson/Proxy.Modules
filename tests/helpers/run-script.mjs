@@ -9,6 +9,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const scriptPath = path.resolve(__dirname, "..", "..", "trakt_simplified_chinese", "trakt_simplified_chinese.js");
 const scriptContent = fs.readFileSync(scriptPath, "utf8");
 const GOOGLE_TRANSLATE_URL = "https://translation.googleapis.com/language/translate/v2";
+// 脚本不再硬编码 TMDb key，默认由后端 /api/trakt/apikeys 下发；测试用同一个假值构造期望 URL。
+const TEST_TMDB_API_KEY = "test-tmdb-api-key";
+const TEST_API_KEYS_PATH_PATTERN = /\/api\/trakt\/apikeys(?:\?|$)/;
+const TEST_API_KEYS_BODY = JSON.stringify({ keys: { tmdb: TEST_TMDB_API_KEY } });
 
 function createTestConsole(verboseLogs) {
     if (verboseLogs) {
@@ -203,6 +207,11 @@ function runScript({
                         return;
                     }
 
+                    if (TEST_API_KEYS_PATH_PATTERN.test(String(options.url ?? ""))) {
+                        callback(null, { status: 200, statusCode: 200, body: TEST_API_KEYS_BODY }, TEST_API_KEYS_BODY);
+                        return;
+                    }
+
                     callback(new Error(`Unexpected HTTP GET: ${options.url}`));
                 },
                 post(options, callback) {
@@ -307,4 +316,4 @@ function runScript({
     });
 }
 
-export { runScript };
+export { runScript, TEST_TMDB_API_KEY };

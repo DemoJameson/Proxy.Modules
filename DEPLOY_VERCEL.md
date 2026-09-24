@@ -143,7 +143,7 @@ POST 请求体为 `{ "comments": { "9001": { "comment": { "sourceTextHash": "...
 5. 确认 Redis / KV 环境变量至少配置以下任意一组：
     - `KV_REST_API_URL` 和 `KV_REST_API_TOKEN`
     - `UPSTASH_REDIS_REST_URL` 和 `UPSTASH_REDIS_REST_TOKEN`
-6. 如需使用管理页面，继续配置 `ADMIN_TOKEN`；如需标题搜索，继续配置 `TRAKT_API_KEY`。
+6. 如需使用管理页面，继续配置 `ADMIN_TOKEN`；如需标题搜索，继续配置 `TRAKT_API_KEY`；如需中文海报等 TMDb 能力，继续配置 `TMDB_API_KEY`。
 7. 部署完成后，记录你的域名，例如 `https://your-project.vercel.app`。
 
 常用环境变量：
@@ -154,6 +154,26 @@ POST 请求体为 `{ "comments": { "9001": { "comment": { "sourceTextHash": "...
 | `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN` |       二选一 | Upstash Redis REST 地址与 Token。                                    |
 | `ADMIN_TOKEN`                                         |   管理页必需 | 访问翻译管理后台时输入的管理员令牌。                                 |
 | `TRAKT_API_KEY`                                       | 标题搜索必需 | Trakt app 的 client id，用于通过 Trakt API 搜索标题并解析 Trakt ID。 |
+| `TMDB_API_KEY`                                        |   TMDb 必需 | TMDb v3 API key，由 `/api/trakt/apikeys` 下发给脚本，用于中文海报与演职员翻译。 |
+
+### 脚本 API key 下发 `/api/trakt/apikeys`
+
+- 路径：`/api/trakt/apikeys`，方法 `GET`，实现文件 `/api/trakt/apikeys.js`
+- 作用：把脚本需要的第三方 API key（当前只有 TMDb）收敛到部署环境变量，避免硬编码进公开的脚本产物
+- 响应：`{ "keys": { "tmdb": "<TMDb v3 key>" } }`（`keys` 下按服务名平铺，未配置的服务不出现）；未配置 `TMDB_API_KEY` 时返回 `500`
+- 缓存：响应头 `Cache-Control: no-store`，由脚本侧自行做 24 小时本地缓存
+- 门槛：请求需携带脚本 UA（`TraktSimplifiedChinese/<版本号>`），否则返回 `403`
+    - 注意这不是安全边界——脚本本身公开，任何人都能拼出这个 URL 并伪造 UA。
+      它的价值在于轮换 key 不必等用户重新拉取脚本，而不在于阻止恶意获取。
+- 脚本取值顺序：本次运行内单例 → 本地持久化缓存（24 小时 TTL）→ 本接口
+    - key 被判失效（TMDb `401`/`403`）时会**立刻拉黑**该 key 并向后端要新 key，不必等 TTL 过期：
+        - 后端已换出新 key → 本次请求直接用它重试成功
+        - 后端还没换 → 本次降级，且**下一个请求**会直接问后端（不会再用已知失效的 key 去撞 TMDb），后端一换 key 即恢复
+        - 拉黑状态落在持久化缓存，因此跨请求生效；后端下发的 key 若仍在黑名单里也不会被拿去请求 TMDb
+        - 拉黑有 10 分钟有效期：窗口内不拿它撞 TMDb，窗口过后允许同一把 key 再试一次，避免把瞬时 `401` 误判成 key 失效后永久判死
+        - 只有同一次运行内会做 60 秒抑制，避免一次页面请求里反复查询后端；跨请求始终以"尽快拿到新 key"为准
+    - 拿不到 key 时跳过 TMDb 相关能力，**不会**写入图片 `NOT_FOUND` 负缓存
+    - 本接口是**配置下发而非缓存**，因此不受 `debugMode` 影响：选「禁用远端缓存」或「禁用所有缓存」时仍会请求它，只是不再读写远端缓存接口
 
 ## 管理页面
 

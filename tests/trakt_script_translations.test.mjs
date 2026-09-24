@@ -6,6 +6,8 @@ import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simpl
 import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
 import * as translationCache from "../trakt_simplified_chinese/src/shared/translation-cache.mjs";
 
+import { TEST_TMDB_API_KEY } from "./helpers/run-script.mjs";
+
 import {
     computeStringHash,
     createCommentTranslationCache,
@@ -36,13 +38,13 @@ const TEST_BACKEND_COMMENT_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trak
 const TEST_BACKEND_LIST_TRANSLATIONS_URL = `${TEST_BACKEND_BASE_URL}/api/trakt/list-translations`;
 const TEST_DIRECT_TRANSLATION_URL = "https://api.trakt.tv/movies/123/translations/zh?extended=all";
 const TEST_DIRECT_EPISODE_TRANSLATION_URL = "https://api.trakt.tv/shows/555/seasons/1/episodes/12/translations/zh?extended=all";
-const TEST_TMDB_MOVIE_IMAGES_URL = "https://api.tmdb.org/3/movie/456/images?language=zh%2Cen&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-const TEST_TMDB_MOVIE_IMAGES_ZH_URL = "https://api.tmdb.org/3/movie/456/images?language=zh&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-const TEST_TMDB_SHOW_IMAGES_URL = "https://api.tmdb.org/3/tv/777/images?language=zh%2Cen&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-const TEST_TMDB_SEASON_IMAGES_URL = "https://api.tmdb.org/3/tv/777/season/1/images?language=zh%2Cen&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-const TEST_TMDB_MOVIE_IMAGES_JA_URL = "https://api.tmdb.org/3/movie/456/images?language=zh%2Cja&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-const TEST_TMDB_MOVIE_DETAIL_URL = "https://api.tmdb.org/3/movie/456?api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-const TEST_TMDB_MOVIE_DETAIL_IMAGES_URL = "https://api.tmdb.org/3/movie/456?append_to_response=images&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
+const TEST_TMDB_MOVIE_IMAGES_URL = `https://api.tmdb.org/3/movie/456/images?language=zh%2Cen&api_key=${TEST_TMDB_API_KEY}`;
+const TEST_TMDB_MOVIE_IMAGES_ZH_URL = `https://api.tmdb.org/3/movie/456/images?language=zh&api_key=${TEST_TMDB_API_KEY}`;
+const TEST_TMDB_SHOW_IMAGES_URL = `https://api.tmdb.org/3/tv/777/images?language=zh%2Cen&api_key=${TEST_TMDB_API_KEY}`;
+const TEST_TMDB_SEASON_IMAGES_URL = `https://api.tmdb.org/3/tv/777/season/1/images?language=zh%2Cen&api_key=${TEST_TMDB_API_KEY}`;
+const TEST_TMDB_MOVIE_IMAGES_JA_URL = `https://api.tmdb.org/3/movie/456/images?language=zh%2Cja&api_key=${TEST_TMDB_API_KEY}`;
+const TEST_TMDB_MOVIE_DETAIL_URL = `https://api.tmdb.org/3/movie/456?api_key=${TEST_TMDB_API_KEY}`;
+const TEST_TMDB_MOVIE_DETAIL_IMAGES_URL = `https://api.tmdb.org/3/movie/456?append_to_response=images&api_key=${TEST_TMDB_API_KEY}`;
 
 function createPendingBackendPostMocks() {
     return {
@@ -2349,7 +2351,7 @@ test("/shows/:id/seasons 会用 TMDb 中文季海报替换 season images.poster[
 
 test("posterImageMode=original 时季海报缺 show language/country 会补查 show detail", async () => {
     const seasonPoster = "https://walter.trakt.tv/images/seasons/000/001/posters/original.jpg";
-    const seasonImagesUrl = "https://api.tmdb.org/3/tv/777/season/1/images?language=zh%2Cja&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
+    const seasonImagesUrl = `https://api.tmdb.org/3/tv/777/season/1/images?language=zh%2Cja&api_key=${TEST_TMDB_API_KEY}`;
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/shows/555/seasons",
         body: JSON.stringify([
@@ -2417,8 +2419,8 @@ test("posterImageMode=original 时季海报缺 show language/country 会补查 s
 
 test("posterImageMode=original 时季海报缺 show country 会用 TMDb detail 补国家", async () => {
     const seasonPoster = "https://walter.trakt.tv/images/seasons/000/001/posters/original.jpg";
-    const tmdbShowDetailUrl = "https://api.tmdb.org/3/tv/777?api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-    const seasonImagesUrl = "https://api.tmdb.org/3/tv/777/season/1/images?language=zh%2Cja&api_key=a0a4d50000eeb10604c5f9342c8b3f62";
+    const tmdbShowDetailUrl = `https://api.tmdb.org/3/tv/777?api_key=${TEST_TMDB_API_KEY}`;
+    const seasonImagesUrl = `https://api.tmdb.org/3/tv/777/season/1/images?language=zh%2Cja&api_key=${TEST_TMDB_API_KEY}`;
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/shows/555/seasons",
         body: JSON.stringify([
@@ -2486,8 +2488,8 @@ test("posterImageMode=original 时季海报缺 show country 会用 TMDb detail �
 });
 
 test("posterImageMode=original 季列表多季共享一次 TMDb show 详情请求", async () => {
-    const tmdbShowDetailUrl = "https://api.tmdb.org/3/tv/777?api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-    const seasonImagesUrl = (seasonNumber) => `https://api.tmdb.org/3/tv/777/season/${seasonNumber}/images?language=zh%2Cja&api_key=a0a4d50000eeb10604c5f9342c8b3f62`;
+    const tmdbShowDetailUrl = `https://api.tmdb.org/3/tv/777?api_key=${TEST_TMDB_API_KEY}`;
+    const seasonImagesUrl = (seasonNumber) => `https://api.tmdb.org/3/tv/777/season/${seasonNumber}/images?language=zh%2Cja&api_key=${TEST_TMDB_API_KEY}`;
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/shows/555/seasons",
         body: JSON.stringify([
@@ -2560,8 +2562,8 @@ test("posterImageMode=original 季列表多季共享一次 TMDb show 详情请�
 });
 
 test("posterImageMode=chinese 季列表并发共享一次 TMDb show 详情请求", async () => {
-    const tmdbShowDetailUrl = "https://api.tmdb.org/3/tv/777?api_key=a0a4d50000eeb10604c5f9342c8b3f62";
-    const seasonImagesUrl = (seasonNumber) => `https://api.tmdb.org/3/tv/777/season/${seasonNumber}/images?language=zh%2Cja&api_key=a0a4d50000eeb10604c5f9342c8b3f62`;
+    const tmdbShowDetailUrl = `https://api.tmdb.org/3/tv/777?api_key=${TEST_TMDB_API_KEY}`;
+    const seasonImagesUrl = (seasonNumber) => `https://api.tmdb.org/3/tv/777/season/${seasonNumber}/images?language=zh%2Cja&api_key=${TEST_TMDB_API_KEY}`;
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/shows/555/seasons",
         body: JSON.stringify([

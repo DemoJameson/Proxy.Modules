@@ -43,6 +43,12 @@ function fetchTranslations(query) {
     return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/translations?${query}`);
 }
 
+// 下发第三方 API key（当前只有 TMDb）。刻意不受 debugMode 的远端开关影响：
+// disableRemote / disableAll 禁的是"缓存"，而 key 属于配置下发 —— 跟着一起禁会让海报、人名翻译直接消失。
+function fetchApiKeys() {
+    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/apikeys`);
+}
+
 function fetchImages(query) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve(null);
@@ -129,6 +135,7 @@ function postListTranslations(payload) {
 
 export {
     DEFAULT_BACKEND_BASE_URL,
+    fetchApiKeys,
     fetchCommentTranslations,
     fetchDoubanCache,
     fetchImages,
