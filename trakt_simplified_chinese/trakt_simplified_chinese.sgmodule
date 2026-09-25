@@ -3,8 +3,8 @@
 #!icon=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/images/trakt.webp
 #!homepage=https://github.com/DemoJameson/Proxy.Modules
 #!author=DemoJameson
-#!arguments=fakeVipEnabled:"true", posterImageMode:"原片语言", historyEpisodesMergedByShow:"true", translationEngine:"谷歌翻译", characterTranslationEnabled:"true", forwardButtonOrder:"2", infuseButtonOrder:"3", rexButtonOrder:"4", backendBaseUrl:"https://proxy-modules.demojameson.de5.net", debugMode:"关闭"
-#!arguments-desc=fakeVipEnabled: 启用后伪装为 Trakt VIP 会员，移除 App 中的广告\nposterImageMode: 原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图\nhistoryEpisodesMergedByShow: 启用后会将历史页面电视剧类别的观看记录按电视剧合并\ntranslationEngine: 选择翻译引擎：谷歌翻译（快，需翻墙）、DeepLX（慢，可直连）、关闭\ncharacterTranslationEnabled: 启用后会用豆瓣翻译角色名\nforwardButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 2\ninfuseButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 3\nrexButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 4\nbackendBaseUrl: 用于批量获取 Trakt 的中文翻译，一般留空即可\ndebugMode: 禁用本地缓存：不读写持久化存储；禁用远端缓存：不请求后端缓存接口；禁用所有缓存：两者皆禁用
+#!arguments=fakeVipEnabled:"true", posterImageMode:"原片语言", historyEpisodesMergedByShow:"true", translationEngine:"谷歌翻译", characterTranslationEnabled:"true", forwardButtonOrder:"1", infuseButtonOrder:"2", rexButtonOrder:"3", backendBaseUrl:"https://proxy-modules.demojameson.de5.net", debugMode:"关闭"
+#!arguments-desc=fakeVipEnabled: 启用后伪装为 Trakt VIP 会员，移除 App 中的广告\nposterImageMode: 原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图\nhistoryEpisodesMergedByShow: 启用后会将历史页面电视剧类别的观看记录按电视剧合并\ntranslationEngine: 选择翻译引擎：谷歌翻译（快，需翻墙）、DeepLX（慢，可直连）、关闭\ncharacterTranslationEnabled: 启用后会用豆瓣翻译角色名\nforwardButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 1\ninfuseButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 2\nrexButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 3\nbackendBaseUrl: 用于批量获取 Trakt 的中文翻译，一般留空即可\ndebugMode: 禁用本地缓存：不读写持久化存储；禁用远端缓存：不请求后端缓存接口；禁用所有缓存：两者皆禁用
 
 [Script]
 # 处理播放器 DeepLink 跳转

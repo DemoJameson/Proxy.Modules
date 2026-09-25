@@ -29,20 +29,20 @@ test("translationEngine 默认 google，且位于 characterTranslationEnabled �
     const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false]"));
     assert.equal(parsed.translationEngine, "google");
     assert.equal(parsed.characterTranslationEnabled, false);
-    assert.equal(parsed.playerButtonOrder.forward, 2);
+    assert.equal(parsed.playerButtonOrder.forward, 1);
     assert.deepEqual(parsed.orderedPlayerTypes, ["forward", "infuse", "rex"]);
     assert.deepEqual(parsed.enabledPlayerTypes, ["forward", "infuse", "rex"]);
 });
 
-test("*Order 默认值为 2/3/4，非法值回落到默认序号", () => {
+test("*Order 默认值为 1/2/3，非法值回落到默认序号", () => {
     const defaults = normalizeArgument(createDefaultArgumentConfig());
-    assert.equal(defaults.playerButtonOrder.forward, 2);
-    assert.equal(defaults.playerButtonOrder.infuse, 3);
-    assert.equal(defaults.playerButtonOrder.rex, 4);
+    assert.equal(defaults.playerButtonOrder.forward, 1);
+    assert.equal(defaults.playerButtonOrder.infuse, 2);
+    assert.equal(defaults.playerButtonOrder.rex, 3);
 
     const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,abc,NaN,2.5]"));
-    assert.equal(parsed.playerButtonOrder.forward, 2);
-    assert.equal(parsed.playerButtonOrder.infuse, 3);
+    assert.equal(parsed.playerButtonOrder.forward, 1);
+    assert.equal(parsed.playerButtonOrder.infuse, 2);
     assert.equal(parsed.playerButtonOrder.rex, 2);
 });
 
