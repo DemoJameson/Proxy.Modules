@@ -16,9 +16,9 @@ const ARGUMENT_FIELDS = argumentFields.map((field) => {
 
 function createDefaultPlayerButtonOrderConfig() {
     return {
-        forward: 2,
-        infuse: 3,
-        rex: 4,
+        forward: 1,
+        infuse: 2,
+        rex: 3,
     };
 }
 
