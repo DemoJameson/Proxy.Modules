@@ -9,6 +9,8 @@
 ^https:\/\/apiz?\.trakt\.tv\/oauth\/(?:device\/code|device\/token|token)(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 篡改第三方 App 的 Trakt Auth token 请求
 ^https:\/\/auth\.trakt\.tv\/oauth\/token(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# 篡改第三方 App 的 trakt.tv token 请求
+^https:\/\/trakt\.tv\/oauth\/token(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 替换第三方 App 的 trakt.tv 授权地址
 ^https:\/\/trakt\.tv\/oauth\/authorize(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 替换第三方 App 的 auth.trakt.tv 授权地址

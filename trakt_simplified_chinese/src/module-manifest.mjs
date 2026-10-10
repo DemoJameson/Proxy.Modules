@@ -137,6 +137,16 @@ const scriptRules = [
         argumentKeys: ALL_ARGUMENT_KEYS,
     },
     {
+        title: "Trakt Web OAuth Client Rewrite",
+        comment: "篡改第三方 App 的 trakt.tv token 请求",
+        phase: "http-request",
+        pattern: String.raw`^https:\/\/trakt\.tv\/oauth\/token(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        requiresBody: true,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
+    {
         title: "Trakt Web OAuth Authorize Rewrite",
         comment: "替换第三方 App 的 trakt.tv 授权地址",
         phase: "http-request",

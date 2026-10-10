@@ -81,6 +81,8 @@ function createUnifiedCache(overrides = {}) {
                 episodes: {},
             },
             authTokens: overrides.authTokens ?? {},
+            tmdbApiKey: overrides.tmdbApiKey ?? null,
+            tamperAppAuthorization: overrides.tamperAppAuthorization ?? { records: [] },
         },
     });
 }

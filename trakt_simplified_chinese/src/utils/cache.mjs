@@ -7,6 +7,8 @@ const UNIFIED_CACHE_SCHEMA_VERSION = 14;
 const DOUBAN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
+// 篡改应用授权记录的条数上限：归一化与功能侧写入共用，避免损坏数据把缓存撑爆
+const TAMPER_AUTHORIZATION_RECORD_LIMIT = 50;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
 const PRUNE_SAFETY_REMEASURE_INTERVAL = 16;
@@ -365,6 +367,10 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
                 episodes: {},
             },
             authTokens: {},
+            tmdbApiKey: null,
+            tamperAppAuthorization: {
+                records: [],
+            },
         },
     };
 }
@@ -403,6 +409,35 @@ function normalizeRevlessEntryMap(cache) {
     return normalizeEntryMap(cache, (entry) => {
         return commonUtils.isPlainObject(entry) ? Object.fromEntries(Object.entries(entry).filter(([key]) => key !== "rev")) : null;
     });
+}
+
+// TMDb key 缓存条目：既可能是下发成功后的 key，也可能是限时拉黑的失效 key（此时 apiKey 为空）。
+function normalizeTmdbApiKeyEntry(entry) {
+    const source = commonUtils.ensureObject(entry);
+    const apiKey = String(source.apiKey ?? "").trim();
+    const invalidApiKey = String(source.invalidApiKey ?? "").trim();
+    if (!apiKey && !invalidApiKey) {
+        return null;
+    }
+    const expiresAt = Number(source.expiresAt);
+    const invalidUntil = Number(source.invalidUntil);
+    return {
+        apiKey,
+        expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
+        invalidApiKey,
+        invalidUntil: Number.isFinite(invalidUntil) ? invalidUntil : 0,
+    };
+}
+
+// 篡改应用授权的流程状态与长期绑定都由该功能自己归一化，这里只保证形状是对象数组。
+function normalizeTamperAppAuthorization(value) {
+    const source = commonUtils.ensureObject(value);
+    return {
+        records: commonUtils
+            .ensureArray(source.records)
+            .filter((record) => commonUtils.isPlainObject(record))
+            .slice(0, TAMPER_AUTHORIZATION_RECORD_LIMIT),
+    };
 }
 
 function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
@@ -448,6 +483,8 @@ function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VE
     nextCache.persistent.historyShows = normalizeEntryMap(persistentCache.historyShows, normalizeHistoryShowsEntry);
     nextCache.persistent.translationOverrides = normalizeTranslationOverrides(persistentCache.translationOverrides);
     nextCache.persistent.authTokens = normalizeAuthTokens(persistentCache.authTokens);
+    nextCache.persistent.tmdbApiKey = normalizeTmdbApiKeyEntry(persistentCache.tmdbApiKey);
+    nextCache.persistent.tamperAppAuthorization = normalizeTamperAppAuthorization(persistentCache.tamperAppAuthorization);
 
     return nextCache;
 }
@@ -478,6 +515,10 @@ function detectUnifiedCacheDrift(rawCache, nextCache) {
     const nextAuthTokens = nextCache.persistent.authTokens;
     const sourceAuthTokenKeys = Object.keys(sourceAuthTokens);
     if (sourceAuthTokenKeys.length !== Object.keys(nextAuthTokens).length || sourceAuthTokenKeys.some((key) => sourceAuthTokens[key] !== nextAuthTokens[key])) {
+        return true;
+    }
+
+    if (commonUtils.ensureArray(sourcePersistent.tamperAppAuthorization?.records).length !== nextCache.persistent.tamperAppAuthorization.records.length) {
         return true;
     }
 
@@ -1269,6 +1310,7 @@ export {
     saveUnifiedCache,
     setCurrentSeason,
     setHashedFieldTranslation,
+    TAMPER_AUTHORIZATION_RECORD_LIMIT,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_MAX_BYTES,
     UNIFIED_CACHE_REV_KEY,
