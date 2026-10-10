@@ -96,6 +96,13 @@ const argumentFields = [
         desc: "用于批量获取 Trakt 的中文翻译，一般留空即可",
     },
     {
+        key: "tamperAppAuthorizationEnabled",
+        defaultValue: false,
+        type: "boolean",
+        tag: "篡改应用授权",
+        desc: "启用后将第三方 App 的 Trakt 授权篡改成 Trakt 官方 App，规避应用连接数的限制，请仅在需要时开启",
+    },
+    {
         key: "debugMode",
         defaultValue: "off",
         type: "select",
@@ -109,6 +116,62 @@ const argumentFields = [
 const ALL_ARGUMENT_KEYS = argumentFields.map((field) => field.key);
 
 const scriptRules = [
+    {
+        title: "Trakt OAuth Client Rewrite",
+        comment: "篡改第三方 App 的 Trakt OAuth 设备码和 token 请求",
+        phase: "http-request",
+        pattern: String.raw`^https:\/\/apiz?\.trakt\.tv\/oauth\/(?:device\/code|device\/token|token)(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        requiresBody: true,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
+    {
+        title: "Trakt Auth OAuth Client Rewrite",
+        comment: "篡改第三方 App 的 Trakt Auth token 请求",
+        phase: "http-request",
+        pattern: String.raw`^https:\/\/auth\.trakt\.tv\/oauth\/token(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        requiresBody: true,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
+    {
+        title: "Trakt Web OAuth Authorize Rewrite",
+        comment: "替换第三方 App 的 trakt.tv 授权地址",
+        phase: "http-request",
+        pattern: String.raw`^https:\/\/trakt\.tv\/oauth\/authorize(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
+    {
+        title: "Trakt Auth OAuth Authorize Rewrite",
+        comment: "替换第三方 App 的 auth.trakt.tv 授权地址",
+        phase: "http-request",
+        pattern: String.raw`^https:\/\/auth\.trakt\.tv\/oauth\/authorize(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
+    {
+        title: "Trakt OAuth Callback Rewrite",
+        comment: "将 Trakt 官方授权回调还原为第三方 App 回调",
+        phase: "http-response",
+        pattern: String.raw`^https:\/\/auth\.trakt\.tv\/api\/auth\/oauth2\/authorize(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
+    {
+        title: "Trakt Web OAuth Callback Rewrite",
+        comment: "将 trakt.tv 官方授权回调还原为第三方 App 回调",
+        phase: "http-response",
+        pattern: String.raw`^https:\/\/trakt\.tv\/api\/auth\/oauth2\/authorize(?:\?.*)?$`,
+        scriptFile: TRAKT_SCRIPT_FILE,
+        timeout: 10,
+        argumentKeys: ALL_ARGUMENT_KEYS,
+    },
     {
         title: "Direct Redirect",
         comment: "处理播放器 DeepLink 跳转",
@@ -189,7 +252,7 @@ const scriptRules = [
     },
 ];
 
-const mitmHosts = ["apiz.trakt.tv", "api.trakt.tv", "api.themoviedb.org", "image.tmdb.org", "loon-plugins.demojameson.de5.net"];
+const mitmHosts = ["apiz.trakt.tv", "api.trakt.tv", "auth.trakt.tv", "trakt.tv", "api.themoviedb.org", "image.tmdb.org", "loon-plugins.demojameson.de5.net"];
 
 const boxjs = {
     id: "demojameson.app.sub",

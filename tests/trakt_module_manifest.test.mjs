@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { formatBuildVersion, renderGeneratedTargets, renderScriptBanner } from "../scripts/build-trakt.mjs";
+import { formatBuildVersion, renderGeneratedTargets, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
 import { argumentFields, BOXJS_CONFIG_KEY, metadata } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { PLAYER_DEFINITIONS } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
 
@@ -22,6 +22,23 @@ test("module manifest renders tracked Trakt subscription and BoxJs files", async
         const actual = await readFile(path.join(rootDir, target.outputFile), "utf8");
         assert.equal(normalizeLineEndings(actual), normalizeLineEndings(target.content), `${target.outputFile} should be generated from module-manifest.mjs`);
     }
+});
+
+test("Quantumult X snippet 会按 requiresBody 选择请求体或响应头脚本类型", () => {
+    const snippet = normalizeLineEndings(renderSnippet());
+
+    assert.ok(
+        snippet.split("\n").some((line) => line.includes("device\\/code") && line.includes("script-request-body")),
+        "device/code 请求体规则应使用 script-request-body",
+    );
+    assert.ok(
+        snippet.split("\n").some((line) => line.includes("auth\\.trakt\\.tv\\/oauth\\/token") && line.includes("script-request-body")),
+        "auth token 请求体规则应使用 script-request-body",
+    );
+    assert.ok(
+        snippet.split("\n").some((line) => line.includes("api\\/auth\\/oauth2\\/authorize") && line.includes("script-response-header")),
+        "OAuth 回调响应头规则应使用 script-response-header",
+    );
 });
 
 test("build-trakt 头部元信息按 +08:00 分钟精度格式化，并与代码之间留出空行", () => {

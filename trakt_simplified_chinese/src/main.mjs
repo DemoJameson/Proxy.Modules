@@ -19,6 +19,9 @@ function applyResult(env, result) {
         if (Object.hasOwn(normalized, "headers")) {
             payload.headers = normalized.headers;
         }
+        if (Object.hasOwn(normalized, "body")) {
+            payload.body = normalized.body;
+        }
         env.done(payload);
         return;
     }

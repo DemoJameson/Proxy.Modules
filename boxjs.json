@@ -19,6 +19,7 @@
                 "@dj_trakt_boxjs_configs.infuseButtonOrder",
                 "@dj_trakt_boxjs_configs.rexButtonOrder",
                 "@dj_trakt_boxjs_configs.backendBaseUrl",
+                "@dj_trakt_boxjs_configs.tamperAppAuthorizationEnabled",
                 "@dj_trakt_boxjs_configs.debugMode"
             ],
             "author": "@DemoJameson",
@@ -172,6 +173,13 @@
                     "val": "https://proxy-modules.demojameson.de5.net",
                     "type": "text",
                     "desc": "用于批量获取 Trakt 的中文翻译，一般留空即可"
+                },
+                {
+                    "id": "@dj_trakt_boxjs_configs.tamperAppAuthorizationEnabled",
+                    "name": "篡改应用授权",
+                    "val": false,
+                    "type": "boolean",
+                    "desc": "启用后将第三方 App 的 Trakt 授权篡改成 Trakt 官方 App，规避应用连接数的限制，请仅在需要时开启"
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.debugMode",

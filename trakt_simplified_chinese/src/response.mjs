@@ -7,10 +7,17 @@ import * as peopleTranslationHandler from "./features/people-translation.mjs";
 import * as playerInjectionSofaTimeHandler from "./features/player-injection-sofatime.mjs";
 import * as playerInjectionTraktHandler from "./features/player-injection-trakt.mjs";
 import * as sentimentsTranslationHandler from "./features/sentiments-translation.mjs";
+import * as tamperAppAuthorizationHandler from "./features/tamper-app-authorization.mjs";
 import { createRoute, dispatchRoutes } from "./shared/route.mjs";
 
 function createResponsePhaseRoutes() {
     return [
+        createRoute({
+            pattern: /^api\/auth\/oauth2\/authorize$/i,
+            host: /^(?:auth\.)?trakt\.tv$/i,
+            id: "oauth.callback",
+            handler: tamperAppAuthorizationHandler.handleAuthorizeCallbackResponse,
+        }),
         createRoute({ pattern: /^(movies|shows)\/[^/]+\/lists\/[^/]+(\/[^/]+)?$/i, id: "media.lists.typeSort", handler: listsTranslationHandler.handleList }),
         createRoute({ pattern: /^users\/[^/]+\/likes\/lists$/i, id: "users.likes.lists", handler: listsTranslationHandler.handleList }),
         createRoute({ pattern: /^users\/[^/]+\/lists\/collaborations$/i, id: "users.lists.collaborations", handler: listsTranslationHandler.handleList }),

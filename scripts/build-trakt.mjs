@@ -360,7 +360,14 @@ function renderSnippet() {
     scriptRules
         .filter((rule) => getRuleTargets(rule).includes("snippet"))
         .forEach((rule) => {
-            const snippetType = rule.phase === "http-request" ? "script-request-header" : "script-response-body";
+            const snippetType =
+                rule.phase === "http-request"
+                    ? rule.requiresBody
+                        ? "script-request-body"
+                        : "script-request-header"
+                    : rule.requiresBody
+                      ? "script-response-body"
+                      : "script-response-header";
             lines.push(`# ${rule.comment}`, `${rule.pattern} url ${snippetType} ${buildScriptUrl(rule.scriptFile)}`);
         });
 
