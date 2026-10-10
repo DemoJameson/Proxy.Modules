@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { TMDB_API_KEY_CACHE_KEY } from "../trakt_simplified_chinese/src/outbound/tmdb-client.mjs";
-
 import { TEST_TMDB_API_KEY } from "./helpers/run-script.mjs";
 import {
     createHttpErrorMock,
@@ -24,14 +22,11 @@ function createApiKeysBody(apiKey) {
 }
 
 function createApiKeyCacheData(apiKey, expiresAt, { invalidApiKey = "", invalidUntil = 0 } = {}) {
-    return {
-        ...createUnifiedPersistentData(),
-        [TMDB_API_KEY_CACHE_KEY]: JSON.stringify({ apiKey, expiresAt, invalidApiKey, invalidUntil }),
-    };
+    return createUnifiedPersistentData({ tmdbApiKey: { apiKey, expiresAt, invalidApiKey, invalidUntil } });
 }
 
 function readApiKeyCache(persistentData) {
-    return JSON.parse(String(persistentData[TMDB_API_KEY_CACHE_KEY] ?? "{}"));
+    return parseUnifiedCache(persistentData).persistent.tmdbApiKey ?? {};
 }
 
 function readCachedApiKey(persistentData) {
@@ -138,7 +133,7 @@ test("后端未配置 key（500）时不请求 TMDb，也不写图片负缓存",
         false,
     );
     assert.deepEqual(parseUnifiedCache(persistentData).trakt.image, {});
-    assert.equal(persistentData[TMDB_API_KEY_CACHE_KEY], undefined);
+    assert.equal(parseUnifiedCache(persistentData).persistent.tmdbApiKey, null);
 });
 
 test("后端不可达时不请求 TMDb，也不写图片负缓存", async () => {

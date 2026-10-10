@@ -1,3 +1,4 @@
+import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
 
@@ -6,9 +7,13 @@ const TRAKT_TAMPER_REDIRECT_URI = "trakt://auth";
 const TRAKT_TAMPER_AUTHORIZE_URL = "https://auth.trakt.tv/oauth/authorize";
 const TRAKT_TAMPER_CALLBACK_HOST = "auth.trakt.tv";
 const TRAKT_TAMPER_CALLBACK_PATH = "/api/auth/oauth2/authorize";
-const TRAKT_TAMPER_STATE_KEY = "dj_trakt_tamper_app_authorization_state";
-const TRAKT_TAMPER_STATE_TTL_MS = 10 * 60 * 1000;
-const TRAKT_TAMPER_STATE_SLOT_COUNT = 10;
+const TRAKT_TAMPER_STATE_TTL_MS = 5 * 60 * 1000;
+// 条数上限由缓存层统一定义，保证归一化与写入用的是同一个上限
+const TRAKT_TAMPER_STATE_RECORD_LIMIT = cacheUtils.TAMPER_AUTHORIZATION_RECORD_LIMIT;
+// 授权流程状态与长期绑定都落在 unified cache 的 persistent.tamperAppAuthorization 里，不额外占持久化 key
+// Trakt access_token 的 expires_in 为 604800 秒（7 天），绑定过期时间按它加冗余计算
+const TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TRAKT_TAMPER_BINDING_REDUNDANCY_MS = 30 * 24 * 60 * 60 * 1000;
 const TRAKT_TAMPER_DEFAULT_CALLBACK_STATUS = 302;
 
 const TRAKT_TAMPER_DISABLED_REDIRECT_SCHEMES = ["rex://", "forward://"];
@@ -298,111 +303,135 @@ function isTamperStateFresh(state) {
     return Number.isFinite(createdAt) && Date.now() - createdAt <= TRAKT_TAMPER_STATE_TTL_MS;
 }
 
-function getTamperStateSlotKey(slot) {
-    return `${TRAKT_TAMPER_STATE_KEY}.${slot}`;
+function isTamperBindingFresh(state) {
+    const bindingExpiresAt = Number(state?.bindingExpiresAt);
+    return Number.isFinite(bindingExpiresAt) && bindingExpiresAt > Date.now();
 }
 
-function getTamperStateSlot(state) {
-    const text = String(state?.codeChallenge ?? state?.id ?? "");
-    let hash = 0;
-    for (let index = 0; index < text.length; index += 1) {
-        hash = (Math.imul(hash, 31) + text.charCodeAt(index)) >>> 0;
-    }
-    return hash % TRAKT_TAMPER_STATE_SLOT_COUNT;
+// 流程状态 5 分钟有效，绑定按 access_token 生命周期 + 冗余有效；两者任一有效都保留该记录
+function isTamperStateAlive(state) {
+    return isTamperStateFresh(state) || isTamperBindingFresh(state);
 }
 
-function loadTamperStateSlot(env, slot) {
+// 只有真正进行中的授权流程（带 PKCE challenge）才必须保留；
+// 设备码写出的纯绑定记录虽然 createdAt 很新，但不属于进行中的流程
+function isTamperFlowPending(state) {
+    return isTamperStateFresh(state) && String(state?.codeChallenge ?? "").trim() !== "";
+}
+
+function getTamperStateRetention(state) {
+    return Math.max(Number(state?.createdAt) + TRAKT_TAMPER_STATE_TTL_MS, Number(state?.bindingExpiresAt) || 0);
+}
+
+function loadTamperRecords(env) {
     try {
-        const state = env.getjson(getTamperStateSlotKey(slot), null);
-        return commonUtils.isPlainObject(state) && isTamperStateFresh(state) ? { ...state, slot } : null;
+        // 授权状态属于鉴权关键数据，与 authTokens 一样不受 debugMode 的本地缓存禁用影响
+        const store = cacheUtils.loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true }).persistent.tamperAppAuthorization;
+        return commonUtils.ensureArray(store?.records).filter((record) => commonUtils.isPlainObject(record) && isTamperStateAlive(record));
     } catch (error) {
         env.log(`Trakt tamper app authorization state load failed: ${error}`);
-        return null;
+        return [];
     }
 }
 
-function loadTamperStateSlots(env) {
-    const states = [];
-    for (let slot = 0; slot < TRAKT_TAMPER_STATE_SLOT_COUNT; slot += 1) {
-        const state = loadTamperStateSlot(env, slot);
-        if (state) {
-            states.push(state);
-        }
+// 进行中的授权流程必须保留，否则刚发起的授权会被自己挤掉；其余按保留截止时间排序，先淘汰最没有保留价值的记录
+function compareTamperRecordsForKeep(left, right) {
+    const leftPending = isTamperFlowPending(left) ? 1 : 0;
+    const rightPending = isTamperFlowPending(right) ? 1 : 0;
+    if (leftPending !== rightPending) {
+        return rightPending - leftPending;
     }
-    return states;
+    return getTamperStateRetention(right) - getTamperStateRetention(left);
 }
 
-function isTamperStateSlotOccupied(env, slot) {
+function pruneTamperRecords(records) {
+    return records
+        .filter((record) => commonUtils.isPlainObject(record) && isTamperStateAlive(record))
+        .sort(compareTamperRecordsForKeep)
+        .slice(0, TRAKT_TAMPER_STATE_RECORD_LIMIT);
+}
+
+function saveTamperRecords(env, records) {
     try {
-        const state = env.getjson(getTamperStateSlotKey(slot), null);
-        return commonUtils.isPlainObject(state) && isTamperStateFresh(state);
-    } catch (error) {
-        env.log(`Trakt tamper app authorization state load failed: ${error}`);
-        return false;
-    }
-}
-
-function pickTamperStateSlot(env, preferredSlot) {
-    if (!isTamperStateSlotOccupied(env, preferredSlot)) {
-        return preferredSlot;
-    }
-
-    for (let offset = 1; offset < TRAKT_TAMPER_STATE_SLOT_COUNT; offset += 1) {
-        const slot = (preferredSlot + offset) % TRAKT_TAMPER_STATE_SLOT_COUNT;
-        if (!isTamperStateSlotOccupied(env, slot)) {
-            return slot;
-        }
-    }
-
-    const states = loadTamperStateSlots(env);
-    if (states.length === 0) {
-        return preferredSlot;
-    }
-    return states.reduce((oldest, state) => (Number(state.createdAt) < Number(oldest.createdAt) ? state : oldest)).slot;
-}
-
-function saveTamperStateSlot(env, slot, state) {
-    try {
-        env.setjson(
-            {
-                id: state.id,
-                redirectUri: state.redirectUri,
-                originalState: state.originalState,
-                codeVerifier: state.codeVerifier,
-                codeChallenge: state.codeChallenge,
-                code: state.code,
-                callbackAt: state.callbackAt,
-                createdAt: state.createdAt,
+        const nextStore = { records: pruneTamperRecords(records) };
+        const unifiedCache = cacheUtils.loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true });
+        unifiedCache.persistent.tamperAppAuthorization = nextStore;
+        cacheUtils.saveUnifiedCache(env, unifiedCache, undefined, undefined, undefined, {
+            force: true,
+            owner: {
+                path: ["persistent", "tamperAppAuthorization"],
+                value: nextStore,
             },
-            getTamperStateSlotKey(slot),
-        );
+        });
     } catch (error) {
         env.log(`Trakt tamper app authorization state save failed: ${error}`);
     }
 }
 
 function saveTamperState(env, state) {
-    const slot = pickTamperStateSlot(env, getTamperStateSlot(state));
-    saveTamperStateSlot(env, slot, {
-        ...state,
-        createdAt: Date.now(),
-    });
+    const records = loadTamperRecords(env);
+    const next = { ...state, createdAt: Date.now() };
+    const id = String(next.id ?? "").trim();
+    const index = id ? records.findIndex((record) => String(record?.id ?? "").trim() === id) : -1;
+    if (index >= 0) {
+        records[index] = { ...records[index], ...next };
+    } else {
+        records.push(next);
+    }
+    saveTamperRecords(env, records);
 }
 
 function updateTamperState(env, predicate, updates) {
-    const state = loadTamperStateSlots(env).find(predicate);
-    if (!state) {
+    const records = loadTamperRecords(env);
+    const index = records.findIndex((record) => isTamperStateFresh(record) && predicate(record));
+    if (index < 0) {
         return false;
     }
-    saveTamperStateSlot(env, state.slot, {
-        ...state,
-        ...updates,
-    });
+    records[index] = { ...records[index], ...updates };
+    saveTamperRecords(env, records);
     return true;
 }
 
 function findTamperState(env, predicate) {
-    return loadTamperStateSlots(env).find(predicate) ?? null;
+    return loadTamperRecords(env).find(predicate) ?? null;
+}
+
+function findFreshTamperState(env, predicate) {
+    return findTamperState(env, (state) => isTamperStateFresh(state) && predicate(state));
+}
+
+function isSameTamperBinding(state, clientId) {
+    return String(state?.clientId ?? "").trim() === clientId;
+}
+
+function getTamperBindingExpiresAt() {
+    return Date.now() + TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS + TRAKT_TAMPER_BINDING_REDUNDANCY_MS;
+}
+
+function upsertTamperBinding(env, clientId) {
+    const normalizedClientId = String(clientId ?? "").trim();
+    if (!normalizedClientId) {
+        return;
+    }
+
+    const records = loadTamperRecords(env);
+    const bindingExpiresAt = getTamperBindingExpiresAt();
+    const index = records.findIndex((record) => isSameTamperBinding(record, normalizedClientId));
+    if (index >= 0) {
+        records[index] = { ...records[index], clientId: normalizedClientId, bindingExpiresAt };
+    } else {
+        // 设备码流程没有授权流程记录，单独写一条只带绑定的记录
+        records.push({ clientId: normalizedClientId, bindingExpiresAt, createdAt: Date.now() });
+    }
+    saveTamperRecords(env, records);
+}
+
+function findTamperBinding(env, clientId) {
+    const normalizedClientId = String(clientId ?? "").trim();
+    if (!normalizedClientId) {
+        return null;
+    }
+    return findTamperState(env, (state) => isTamperBindingFresh(state) && isSameTamperBinding(state, normalizedClientId));
 }
 
 function isOfficialTraktClientId(clientId) {
@@ -462,6 +491,11 @@ async function handleDeviceOAuthRequest() {
         }
     });
 
+    // 只在 device/code 阶段写一次绑定：device/token 会被 App 按 interval 反复轮询，每次整块写 unified cache 代价过高
+    if (pathname === "oauth/device/code") {
+        upsertTamperBinding(context.env, originalClientId);
+    }
+
     return {
         type: "rewriteRequest",
         url,
@@ -490,15 +524,22 @@ async function handleTokenOAuthRequest() {
     let state = null;
     if (requiresAuthorizationCode) {
         if (code) {
-            state = findTamperState(context.env, (entry) => String(entry.code ?? "") === code);
+            state = findFreshTamperState(context.env, (entry) => String(entry.code ?? "") === code);
         }
         if (!state) {
             context.env.log("Trakt tamper app authorization token rewrite skipped: no matching authorization flow");
             return { type: "passThrough" };
         }
+        upsertTamperBinding(context.env, originalClientId || state.clientId);
+    } else {
+        if (!findTamperBinding(context.env, originalClientId)) {
+            context.env.log("Trakt tamper app authorization token rewrite skipped: no matching authorization binding");
+            return { type: "passThrough" };
+        }
+        upsertTamperBinding(context.env, originalClientId);
     }
 
-    const codeVerifier = String(state?.codeVerifier ?? "").trim();
+    const codeVerifier = requiresAuthorizationCode ? String(state?.codeVerifier ?? "").trim() : "";
     const bodyResult = rewriteTokenBody(context.env.request.body, context.env.request.headers, codeVerifier);
     const url = rewriteUrlSearchParams(context.env.request.url, (searchParams) => {
         if (searchParams.has("client_id")) {
@@ -546,7 +587,8 @@ async function handleAuthorizeRequest() {
     }
 
     const originalUrl = new URL(context.env.request.url);
-    if (isAlreadyTamperedAuthorizeUrl(originalUrl) || isOfficialTraktClientId(originalUrl.searchParams.get("client_id"))) {
+    const originalClientId = String(originalUrl.searchParams.get("client_id") ?? "").trim();
+    if (isAlreadyTamperedAuthorizeUrl(originalUrl) || isOfficialTraktClientId(originalClientId)) {
         return { type: "passThrough" };
     }
 
@@ -571,6 +613,7 @@ async function handleAuthorizeRequest() {
     const originalState = originalUrl.searchParams.get("state") ?? "";
     saveTamperState(context.env, {
         id: pkce.challenge,
+        clientId: originalClientId,
         redirectUri: originalRedirectUri,
         originalState,
         codeVerifier: pkce.verifier,
@@ -623,7 +666,7 @@ async function handleAuthorizeCallbackResponse() {
 
     const callbackState = String(context.url.searchParams.get("state") ?? "").trim();
     const callbackChallenge = String(context.url.searchParams.get("code_challenge") ?? "").trim();
-    const state = findTamperState(context.env, (entry) => {
+    const state = findFreshTamperState(context.env, (entry) => {
         if (callbackState && String(entry.id ?? "") === callbackState) {
             return true;
         }
@@ -649,6 +692,7 @@ async function handleAuthorizeCallbackResponse() {
             code,
             callbackAt: Date.now(),
         });
+        upsertTamperBinding(context.env, state.clientId);
     }
 
     const nextLocation = appendCallbackQuery(redirectUri, location, String(state.originalState ?? "").trim());
@@ -671,10 +715,12 @@ export {
     handleAuthorizeCallbackResponse,
     handleAuthorizeRequest,
     handleOAuthRequest,
+    TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
     TRAKT_TAMPER_AUTHORIZE_URL,
+    TRAKT_TAMPER_BINDING_REDUNDANCY_MS,
     TRAKT_TAMPER_CALLBACK_HOST,
     TRAKT_TAMPER_CALLBACK_PATH,
     TRAKT_TAMPER_CLIENT_ID,
     TRAKT_TAMPER_REDIRECT_URI,
-    TRAKT_TAMPER_STATE_KEY,
+    TRAKT_TAMPER_STATE_RECORD_LIMIT,
 };

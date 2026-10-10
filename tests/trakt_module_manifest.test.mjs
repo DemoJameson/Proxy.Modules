@@ -5,7 +5,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { formatBuildVersion, renderGeneratedTargets, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
-import { argumentFields, BOXJS_CONFIG_KEY, metadata } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+import { argumentFields, BOXJS_CONFIG_KEY, metadata, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+import { createRequestPhaseRoutes } from "../trakt_simplified_chinese/src/request.mjs";
+import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
 import { PLAYER_DEFINITIONS } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -36,9 +38,66 @@ test("Quantumult X snippet 会按 requiresBody 选择请求体或响应头脚本
         "auth token 请求体规则应使用 script-request-body",
     );
     assert.ok(
+        snippet.split("\n").some((line) => line.startsWith(String.raw`^https:\/\/trakt\.tv\/oauth\/token`) && line.includes("script-request-body")),
+        "trakt.tv token 请求体规则应使用 script-request-body",
+    );
+    assert.ok(
         snippet.split("\n").some((line) => line.includes("api\\/auth\\/oauth2\\/authorize") && line.includes("script-response-header")),
         "OAuth 回调响应头规则应使用 script-response-header",
     );
+});
+
+// OAuth 相关端点需要模块清单规则和脚本路由同时覆盖，任一侧漏配都会导致请求未被改写。
+const OAUTH_INTERCEPT_TARGETS = [
+    { phase: "http-request", url: "https://api.trakt.tv/oauth/token" },
+    { phase: "http-request", url: "https://apiz.trakt.tv/oauth/token" },
+    { phase: "http-request", url: "https://api.trakt.tv/oauth/device/code" },
+    { phase: "http-request", url: "https://api.trakt.tv/oauth/device/token" },
+    { phase: "http-request", url: "https://auth.trakt.tv/oauth/token" },
+    { phase: "http-request", url: "https://trakt.tv/oauth/token" },
+    { phase: "http-request", url: "https://trakt.tv/oauth/authorize" },
+    { phase: "http-request", url: "https://auth.trakt.tv/oauth/authorize" },
+    { phase: "http-response", url: "https://auth.trakt.tv/api/auth/oauth2/authorize" },
+    { phase: "http-response", url: "https://trakt.tv/api/auth/oauth2/authorize" },
+];
+
+function createRouteContext(url) {
+    const parsed = new URL(url);
+    parsed.shortPathname = parsed.pathname.replace(/^\/+|\/+$/g, "");
+    return { url: parsed };
+}
+
+test("OAuth 模块清单规则与请求/响应路由保持一致", () => {
+    const routesByPhase = {
+        "http-request": createRequestPhaseRoutes(),
+        "http-response": createResponsePhaseRoutes(),
+    };
+    const oauthRules = scriptRules.filter((rule) => rule.pattern.includes("oauth"));
+    const oauthRoutes = Object.entries(routesByPhase).flatMap(([phase, routes]) =>
+        routes.filter((route) => route.describe().startsWith("oauth.")).map((route) => ({ phase, route })),
+    );
+
+    for (const target of OAUTH_INTERCEPT_TARGETS) {
+        const ruleMatched = oauthRules.some((rule) => rule.phase === target.phase && new RegExp(rule.pattern).test(target.url));
+        assert.ok(ruleMatched, `${target.phase} ${target.url} 应被模块清单规则覆盖`);
+
+        const routeMatched = oauthRoutes.some(({ phase, route }) => phase === target.phase && route.test(createRouteContext(target.url)));
+        assert.ok(routeMatched, `${target.phase} ${target.url} 应被脚本路由覆盖`);
+    }
+
+    for (const rule of oauthRules) {
+        assert.ok(
+            OAUTH_INTERCEPT_TARGETS.some((target) => target.phase === rule.phase && new RegExp(rule.pattern).test(target.url)),
+            `模块清单规则「${rule.title}」未出现在一致性用例的端点列表里`,
+        );
+    }
+
+    for (const { phase, route } of oauthRoutes) {
+        assert.ok(
+            OAUTH_INTERCEPT_TARGETS.some((target) => target.phase === phase && route.test(createRouteContext(target.url))),
+            `脚本路由「${route.describe()}」未出现在一致性用例的端点列表里`,
+        );
+    }
 });
 
 test("build-trakt 头部元信息按 +08:00 分钟精度格式化，并与代码之间留出空行", () => {

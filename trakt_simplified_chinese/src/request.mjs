@@ -22,6 +22,12 @@ function createRequestPhaseRoutes() {
             handler: tamperAppAuthorizationHandler.handleOAuthRequest,
         }),
         createRoute({
+            id: "oauth.web.client",
+            host: /^trakt\.tv$/i,
+            pattern: /^oauth\/token$/,
+            handler: tamperAppAuthorizationHandler.handleOAuthRequest,
+        }),
+        createRoute({
             id: "oauth.authorize.trakt",
             host: /^trakt\.tv$/i,
             pattern: /^oauth\/authorize$/,

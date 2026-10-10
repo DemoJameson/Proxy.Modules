@@ -17,6 +17,7 @@ import {
     saveCommentTranslationCache,
     setCurrentSeason,
     setHashedFieldTranslation,
+    TAMPER_AUTHORIZATION_RECORD_LIMIT,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_REV_KEY,
 } from "../trakt_simplified_chinese/src/utils/cache.mjs";
@@ -102,6 +103,13 @@ test("cache utils: hashed field translation roundtrip works for comments cache s
     assert.equal(getHashedFieldTranslation(cache, 9001, "comment", "Great movie"), "很棒的电影");
     assert.equal(getHashedFieldTranslation(cache, 9001, "comment", "Another movie"), "");
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
+});
+
+test("cache utils: normalizeUnifiedCache 截断超量的篡改授权记录", () => {
+    const records = Array.from({ length: TAMPER_AUTHORIZATION_RECORD_LIMIT + 5 }, (_, index) => ({ clientId: `client-${index}` }));
+    const normalized = normalizeUnifiedCache({ version: 14, persistent: { tamperAppAuthorization: { records } } });
+
+    assert.equal(normalized.persistent.tamperAppAuthorization.records.length, TAMPER_AUTHORIZATION_RECORD_LIMIT);
 });
 
 test("cache utils: normalizeUnifiedCache keeps comments cache in current nested shape", () => {
