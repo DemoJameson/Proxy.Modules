@@ -296,10 +296,11 @@ function runResponseCase(input) {
 }
 
 function runRequestCase(input) {
-    const { argument, ...rest } = input ?? {};
+    const { argument, body, requestBody, ...rest } = input ?? {};
     return runScript({
         hasResponse: false,
         ...rest,
+        requestBody: requestBody ?? body,
         argument: {
             translationEngine: "deeplx",
             ...argument,

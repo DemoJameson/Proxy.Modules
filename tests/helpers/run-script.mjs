@@ -1,3 +1,4 @@
+import { webcrypto } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -108,6 +109,7 @@ function resolveHttpMock(mocks, url) {
 function runScript({
     url,
     body,
+    requestBody,
     headers = {},
     responseHeaders = {},
     responseStatus = 200,
@@ -161,6 +163,7 @@ function runScript({
             $request: {
                 url,
                 headers,
+                body: requestBody,
             },
             $persistentStore: persistentStore,
             $httpClient: {
@@ -292,6 +295,7 @@ function runScript({
                 }, 0);
             },
             console: createTestConsole(verboseLogs),
+            crypto: webcrypto,
             URL,
             setTimeout: trackedSetTimeout,
             clearTimeout: trackedClearTimeout,
