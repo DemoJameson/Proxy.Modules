@@ -1,4 +1,4 @@
-import { TRAKT_TAMPER_CLIENT_ID } from "../shared/tamper-app-constants.mjs";
+import { TRAKT_TAMPER_CLIENT_ID, TRAKT_TAMPER_EXEMPT_CLIENT_IDS } from "../shared/tamper-app-constants.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
@@ -610,6 +610,12 @@ function isOfficialTraktClientId(clientId) {
     return String(clientId ?? "").trim() === TRAKT_TAMPER_CLIENT_ID;
 }
 
+// 这些 client 的授权不计入 Trakt 授权数量限制，篡改没有收益，直接放行
+function isTamperAppAuthorizationExemptClientId(clientId) {
+    const normalizedClientId = String(clientId ?? "").trim();
+    return !!normalizedClientId && TRAKT_TAMPER_EXEMPT_CLIENT_IDS.includes(normalizedClientId);
+}
+
 function isAlreadyTamperedAuthorizeUrl(url) {
     return isOfficialTraktClientId(url.searchParams.get("client_id")) && url.searchParams.get("redirect_uri") === TRAKT_TAMPER_REDIRECT_URI;
 }
@@ -646,7 +652,7 @@ async function handleDeviceOAuthRequest() {
     const originalClientId = String(
         bodyPayload?.client_id ?? context.url.searchParams.get("client_id") ?? getHeaderValue(context.env.request.headers, "trakt-api-key") ?? "",
     ).trim();
-    if (isOfficialTraktClientId(originalClientId)) {
+    if (isOfficialTraktClientId(originalClientId) || isTamperAppAuthorizationExemptClientId(originalClientId)) {
         return { type: "passThrough" };
     }
 
@@ -694,7 +700,11 @@ async function handleTokenOAuthRequest() {
         bodyPayload?.client_id ?? context.url.searchParams.get("client_id") ?? getHeaderValue(context.env.request.headers, "trakt-api-key") ?? "",
     ).trim();
 
-    if (isTamperAppAuthorizationDisabledForRedirectUri(originalRedirectUri) || isOfficialTraktClientId(originalClientId)) {
+    if (
+        isTamperAppAuthorizationDisabledForRedirectUri(originalRedirectUri) ||
+        isOfficialTraktClientId(originalClientId) ||
+        isTamperAppAuthorizationExemptClientId(originalClientId)
+    ) {
         return { type: "passThrough" };
     }
 
@@ -775,8 +785,8 @@ async function handleOAuthRequest() {
 function handleOAuthHeaderOnlyRequest(pathname) {
     const context = globalThis.$ctx;
     const originalClientId = String(context.url.searchParams.get("client_id") ?? getHeaderValue(context.env.request.headers, "trakt-api-key") ?? "").trim();
-    // 识别不出第三方 client（或本来就是官方 client）时不补写，避免把无关请求改坏
-    if (!originalClientId || isOfficialTraktClientId(originalClientId)) {
+    // 识别不出第三方 client（或本来就是官方 client、豁免 client）时不补写，避免把无关请求改坏
+    if (!originalClientId || isOfficialTraktClientId(originalClientId) || isTamperAppAuthorizationExemptClientId(originalClientId)) {
         return { type: "passThrough" };
     }
     if (isTamperAppAuthorizationDisabledForRedirectUri(context.url.searchParams.get("redirect_uri"))) {
@@ -817,7 +827,7 @@ async function handleAuthorizeRequest() {
 
     const originalUrl = new URL(context.env.request.url);
     const originalClientId = String(originalUrl.searchParams.get("client_id") ?? "").trim();
-    if (isAlreadyTamperedAuthorizeUrl(originalUrl) || isOfficialTraktClientId(originalClientId)) {
+    if (isAlreadyTamperedAuthorizeUrl(originalUrl) || isOfficialTraktClientId(originalClientId) || isTamperAppAuthorizationExemptClientId(originalClientId)) {
         return { type: "passThrough" };
     }
 
@@ -1089,6 +1099,7 @@ export {
     TRAKT_TAMPER_CALLBACK_HOST,
     TRAKT_TAMPER_CALLBACK_PATH,
     TRAKT_TAMPER_CLIENT_ID,
+    TRAKT_TAMPER_EXEMPT_CLIENT_IDS,
     TRAKT_TAMPER_REDIRECT_URI,
     TRAKT_TAMPER_STATE_RECORD_LIMIT,
     TRAKT_TAMPER_TOKEN_RECORD_LIMIT,

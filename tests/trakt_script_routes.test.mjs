@@ -4,6 +4,7 @@ import test from "node:test";
 import {
     TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
     TRAKT_TAMPER_CLIENT_ID,
+    TRAKT_TAMPER_EXEMPT_CLIENT_IDS,
     TRAKT_TAMPER_REDIRECT_URI,
     TRAKT_TAMPER_STATE_RECORD_LIMIT,
     TRAKT_TAMPER_TOKEN_RECORD_LIMIT,
@@ -2215,6 +2216,49 @@ test("篡改应用授权默认关闭时 OAuth 请求直接放行", async () => {
         url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=senplayer%3A%2F%2Foauth-trakt",
     });
     assert.equal(Object.keys(authorizeRun.result).length, 0);
+});
+
+test("不计入授权数量限制的 Client（Infuse/Showly/Rippple）授权请求不会被篡改", async () => {
+    for (const clientId of TRAKT_TAMPER_EXEMPT_CLIENT_IDS) {
+        const authorizeRun = await runRequestCase({
+            url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&state=original-state`,
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(authorizeRun.result).length, 0);
+
+        const deviceRun = await runRequestCase({
+            url: "https://api.trakt.tv/oauth/device/code",
+            headers: {
+                "content-type": "application/json",
+                "trakt-api-key": clientId,
+            },
+            body: JSON.stringify({ client_id: clientId }),
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(deviceRun.result).length, 0);
+
+        const tokenRun = await runRequestCase({
+            url: "https://auth.trakt.tv/oauth/token",
+            headers: {
+                "content-type": "application/json",
+                "trakt-api-key": clientId,
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                redirect_uri: "thirdparty://oauth/callback",
+                grant_type: "authorization_code",
+                code: "auth-code",
+            }),
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(tokenRun.result).length, 0);
+    }
 });
 
 test("官方 Trakt Client 的授权请求不会被篡改", async () => {
