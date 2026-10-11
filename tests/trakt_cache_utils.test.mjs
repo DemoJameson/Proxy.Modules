@@ -18,6 +18,7 @@ import {
     setCurrentSeason,
     setHashedFieldTranslation,
     TAMPER_AUTHORIZATION_RECORD_LIMIT,
+    TAMPER_AUTHORIZATION_TOKEN_LIMIT,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_REV_KEY,
 } from "../trakt_simplified_chinese/src/utils/cache.mjs";
@@ -105,11 +106,15 @@ test("cache utils: hashed field translation roundtrip works for comments cache s
     assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
 });
 
-test("cache utils: normalizeUnifiedCache 截断超量的篡改授权记录", () => {
-    const records = Array.from({ length: TAMPER_AUTHORIZATION_RECORD_LIMIT + 5 }, (_, index) => ({ clientId: `client-${index}` }));
-    const normalized = normalizeUnifiedCache({ version: 14, persistent: { tamperAppAuthorization: { records } } });
+test("cache utils: normalizeUnifiedCache 截断超量的篡改授权流程、token 与 pending", () => {
+    const records = Array.from({ length: TAMPER_AUTHORIZATION_RECORD_LIMIT + 5 }, (_, index) => ({ id: `record-${index}` }));
+    const tokens = Array.from({ length: TAMPER_AUTHORIZATION_TOKEN_LIMIT + 5 }, (_, index) => ({ accessToken: `access-${index}` }));
+    const pending = Array.from({ length: TAMPER_AUTHORIZATION_RECORD_LIMIT + 5 }, (_, index) => ({ kind: "device_code", id: `pending-${index}` }));
+    const normalized = normalizeUnifiedCache({ version: 15, persistent: { tamperAppAuthorization: { records, tokens, pending } } });
 
     assert.equal(normalized.persistent.tamperAppAuthorization.records.length, TAMPER_AUTHORIZATION_RECORD_LIMIT);
+    assert.equal(normalized.persistent.tamperAppAuthorization.tokens.length, TAMPER_AUTHORIZATION_TOKEN_LIMIT);
+    assert.equal(normalized.persistent.tamperAppAuthorization.pending.length, TAMPER_AUTHORIZATION_RECORD_LIMIT);
 });
 
 test("cache utils: normalizeUnifiedCache keeps comments cache in current nested shape", () => {

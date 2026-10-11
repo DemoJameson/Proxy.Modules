@@ -70,8 +70,9 @@ function createRequestPhaseRoutes() {
     ];
 }
 
-function handleRequest() {
-    return dispatchRoutes(createRequestPhaseRoutes);
+async function handleRequest() {
+    const result = await dispatchRoutes(createRequestPhaseRoutes);
+    return tamperAppAuthorizationHandler.applyTraktApiKeyRewrite(result);
 }
 
 export { createRequestPhaseRoutes, handleRequest };

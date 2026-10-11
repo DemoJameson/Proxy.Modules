@@ -41,6 +41,14 @@ function createPersistentStore(initialData = {}) {
             data[key] = value;
             return true;
         },
+        // QX 的 $prefs 接口：valueForKey(key) / setValueForKey(value, key)
+        valueForKey(key) {
+            return Object.hasOwn(data, key) ? data[key] : null;
+        },
+        setValueForKey(value, key) {
+            data[key] = value;
+            return true;
+        },
     };
 }
 
@@ -119,6 +127,10 @@ function runScript({
     httpGetMocks = {},
     httpPostMocks = {},
     verboseLogs = false,
+    environment = "loon",
+    requestSessionIndex,
+    responseSessionIndex,
+    omitRequestBody = false,
 }) {
     return new Promise((resolve, reject) => {
         const persistentStore = createPersistentStore(persistentData);
@@ -157,15 +169,46 @@ function runScript({
             pendingTimers.clear();
         };
 
+        const isQuanX = environment === "qx";
+        const requestContext = {
+            url,
+            headers,
+        };
+        // QX 的 script-response-body / script-request-header 拿不到 $request.body，用 omitRequestBody 复现该行为
+        if (!omitRequestBody) {
+            requestContext.body = requestBody;
+        }
+        if (requestSessionIndex !== undefined) {
+            requestContext.sessionIndex = requestSessionIndex;
+        }
+        const qxFetch = (options) =>
+            new Promise((resolve, reject) => {
+                const target = String(options?.url ?? "");
+                const method = String(options?.method ?? "GET").toUpperCase();
+                httpLogs.push({
+                    method,
+                    url: target,
+                    body: String(options?.body ?? ""),
+                    headers: options?.headers,
+                });
+                const mock = resolveHttpMock(method === "POST" ? httpPostMocks : httpGetMocks, target);
+                if (mock) {
+                    const error = createMockHttpError(mock);
+                    if (error) {
+                        reject({ error: error.message });
+                        return;
+                    }
+                    const response = createMockHttpResponse(mock);
+                    resolve({ status: response.status, statusCode: response.statusCode, headers: {}, body: response.body });
+                    return;
+                }
+                reject({ error: `Unexpected $task.fetch: ${target}` });
+            });
         const context = {
-            $loon: {},
+            ...(isQuanX ? { $task: { fetch: qxFetch }, $notify: () => {} } : { $loon: {} }),
             $argument: argument,
-            $request: {
-                url,
-                headers,
-                body: requestBody,
-            },
-            $persistentStore: persistentStore,
+            $request: requestContext,
+            ...(isQuanX ? { $prefs: persistentStore } : { $persistentStore: persistentStore }),
             $httpClient: {
                 get(options, callback) {
                     httpLogs.push({
@@ -307,6 +350,7 @@ function runScript({
                 headers: responseHeaders,
                 status: responseStatus,
                 statusCode: responseStatus,
+                ...(responseSessionIndex !== undefined ? { sessionIndex: responseSessionIndex } : {}),
             };
         }
 

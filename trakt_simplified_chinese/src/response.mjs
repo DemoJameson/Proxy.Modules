@@ -18,6 +18,12 @@ function createResponsePhaseRoutes() {
             id: "oauth.callback",
             handler: tamperAppAuthorizationHandler.handleAuthorizeCallbackResponse,
         }),
+        createRoute({
+            pattern: /^oauth\/(?:device\/code|token|device\/token)$/i,
+            host: /^(?:apiz?\.trakt\.tv|auth\.trakt\.tv|trakt\.tv)$/i,
+            id: "oauth.response",
+            handler: tamperAppAuthorizationHandler.handleOAuthResponse,
+        }),
         createRoute({ pattern: /^(movies|shows)\/[^/]+\/lists\/[^/]+(\/[^/]+)?$/i, id: "media.lists.typeSort", handler: listsTranslationHandler.handleList }),
         createRoute({ pattern: /^users\/[^/]+\/likes\/lists$/i, id: "users.likes.lists", handler: listsTranslationHandler.handleList }),
         createRoute({ pattern: /^users\/[^/]+\/lists\/collaborations$/i, id: "users.lists.collaborations", handler: listsTranslationHandler.handleList }),
