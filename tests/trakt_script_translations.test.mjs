@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { TRAKT_TAMPER_CLIENT_ID } from "../trakt_simplified_chinese/src/features/tamper-app-authorization.mjs";
 import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
@@ -4707,6 +4708,48 @@ test("源请求无 Authorization 但缓存有对应 apiKey 的 token 时走 bulk
     const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
     assert.equal(bulkLogs.length, 4);
     assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
+});
+
+test("篡改流程签发的 token 走 bulk 时会把 trakt-api-key 换成官方 client id", async () => {
+    const movieCount = 11;
+    const cachedApiKey = "cached-api-key-tamper";
+    const accessToken = "tamper-token-abc";
+    const httpPostMocks = createPendingBackendPostMocks();
+    const { httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { "trakt-api-key": cachedApiKey },
+        persistentData: createUnifiedPersistentData({
+            authTokens: { [cachedApiKey]: `Bearer ${accessToken}` },
+            tamperAppAuthorization: {
+                records: [],
+                tokens: [
+                    {
+                        accessToken,
+                        refreshToken: "tamper-refresh",
+                        clientId: cachedApiKey,
+                        expiresAt: Date.now() + 60 * 60 * 1000,
+                        createdAt: Date.now(),
+                    },
+                ],
+                pending: [],
+            },
+        }),
+        httpGetMocks: {
+            [BULK_API_COUNTRY_REGEX("CN")]: createBulkMovieResponse(movieCount, "中文标题"),
+            [BULK_API_COUNTRY_REGEX("SG")]: createBulkMovieResponse(movieCount, "English SG"),
+            [BULK_API_COUNTRY_REGEX("TW")]: createBulkMovieResponse(movieCount, "賣房子"),
+            [BULK_API_COUNTRY_REGEX("HK")]: createBulkMovieResponse(movieCount, "English HK"),
+        },
+        httpPostMocks,
+    });
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    bulkLogs.forEach((log) => {
+        assert.equal(log.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    });
 });
 
 test("源请求带 Authorization 时会写入 authTokens 缓存", async () => {

@@ -11,6 +11,12 @@
 ^https:\/\/auth\.trakt\.tv\/oauth\/token(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 篡改第三方 App 的 trakt.tv token 请求
 ^https:\/\/trakt\.tv\/oauth\/token(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# QX 下补写篡改流程的 trakt-api-key（只回 headers）
+^https:\/\/apiz?\.trakt\.tv\/oauth\/(?:device\/code|device\/token|token)(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# QX 下补写篡改流程的 auth.trakt.tv trakt-api-key（只回 headers）
+^https:\/\/auth\.trakt\.tv\/oauth\/token(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# QX 下补写篡改流程的 trakt.tv trakt-api-key（只回 headers）
+^https:\/\/trakt\.tv\/oauth\/token(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 替换第三方 App 的 trakt.tv 授权地址
 ^https:\/\/trakt\.tv\/oauth\/authorize(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 替换第三方 App 的 auth.trakt.tv 授权地址
@@ -19,6 +25,10 @@
 ^https:\/\/auth\.trakt\.tv\/api\/auth\/oauth2\/authorize(?:\?.*)?$ url script-response-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 将 trakt.tv 官方授权回调还原为第三方 App 回调
 ^https:\/\/trakt\.tv\/api\/auth\/oauth2\/authorize(?:\?.*)?$ url script-response-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# 记录篡改流程签发的 Trakt Auth access/refresh token
+^https:\/\/auth\.trakt\.tv\/oauth\/token(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# 记录篡改流程签发的 trakt.tv access/refresh token
+^https:\/\/trakt\.tv\/oauth\/token(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 处理播放器 DeepLink 跳转
 ^https:\/\/loon-plugins\.demojameson\.de5\.net\/api\/redirect\?.*$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # SofaTime 中自定义播放器 Logo
@@ -29,6 +39,8 @@
 ^https:\/\/apiz?\.trakt\.tv\/users\/[^\/]+?\/history\/episodes\/?(\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 拦截带季号的请求，记录当前浏览季
 ^https:\/\/apiz?\.trakt\.tv\/shows\/[^\/]+\/seasons\/\d+(?:\/.*|\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
+# 按篡改流程签发的 access token 改写 trakt-api-key
+^https:\/\/apiz?\.trakt\.tv\/(?!oauth\/).*$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 统一拦截 Trakt 响应，由脚本内部分流处理
 ^https:\/\/apiz?\.trakt\.tv\/.*$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/trakt_simplified_chinese.js
 # 仅拦截 SofaTime 的 TMDB provider 列表，注入播放器

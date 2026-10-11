@@ -3,12 +3,14 @@ import * as commonUtils from "../utils/common.mjs";
 
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
-const UNIFIED_CACHE_SCHEMA_VERSION = 14;
+const UNIFIED_CACHE_SCHEMA_VERSION = 15;
 const DOUBAN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
 // 篡改应用授权记录的条数上限：归一化与功能侧写入共用，避免损坏数据把缓存撑爆
 const TAMPER_AUTHORIZATION_RECORD_LIMIT = 50;
+// 篡改应用授权 token 记录的条数上限：明文保存 access/refresh token，只按数量截断
+const TAMPER_AUTHORIZATION_TOKEN_LIMIT = 50;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
 const PRUNE_SAFETY_REMEASURE_INTERVAL = 16;
@@ -370,6 +372,8 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
             tmdbApiKey: null,
             tamperAppAuthorization: {
                 records: [],
+                tokens: [],
+                pending: [],
             },
         },
     };
@@ -429,14 +433,18 @@ function normalizeTmdbApiKeyEntry(entry) {
     };
 }
 
-// 篡改应用授权的流程状态与长期绑定都由该功能自己归一化，这里只保证形状是对象数组。
+// 篡改应用授权的流程状态、token 记录与待回写标记都由该功能自己归一化，这里只保证形状是对象数组。
 function normalizeTamperAppAuthorization(value) {
     const source = commonUtils.ensureObject(value);
-    return {
-        records: commonUtils
-            .ensureArray(source.records)
+    const normalizeBucket = (bucket, limit) =>
+        commonUtils
+            .ensureArray(bucket)
             .filter((record) => commonUtils.isPlainObject(record))
-            .slice(0, TAMPER_AUTHORIZATION_RECORD_LIMIT),
+            .slice(0, limit);
+    return {
+        records: normalizeBucket(source.records, TAMPER_AUTHORIZATION_RECORD_LIMIT),
+        tokens: normalizeBucket(source.tokens, TAMPER_AUTHORIZATION_TOKEN_LIMIT),
+        pending: normalizeBucket(source.pending, TAMPER_AUTHORIZATION_RECORD_LIMIT),
     };
 }
 
@@ -518,7 +526,11 @@ function detectUnifiedCacheDrift(rawCache, nextCache) {
         return true;
     }
 
-    if (commonUtils.ensureArray(sourcePersistent.tamperAppAuthorization?.records).length !== nextCache.persistent.tamperAppAuthorization.records.length) {
+    if (
+        ["records", "tokens", "pending"].some(
+            (bucket) => commonUtils.ensureArray(sourcePersistent.tamperAppAuthorization?.[bucket]).length !== nextCache.persistent.tamperAppAuthorization[bucket].length,
+        )
+    ) {
         return true;
     }
 
@@ -1248,6 +1260,21 @@ function getAuthToken(env, apiKey) {
     }
 }
 
+// 篡改流程签发的 token 记录：明文匹配 access_token，供请求改写与 bulk 出站请求共用
+function getTamperTokenByAccessToken(env, accessToken) {
+    const normalized = String(accessToken ?? "").trim();
+    if (!normalized) {
+        return null;
+    }
+    try {
+        const tokens = loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true }).persistent.tamperAppAuthorization?.tokens;
+        return commonUtils.ensureArray(tokens).find((record) => commonUtils.isPlainObject(record) && String(record.accessToken ?? "").trim() === normalized) ?? null;
+    } catch (error) {
+        env.log(`Trakt tamper token cache load failed: ${error}`);
+        return null;
+    }
+}
+
 function saveAuthToken(env, apiKey, authorization) {
     if (!apiKey || !authorization) {
         return;
@@ -1278,6 +1305,7 @@ export {
     getAuthToken,
     getCurrentSeason,
     getHashedFieldTranslation,
+    getTamperTokenByAccessToken,
     isLocalCacheDisabled,
     loadCache,
     loadCommentTranslationCache,
@@ -1311,6 +1339,7 @@ export {
     setCurrentSeason,
     setHashedFieldTranslation,
     TAMPER_AUTHORIZATION_RECORD_LIMIT,
+    TAMPER_AUTHORIZATION_TOKEN_LIMIT,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_MAX_BYTES,
     UNIFIED_CACHE_REV_KEY,

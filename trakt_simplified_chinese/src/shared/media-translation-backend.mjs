@@ -5,6 +5,7 @@ import * as commonUtils from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
 
 import * as mediaTypes from "./media-types.mjs";
+import { TRAKT_TAMPER_CLIENT_ID } from "./tamper-app-constants.mjs";
 import * as translationCache from "./translation-cache.mjs";
 
 const MEDIA_CONFIG = {
@@ -649,6 +650,11 @@ async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) 
             [SCRIPT_TRANSLATION_REQUEST_HEADER]: SCRIPT_TRANSLATION_REQUEST_VALUE,
             authorization: authorizationHeader,
         };
+        // 篡改流程签发的 token 属于官方 App：bulk 出站请求必须带官方 client id，否则 Trakt 会按 client_id/token 不匹配拒绝
+        const bearerToken = /^Bearer\s+(\S+)/i.exec(authorizationHeader)?.[1] ?? "";
+        if (bearerToken && cacheUtils.getTamperTokenByAccessToken(context.env, bearerToken)) {
+            extraHeaders["trakt-api-key"] = TRAKT_TAMPER_CLIENT_ID;
+        }
 
         let remainingBudget = TRAKT_BULK_TRANSLATION_MAX_REFS;
         const chunksByType = {};

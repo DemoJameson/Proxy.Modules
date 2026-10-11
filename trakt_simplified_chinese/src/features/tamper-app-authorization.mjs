@@ -1,8 +1,8 @@
+import { TRAKT_TAMPER_CLIENT_ID } from "../shared/tamper-app-constants.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
 
-const TRAKT_TAMPER_CLIENT_ID = "fa21865a71b1bbf9464522c876864aa6e863df53d1f3e3fc7398394ead549787";
 const TRAKT_TAMPER_REDIRECT_URI = "trakt://auth";
 const TRAKT_TAMPER_AUTHORIZE_URL = "https://auth.trakt.tv/oauth/authorize";
 const TRAKT_TAMPER_CALLBACK_HOST = "auth.trakt.tv";
@@ -10,13 +10,18 @@ const TRAKT_TAMPER_CALLBACK_PATH = "/api/auth/oauth2/authorize";
 const TRAKT_TAMPER_STATE_TTL_MS = 5 * 60 * 1000;
 // 条数上限由缓存层统一定义，保证归一化与写入用的是同一个上限
 const TRAKT_TAMPER_STATE_RECORD_LIMIT = cacheUtils.TAMPER_AUTHORIZATION_RECORD_LIMIT;
-// 授权流程状态与长期绑定都落在 unified cache 的 persistent.tamperAppAuthorization 里，不额外占持久化 key
-// Trakt access_token 的 expires_in 为 604800 秒（7 天），绑定过期时间按它加冗余计算
+// 授权流程状态、篡改签发的 token 与待回写标记都落在 unified cache 的 persistent.tamperAppAuthorization 里，不额外占持久化 key
+// Trakt access_token 的 expires_in 为 604800 秒（7 天），响应缺省时按它兜底
 const TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const TRAKT_TAMPER_BINDING_REDUNDANCY_MS = 30 * 24 * 60 * 60 * 1000;
+const TRAKT_TAMPER_TOKEN_RECORD_LIMIT = cacheUtils.TAMPER_AUTHORIZATION_TOKEN_LIMIT;
+// Trakt device_code 的 expires_in 为 600 秒，标记按同样时长保留，避免轮询期间反复写缓存
+const TRAKT_TAMPER_DEVICE_FLOW_TTL_MS = 10 * 60 * 1000;
+// 需要与 token 响应关联的 pending 类型
+const TRAKT_TAMPER_TOKEN_PENDING_KINDS = new Set(["authorization_code", "refresh_token", "device_code"]);
 const TRAKT_TAMPER_DEFAULT_CALLBACK_STATUS = 302;
 
-const TRAKT_TAMPER_DISABLED_REDIRECT_SCHEMES = ["rex://", "forward://"];
+// 这些 App 用自定义 scheme 回调并依赖自己的 client 校验授权，篡改会让它们直接失效
+const TRAKT_TAMPER_DISABLED_REDIRECT_SCHEMES = ["rex://", "forward://", "reflix://"];
 
 function isTamperAppAuthorizationEnabled(argument) {
     return argument?.tamperAppAuthorizationEnabled === true;
@@ -288,6 +293,74 @@ function buildTamperHeaders(sourceHeaders, bodyFormat) {
     return headers;
 }
 
+function getBearerAccessToken(headers) {
+    const match = /^Bearer\s+(\S+)/i.exec(String(getHeaderValue(headers, "authorization") ?? "").trim());
+    return match ? match[1] : "";
+}
+
+// token 响应阶段可能因平台拿不到请求体而漏记；只要该 client 还有刚发起的篡改授权记录，
+// 就用请求里的 Bearer access token 补一条 token 记录，避免存量授权一直无法改写 trakt-api-key
+function backfillTamperTokenFromFlowState(context, accessToken) {
+    const clientId = String(getHeaderValue(context.env.request.headers, "trakt-api-key") ?? "").trim();
+    if (!clientId || isOfficialTraktClientId(clientId)) {
+        return false;
+    }
+    const state = findFreshTamperState(context.env, (entry) => String(entry.clientId ?? "").trim() === clientId);
+    if (!state) {
+        return false;
+    }
+    saveTamperToken(context.env, { accessToken, clientId });
+    return true;
+}
+
+// 非认证流程（如 sync/history）只要带的 Bearer access token 命中篡改流程签发的 token 记录，就换成篡改应用的 client_id
+function shouldRewriteTraktApiKey(context) {
+    if (!isTamperAppAuthorizationEnabled(context?.argument)) {
+        return false;
+    }
+    if (!/^apiz?\.trakt\.tv$/i.test(String(context?.url?.hostname ?? "").toLowerCase())) {
+        return false;
+    }
+    const pathname = commonUtils.normalizePathname(context.url.pathname);
+    if (pathname.startsWith("oauth/")) {
+        return false;
+    }
+
+    const accessToken = getBearerAccessToken(context.env.request.headers);
+    if (!accessToken) {
+        return false;
+    }
+    if (findTamperTokenByAccessToken(context.env, accessToken)) {
+        return true;
+    }
+    return backfillTamperTokenFromFlowState(context, accessToken);
+}
+
+function buildTraktApiHeaders(sourceHeaders) {
+    const headers = copyRequestHeaders(sourceHeaders);
+    setHeader(headers, "trakt-api-key", TRAKT_TAMPER_CLIENT_ID);
+    return headers;
+}
+
+// 与既有路由结果合并：路由已改写 URL/body 时只补 trakt-api-key，避免覆盖它们的 header 处理
+function applyTraktApiKeyRewrite(result) {
+    const context = globalThis.$ctx;
+    if (!shouldRewriteTraktApiKey(context)) {
+        return result;
+    }
+
+    const tamperHeaders = buildTraktApiHeaders(context.env.request.headers);
+    if (result?.type === "rewriteRequest") {
+        const headers = { ...tamperHeaders, ...commonUtils.ensureObject(result.headers) };
+        setHeader(headers, "trakt-api-key", TRAKT_TAMPER_CLIENT_ID);
+        return { ...result, headers };
+    }
+    if (!result || result.type === "passThrough") {
+        return { type: "rewriteRequest", url: context.env.request.url, headers: tamperHeaders };
+    }
+    return result;
+}
+
 function rewriteUrlSearchParams(url, rewrite) {
     try {
         const nextUrl = new URL(url);
@@ -298,62 +371,99 @@ function rewriteUrlSearchParams(url, rewrite) {
     }
 }
 
+// QX 的请求脚本与响应脚本共享 sessionIndex，用它可以把响应精确关联回发起它的那次请求
+function getSessionIndex(env) {
+    const candidates = [env?.request?.sessionIndex, env?.response?.sessionIndex];
+    for (const candidate of candidates) {
+        const normalized = String(candidate ?? "").trim();
+        if (normalized) {
+            return normalized;
+        }
+    }
+    return "";
+}
+
 function isTamperStateFresh(state) {
     const createdAt = Number(state?.createdAt);
     return Number.isFinite(createdAt) && Date.now() - createdAt <= TRAKT_TAMPER_STATE_TTL_MS;
 }
 
-function isTamperBindingFresh(state) {
-    const bindingExpiresAt = Number(state?.bindingExpiresAt);
-    return Number.isFinite(bindingExpiresAt) && bindingExpiresAt > Date.now();
+// pending 支持独立 expiresAt：device_code 需要覆盖 Trakt 的 expires_in，其余 pending 仍按流程 TTL 兜底
+function isTamperPendingFresh(pending) {
+    const expiresAt = Number(pending?.expiresAt);
+    if (Number.isFinite(expiresAt)) {
+        return expiresAt > Date.now();
+    }
+    return isTamperStateFresh(pending);
 }
 
-// 流程状态 5 分钟有效，绑定按 access_token 生命周期 + 冗余有效；两者任一有效都保留该记录
-function isTamperStateAlive(state) {
-    return isTamperStateFresh(state) || isTamperBindingFresh(state);
+function normalizeTamperStore(value) {
+    const source = commonUtils.ensureObject(value);
+    return {
+        records: commonUtils.ensureArray(source.records).filter((record) => commonUtils.isPlainObject(record)),
+        tokens: commonUtils.ensureArray(source.tokens).filter((record) => commonUtils.isPlainObject(record)),
+        pending: commonUtils.ensureArray(source.pending).filter((record) => commonUtils.isPlainObject(record)),
+    };
 }
 
-// 只有真正进行中的授权流程（带 PKCE challenge）才必须保留；
-// 设备码写出的纯绑定记录虽然 createdAt 很新，但不属于进行中的流程
-function isTamperFlowPending(state) {
-    return isTamperStateFresh(state) && String(state?.codeChallenge ?? "").trim() !== "";
-}
-
-function getTamperStateRetention(state) {
-    return Math.max(Number(state?.createdAt) + TRAKT_TAMPER_STATE_TTL_MS, Number(state?.bindingExpiresAt) || 0);
-}
-
-function loadTamperRecords(env) {
+function loadTamperStore(env) {
     try {
         // 授权状态属于鉴权关键数据，与 authTokens 一样不受 debugMode 的本地缓存禁用影响
         const store = cacheUtils.loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true }).persistent.tamperAppAuthorization;
-        return commonUtils.ensureArray(store?.records).filter((record) => commonUtils.isPlainObject(record) && isTamperStateAlive(record));
+        const normalized = normalizeTamperStore(store);
+        return {
+            records: normalized.records.filter((record) => isTamperStateFresh(record)),
+            tokens: normalized.tokens.filter((record) => String(record.accessToken ?? "").trim()),
+            pending: normalized.pending.filter((record) => isTamperPendingFresh(record)),
+        };
     } catch (error) {
         env.log(`Trakt tamper app authorization state load failed: ${error}`);
-        return [];
+        return { records: [], tokens: [], pending: [] };
     }
-}
-
-// 进行中的授权流程必须保留，否则刚发起的授权会被自己挤掉；其余按保留截止时间排序，先淘汰最没有保留价值的记录
-function compareTamperRecordsForKeep(left, right) {
-    const leftPending = isTamperFlowPending(left) ? 1 : 0;
-    const rightPending = isTamperFlowPending(right) ? 1 : 0;
-    if (leftPending !== rightPending) {
-        return rightPending - leftPending;
-    }
-    return getTamperStateRetention(right) - getTamperStateRetention(left);
 }
 
 function pruneTamperRecords(records) {
     return records
-        .filter((record) => commonUtils.isPlainObject(record) && isTamperStateAlive(record))
-        .sort(compareTamperRecordsForKeep)
+        .filter((record) => commonUtils.isPlainObject(record) && isTamperStateFresh(record))
+        .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))
         .slice(0, TRAKT_TAMPER_STATE_RECORD_LIMIT);
 }
 
-function saveTamperRecords(env, records) {
+// access_token 过期不代表 refresh_token 失效，因此只有「无 refresh_token 且 access_token 已过期」的记录才优先淘汰
+function isTamperTokenDead(record) {
+    const hasRefreshToken = String(record?.refreshToken ?? "").trim() !== "";
+    const expiresAt = Number(record?.expiresAt);
+    return !hasRefreshToken && Number.isFinite(expiresAt) && expiresAt <= Date.now();
+}
+
+function pruneTamperTokens(tokens) {
+    return tokens
+        .filter((record) => commonUtils.isPlainObject(record) && String(record.accessToken ?? "").trim())
+        .sort((left, right) => {
+            const leftDead = isTamperTokenDead(left) ? 1 : 0;
+            const rightDead = isTamperTokenDead(right) ? 1 : 0;
+            if (leftDead !== rightDead) {
+                return leftDead - rightDead;
+            }
+            return Number(right.createdAt) - Number(left.createdAt);
+        })
+        .slice(0, TRAKT_TAMPER_TOKEN_RECORD_LIMIT);
+}
+
+function pruneTamperPending(pending) {
+    return pending
+        .filter((record) => commonUtils.isPlainObject(record) && isTamperPendingFresh(record))
+        .sort((left, right) => Number(right.createdAt) - Number(left.createdAt))
+        .slice(0, TRAKT_TAMPER_STATE_RECORD_LIMIT);
+}
+
+function saveTamperStore(env, store) {
     try {
-        const nextStore = { records: pruneTamperRecords(records) };
+        const nextStore = {
+            records: pruneTamperRecords(commonUtils.ensureArray(store?.records)),
+            tokens: pruneTamperTokens(commonUtils.ensureArray(store?.tokens)),
+            pending: pruneTamperPending(commonUtils.ensureArray(store?.pending)),
+        };
         const unifiedCache = cacheUtils.loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true });
         unifiedCache.persistent.tamperAppAuthorization = nextStore;
         cacheUtils.saveUnifiedCache(env, unifiedCache, undefined, undefined, undefined, {
@@ -368,70 +478,132 @@ function saveTamperRecords(env, records) {
     }
 }
 
+function updateTamperStore(env, updater) {
+    const store = loadTamperStore(env);
+    const nextStore = updater(store) ?? store;
+    saveTamperStore(env, nextStore);
+    return nextStore;
+}
+
 function saveTamperState(env, state) {
-    const records = loadTamperRecords(env);
     const next = { ...state, createdAt: Date.now() };
     const id = String(next.id ?? "").trim();
-    const index = id ? records.findIndex((record) => String(record?.id ?? "").trim() === id) : -1;
-    if (index >= 0) {
-        records[index] = { ...records[index], ...next };
-    } else {
-        records.push(next);
-    }
-    saveTamperRecords(env, records);
+    updateTamperStore(env, (store) => {
+        const records = store.records.slice();
+        const index = id ? records.findIndex((record) => String(record?.id ?? "").trim() === id) : -1;
+        if (index >= 0) {
+            records[index] = { ...records[index], ...next };
+        } else {
+            records.push(next);
+        }
+        return { ...store, records };
+    });
 }
 
 function updateTamperState(env, predicate, updates) {
-    const records = loadTamperRecords(env);
-    const index = records.findIndex((record) => isTamperStateFresh(record) && predicate(record));
-    if (index < 0) {
-        return false;
-    }
-    records[index] = { ...records[index], ...updates };
-    saveTamperRecords(env, records);
-    return true;
+    let updated = false;
+    updateTamperStore(env, (store) => {
+        const records = store.records.slice();
+        const index = records.findIndex((record) => isTamperStateFresh(record) && predicate(record));
+        if (index < 0) {
+            return store;
+        }
+        records[index] = { ...records[index], ...updates };
+        updated = true;
+        return { ...store, records };
+    });
+    return updated;
 }
 
 function findTamperState(env, predicate) {
-    return loadTamperRecords(env).find(predicate) ?? null;
+    return loadTamperStore(env).records.find(predicate) ?? null;
 }
 
 function findFreshTamperState(env, predicate) {
     return findTamperState(env, (state) => isTamperStateFresh(state) && predicate(state));
 }
 
-function isSameTamperBinding(state, clientId) {
-    return String(state?.clientId ?? "").trim() === clientId;
+function findTamperToken(env, predicate) {
+    return loadTamperStore(env).tokens.find(predicate) ?? null;
 }
 
-function getTamperBindingExpiresAt() {
-    return Date.now() + TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS + TRAKT_TAMPER_BINDING_REDUNDANCY_MS;
+function findTamperTokenByAccessToken(env, accessToken) {
+    // 与 bulk 出站请求共用缓存层实现，避免两处 token 命中逻辑漂移
+    return cacheUtils.getTamperTokenByAccessToken(env, accessToken);
 }
 
-function upsertTamperBinding(env, clientId) {
-    const normalizedClientId = String(clientId ?? "").trim();
-    if (!normalizedClientId) {
-        return;
-    }
-
-    const records = loadTamperRecords(env);
-    const bindingExpiresAt = getTamperBindingExpiresAt();
-    const index = records.findIndex((record) => isSameTamperBinding(record, normalizedClientId));
-    if (index >= 0) {
-        records[index] = { ...records[index], clientId: normalizedClientId, bindingExpiresAt };
-    } else {
-        // 设备码流程没有授权流程记录，单独写一条只带绑定的记录
-        records.push({ clientId: normalizedClientId, bindingExpiresAt, createdAt: Date.now() });
-    }
-    saveTamperRecords(env, records);
-}
-
-function findTamperBinding(env, clientId) {
-    const normalizedClientId = String(clientId ?? "").trim();
-    if (!normalizedClientId) {
+function findTamperTokenByRefreshToken(env, refreshToken) {
+    const normalized = String(refreshToken ?? "").trim();
+    if (!normalized) {
         return null;
     }
-    return findTamperState(env, (state) => isTamperBindingFresh(state) && isSameTamperBinding(state, normalizedClientId));
+    return findTamperToken(env, (record) => String(record.refreshToken ?? "").trim() === normalized);
+}
+
+function saveTamperToken(env, { accessToken, refreshToken, clientId, expiresAt, previousRefreshToken }) {
+    const normalizedAccessToken = String(accessToken ?? "").trim();
+    if (!normalizedAccessToken) {
+        return;
+    }
+    const normalizedRefreshToken = String(refreshToken ?? "").trim();
+    const normalizedPreviousRefreshToken = String(previousRefreshToken ?? "").trim();
+    updateTamperStore(env, (store) => {
+        const tokens = store.tokens.filter((record) => {
+            if (normalizedPreviousRefreshToken && String(record.refreshToken ?? "").trim() === normalizedPreviousRefreshToken) {
+                return false;
+            }
+            return String(record.accessToken ?? "").trim() !== normalizedAccessToken;
+        });
+        const normalizedClientId = String(clientId ?? "").trim();
+        tokens.push({
+            accessToken: normalizedAccessToken,
+            refreshToken: normalizedRefreshToken,
+            clientId: normalizedClientId,
+            expiresAt: Number.isFinite(Number(expiresAt)) ? Number(expiresAt) : Date.now() + TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
+            createdAt: Date.now(),
+        });
+        return { ...store, tokens };
+    });
+}
+
+function saveTamperPending(env, pending) {
+    const kind = String(pending?.kind ?? "").trim();
+    const id = String(pending?.id ?? "").trim();
+    if (!kind || !id) {
+        return;
+    }
+    const expiresAt = Number(pending?.expiresAt);
+    const sessionIndex = getSessionIndex(env);
+    const next = {
+        ...pending,
+        kind,
+        id,
+        createdAt: Date.now(),
+        expiresAt: Number.isFinite(expiresAt) && expiresAt > Date.now() ? expiresAt : Date.now() + TRAKT_TAMPER_STATE_TTL_MS,
+        ...(sessionIndex ? { sessionIndex } : {}),
+    };
+    updateTamperStore(env, (store) => {
+        const pendingList = store.pending.filter((entry) => !(String(entry.kind ?? "").trim() === kind && String(entry.id ?? "").trim() === id));
+        pendingList.push(next);
+        return { ...store, pending: pendingList };
+    });
+}
+
+function findTamperPending(env, predicate) {
+    return loadTamperStore(env).pending.find(predicate) ?? null;
+}
+
+function removeTamperPending(env, predicate) {
+    updateTamperStore(env, (store) => ({ ...store, pending: store.pending.filter((entry) => !predicate(entry)) }));
+}
+
+// QX 的请求头脚本拿不到请求体，只能靠「该 client 已经由篡改流程签发过 token」或「存在进行中的授权流程」判断
+function hasTamperTokenForClient(env, clientId) {
+    const normalizedClientId = String(clientId ?? "").trim();
+    if (!normalizedClientId) {
+        return false;
+    }
+    return !!findTamperToken(env, (record) => String(record.clientId ?? "").trim() === normalizedClientId);
 }
 
 function isOfficialTraktClientId(clientId) {
@@ -491,9 +663,14 @@ async function handleDeviceOAuthRequest() {
         }
     });
 
-    // 只在 device/code 阶段写一次绑定：device/token 会被 App 按 interval 反复轮询，每次整块写 unified cache 代价过高
+    // device/code 只标记一次流程，device_code 由响应阶段从响应体里取；device/token 轮询不再写缓存
     if (pathname === "oauth/device/code") {
-        upsertTamperBinding(context.env, originalClientId);
+        saveTamperPending(context.env, {
+            kind: "device_flow",
+            id: "device-flow",
+            clientId: originalClientId,
+            expiresAt: Date.now() + TRAKT_TAMPER_DEVICE_FLOW_TTL_MS,
+        });
     }
 
     return {
@@ -508,6 +685,7 @@ async function handleTokenOAuthRequest() {
     const context = globalThis.$ctx;
     const bodyPayload = readStructuredBodyPayload(context.env.request.body, context.env.request.headers);
     const code = String(bodyPayload?.code ?? context.url.searchParams.get("code") ?? "").trim();
+    const refreshToken = String(bodyPayload?.refresh_token ?? context.url.searchParams.get("refresh_token") ?? "").trim();
     const grantType = String(bodyPayload?.grant_type ?? context.url.searchParams.get("grant_type") ?? "")
         .trim()
         .toLowerCase();
@@ -530,13 +708,22 @@ async function handleTokenOAuthRequest() {
             context.env.log("Trakt tamper app authorization token rewrite skipped: no matching authorization flow");
             return { type: "passThrough" };
         }
-        upsertTamperBinding(context.env, originalClientId || state.clientId);
+        saveTamperPending(context.env, {
+            kind: "authorization_code",
+            id: code,
+            clientId: originalClientId || state.clientId,
+        });
     } else {
-        if (!findTamperBinding(context.env, originalClientId)) {
-            context.env.log("Trakt tamper app authorization token rewrite skipped: no matching authorization binding");
+        // refresh 只按 refresh_token 命中：token 记录里存有篡改流程签发的 refresh_token
+        if (!refreshToken || !findTamperTokenByRefreshToken(context.env, refreshToken)) {
+            context.env.log("Trakt tamper app authorization token rewrite skipped: no matching refresh token");
             return { type: "passThrough" };
         }
-        upsertTamperBinding(context.env, originalClientId);
+        saveTamperPending(context.env, {
+            kind: "refresh_token",
+            id: refreshToken,
+            clientId: originalClientId,
+        });
     }
 
     const codeVerifier = requiresAuthorizationCode ? String(state?.codeVerifier ?? "").trim() : "";
@@ -571,6 +758,11 @@ async function handleOAuthRequest() {
     }
 
     const pathname = commonUtils.normalizePathname(context.url.pathname);
+    // QX 的 script-request-body 只能返回 body，trakt-api-key 需要并行的 script-request-header 规则补写；
+    // 那次调用拿不到请求体，只回 url/headers，绝不回 body，避免把真实请求体覆盖成残缺内容
+    if (context.env.request.body === undefined || context.env.request.body === null) {
+        return handleOAuthHeaderOnlyRequest(pathname);
+    }
     if (pathname === "oauth/token") {
         return handleTokenOAuthRequest();
     }
@@ -578,6 +770,43 @@ async function handleOAuthRequest() {
         return handleDeviceOAuthRequest();
     }
     return { type: "passThrough" };
+}
+
+function handleOAuthHeaderOnlyRequest(pathname) {
+    const context = globalThis.$ctx;
+    const originalClientId = String(context.url.searchParams.get("client_id") ?? getHeaderValue(context.env.request.headers, "trakt-api-key") ?? "").trim();
+    // 识别不出第三方 client（或本来就是官方 client）时不补写，避免把无关请求改坏
+    if (!originalClientId || isOfficialTraktClientId(originalClientId)) {
+        return { type: "passThrough" };
+    }
+    if (isTamperAppAuthorizationDisabledForRedirectUri(context.url.searchParams.get("redirect_uri"))) {
+        return { type: "passThrough" };
+    }
+    // oauth/token 的 redirect_uri 一般只在 body 里，header 阶段判断不了它是否属于禁用篡改的应用；
+    // 只有确认这是篡改流程（刚发起的授权流程，或该 client 已由篡改流程签发过 token）才补写
+    if (pathname === "oauth/token") {
+        const hasFlowState = !!findFreshTamperState(context.env, (entry) => String(entry.clientId ?? "").trim() === originalClientId);
+        if (!hasFlowState && !hasTamperTokenForClient(context.env, originalClientId)) {
+            return { type: "passThrough" };
+        }
+    }
+    // QX 的 script-request-body 会丢弃返回的 url，把参数放在 query 里的 App 只能在这次调用里改写
+    const url = rewriteUrlSearchParams(context.env.request.url, (searchParams) => {
+        if (searchParams.has("client_id")) {
+            searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
+        }
+        if (searchParams.has("client_secret")) {
+            searchParams.delete("client_secret");
+        }
+        if (searchParams.has("redirect_uri")) {
+            searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);
+        }
+    });
+    return {
+        type: "rewriteRequest",
+        url,
+        headers: buildTamperHeaders(context.env.request.headers, null),
+    };
 }
 
 async function handleAuthorizeRequest() {
@@ -652,6 +881,145 @@ async function handleAuthorizeRequest() {
     };
 }
 
+// 响应阶段能拿到的 client 线索：query 里的 client_id 与请求头 trakt-api-key（QX 的响应脚本拿不到 $request.body）
+function getRequestClientId(context) {
+    const queryClientId = String(context.url.searchParams.get("client_id") ?? "").trim();
+    if (queryClientId) {
+        return queryClientId;
+    }
+    return String(getHeaderValue(context.env.request?.headers, "trakt-api-key") ?? "").trim();
+}
+
+// 兜底匹配只认与请求路径对应的 pending 类型：device_code 只对应 device/token，authorization_code / refresh_token 只对应 token
+function getTamperResponsePendingKinds(pathname) {
+    if (pathname === "oauth/device/token") {
+        return ["device_code"];
+    }
+    if (pathname === "oauth/token") {
+        return ["authorization_code", "refresh_token"];
+    }
+    return [];
+}
+
+// 拿不到 sessionIndex 与请求体时的兜底：优先按「路径对应的 pending 类型」与「client 一致」匹配，
+// 否则会把别的 App（禁用篡改的 rex/forward、官方 App、未拦截授权的 App）的 token 响应误记成篡改流程签发的 token；
+// 请求阶段改写后，平台给响应脚本的 client 线索可能已经是官方 client id，此时原始 client 不可知，只能退回唯一候选
+function findTamperFallbackPending(pendings, { pathname, clientId }) {
+    const kinds = getTamperResponsePendingKinds(pathname);
+    if (kinds.length === 0) {
+        return null;
+    }
+    const candidates = pendings.filter((entry) => kinds.includes(String(entry.kind ?? "").trim()));
+    if (candidates.length === 0) {
+        return null;
+    }
+    const normalizedClientId = String(clientId ?? "").trim();
+    if (normalizedClientId && !isOfficialTraktClientId(normalizedClientId)) {
+        const sameClient = candidates.filter((entry) => String(entry.clientId ?? "").trim() === normalizedClientId);
+        return sameClient.length === 1 ? sameClient[0] : null;
+    }
+    return candidates.length === 1 ? candidates[0] : null;
+}
+
+function parseTamperResponsePayload(body) {
+    try {
+        const parsed = JSON.parse(String(body ?? ""));
+        return commonUtils.isPlainObject(parsed) ? parsed : null;
+    } catch {
+        return null;
+    }
+}
+
+// 响应阶段：device/code 写入 device_code pending；token 响应把篡改流程签发的 access/refresh token 明文写进 token 记录
+function handleOAuthResponse() {
+    const context = globalThis.$ctx;
+    if (!isTamperAppAuthorizationEnabled(context.argument)) {
+        return { type: "passThrough" };
+    }
+
+    const responsePayload = parseTamperResponsePayload(context.env.response?.body);
+    const deviceCode = String(responsePayload?.device_code ?? "").trim();
+    if (deviceCode) {
+        // device/code 的响应优先按 sessionIndex 关联回它自己的请求，避免并发授权时串号
+        const sessionIndex = getSessionIndex(context.env);
+        const flow =
+            (sessionIndex
+                ? findTamperPending(context.env, (entry) => String(entry.kind ?? "").trim() === "device_flow" && String(entry.sessionIndex ?? "").trim() === sessionIndex)
+                : null) ?? findTamperPending(context.env, (entry) => String(entry.kind ?? "").trim() === "device_flow");
+        if (!flow) {
+            return { type: "passThrough" };
+        }
+        const deviceExpiresIn = Number(responsePayload.expires_in);
+        saveTamperPending(context.env, {
+            kind: "device_code",
+            id: deviceCode,
+            clientId: flow.clientId,
+            expiresAt: Date.now() + (Number.isFinite(deviceExpiresIn) && deviceExpiresIn > 0 ? deviceExpiresIn * 1000 : TRAKT_TAMPER_DEVICE_FLOW_TTL_MS),
+        });
+        removeTamperPending(context.env, (entry) => String(entry.kind ?? "").trim() === "device_flow");
+        return { type: "passThrough" };
+    }
+
+    const tokenPendings = loadTamperStore(context.env).pending.filter((entry) => TRAKT_TAMPER_TOKEN_PENDING_KINDS.has(String(entry.kind ?? "").trim()));
+    const accessToken = String(responsePayload?.access_token ?? "").trim();
+    if (!accessToken) {
+        const errorCode = String(responsePayload?.error ?? "").trim();
+        if (errorCode && tokenPendings.length > 0) {
+            context.env.log(`Trakt tamper app authorization token exchange failed: ${errorCode}`);
+        }
+        return { type: "passThrough" };
+    }
+
+    const requestPayload = readStructuredBodyPayload(context.env.request.body, context.env.request.headers);
+    const code = String(requestPayload?.code ?? context.url.searchParams.get("code") ?? "").trim();
+    const refreshToken = String(requestPayload?.refresh_token ?? context.url.searchParams.get("refresh_token") ?? "").trim();
+
+    // QX 的请求/响应脚本共享 sessionIndex，优先按它精确命中；Loon/Surge 没有 sessionIndex 时仍按请求体匹配
+    const sessionIndex = getSessionIndex(context.env);
+    const sessionPending = sessionIndex ? tokenPendings.find((entry) => String(entry.sessionIndex ?? "").trim() === sessionIndex) : null;
+    const bodyPending = tokenPendings.find((entry) => {
+        const kind = String(entry.kind ?? "").trim();
+        const id = String(entry.id ?? "").trim();
+        if (refreshToken && kind === "refresh_token" && id === refreshToken) {
+            return true;
+        }
+        return !!code && (kind === "authorization_code" || kind === "device_code") && id === code;
+    });
+    const exactPending = sessionPending ?? bodyPending;
+    // 既没有 sessionIndex 也拿不到 $request.body 的平台（QX）：按「路径对应的 pending 类型 + client」兜底匹配
+    const fallbackPending = exactPending
+        ? null
+        : findTamperFallbackPending(tokenPendings, {
+              pathname: commonUtils.normalizePathname(context.url.pathname),
+              clientId: getRequestClientId(context),
+          });
+    const pending = exactPending ?? fallbackPending;
+    if (!pending) {
+        if (tokenPendings.length > 0) {
+            context.env.log("Trakt tamper app authorization response skipped: pending exists but does not match the token response");
+        }
+        return { type: "passThrough" };
+    }
+    if (!exactPending) {
+        context.env.log("Trakt tamper app authorization response matched a fresh pending by request path and client without the request body");
+    }
+
+    const pendingKind = String(pending.kind ?? "").trim();
+    const previousRefreshToken = pendingKind === "refresh_token" ? String(pending.id ?? "").trim() : refreshToken;
+    const expiresIn = Number(responsePayload.expires_in);
+    const expiresAt = Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1000 : Date.now() + TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS;
+    saveTamperToken(context.env, {
+        accessToken,
+        refreshToken: String(responsePayload.refresh_token ?? "").trim() || previousRefreshToken,
+        clientId: pending.clientId,
+        expiresAt,
+        previousRefreshToken,
+    });
+    removeTamperPending(context.env, (entry) => entry.kind === pending.kind && entry.id === pending.id);
+
+    return { type: "passThrough" };
+}
+
 async function handleAuthorizeCallbackResponse() {
     const context = globalThis.$ctx;
     if (!isTamperAppAuthorizationEnabled(context.argument)) {
@@ -692,7 +1060,6 @@ async function handleAuthorizeCallbackResponse() {
             code,
             callbackAt: Date.now(),
         });
-        upsertTamperBinding(context.env, state.clientId);
     }
 
     const nextLocation = appendCallbackQuery(redirectUri, location, String(state.originalState ?? "").trim());
@@ -712,15 +1079,17 @@ async function handleAuthorizeCallbackResponse() {
 }
 
 export {
+    applyTraktApiKeyRewrite,
     handleAuthorizeCallbackResponse,
     handleAuthorizeRequest,
     handleOAuthRequest,
+    handleOAuthResponse,
     TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
     TRAKT_TAMPER_AUTHORIZE_URL,
-    TRAKT_TAMPER_BINDING_REDUNDANCY_MS,
     TRAKT_TAMPER_CALLBACK_HOST,
     TRAKT_TAMPER_CALLBACK_PATH,
     TRAKT_TAMPER_CLIENT_ID,
     TRAKT_TAMPER_REDIRECT_URI,
     TRAKT_TAMPER_STATE_RECORD_LIMIT,
+    TRAKT_TAMPER_TOKEN_RECORD_LIMIT,
 };

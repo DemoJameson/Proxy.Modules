@@ -47,6 +47,33 @@ test("Quantumult X snippet 会按 requiresBody 选择请求体或响应头脚本
     );
 });
 
+// QX 的 script-request-body 改不了 headers，需要并行的 script-request-header 规则；
+// 该规则只进 QX 片段，否则 Loon/Surge 会对同一请求跑两遍脚本
+test("QX 的 OAuth 请求头规则只进 snippet 且与请求体规则成对", () => {
+    const qxHeaderRules = scriptRules.filter((rule) => Array.isArray(rule.targets) && rule.targets.includes("snippet"));
+    assert.equal(qxHeaderRules.length, 3, "应有三条 QX 专用的 OAuth 请求头规则");
+
+    const snippet = normalizeLineEndings(renderSnippet());
+    const snippetLines = snippet.split("\n");
+    const otherTargets = renderGeneratedTargets().filter((target) => target.outputFile !== "trakt_simplified_chinese/trakt_simplified_chinese.snippet");
+    for (const rule of qxHeaderRules) {
+        assert.deepEqual(rule.targets, ["snippet"]);
+        assert.ok(
+            snippetLines.some((line) => line.startsWith(rule.pattern) && line.includes("script-request-header")),
+            `QX 片段应包含请求头规则：${rule.title}`,
+        );
+        for (const target of otherTargets) {
+            // 同一 pattern 会被 Loon/Surge 的请求体规则复用，因此用 QX 专用注释判断该规则是否泄漏到其它产物
+            assert.equal(normalizeLineEndings(target.content).includes(rule.comment), false, `${target.outputFile} 不应包含 QX 专用规则：${rule.title}`);
+        }
+    }
+
+    // 同一条 URL 在 QX 上必须同时挂 script-request-body 与 script-request-header 两条规则
+    const oauthBodyPattern = String.raw`^https:\/\/apiz?\.trakt\.tv\/oauth\/(?:device\/code|device\/token|token)(?:\?.*)?$`;
+    assert.ok(snippetLines.some((line) => line.startsWith(oauthBodyPattern) && line.includes("script-request-body")));
+    assert.ok(snippetLines.some((line) => line.startsWith(oauthBodyPattern) && line.includes("script-request-header")));
+});
+
 // OAuth 相关端点需要模块清单规则和脚本路由同时覆盖，任一侧漏配都会导致请求未被改写。
 const OAUTH_INTERCEPT_TARGETS = [
     { phase: "http-request", url: "https://api.trakt.tv/oauth/token" },
@@ -59,6 +86,11 @@ const OAUTH_INTERCEPT_TARGETS = [
     { phase: "http-request", url: "https://auth.trakt.tv/oauth/authorize" },
     { phase: "http-response", url: "https://auth.trakt.tv/api/auth/oauth2/authorize" },
     { phase: "http-response", url: "https://trakt.tv/api/auth/oauth2/authorize" },
+    { phase: "http-response", url: "https://api.trakt.tv/oauth/token" },
+    { phase: "http-response", url: "https://api.trakt.tv/oauth/device/code" },
+    { phase: "http-response", url: "https://api.trakt.tv/oauth/device/token" },
+    { phase: "http-response", url: "https://auth.trakt.tv/oauth/token" },
+    { phase: "http-response", url: "https://trakt.tv/oauth/token" },
 ];
 
 function createRouteContext(url) {
@@ -72,13 +104,14 @@ test("OAuth 模块清单规则与请求/响应路由保持一致", () => {
         "http-request": createRequestPhaseRoutes(),
         "http-response": createResponsePhaseRoutes(),
     };
-    const oauthRules = scriptRules.filter((rule) => rule.pattern.includes("oauth"));
+    const oauthRules = scriptRules.filter((rule) => /\/oauth\//.test(rule.pattern));
     const oauthRoutes = Object.entries(routesByPhase).flatMap(([phase, routes]) =>
         routes.filter((route) => route.describe().startsWith("oauth.")).map((route) => ({ phase, route })),
     );
 
     for (const target of OAUTH_INTERCEPT_TARGETS) {
-        const ruleMatched = oauthRules.some((rule) => rule.phase === target.phase && new RegExp(rule.pattern).test(target.url));
+        // api/apiz 的响应由通用 Trakt Response Router 触发，因此这里对全部规则做覆盖检查
+        const ruleMatched = scriptRules.some((rule) => rule.phase === target.phase && new RegExp(rule.pattern).test(target.url));
         assert.ok(ruleMatched, `${target.phase} ${target.url} 应被模块清单规则覆盖`);
 
         const routeMatched = oauthRoutes.some(({ phase, route }) => phase === target.phase && route.test(createRouteContext(target.url)));
@@ -96,6 +129,24 @@ test("OAuth 模块清单规则与请求/响应路由保持一致", () => {
         assert.ok(
             OAUTH_INTERCEPT_TARGETS.some((target) => target.phase === phase && route.test(createRouteContext(target.url))),
             `脚本路由「${route.describe()}」未出现在一致性用例的端点列表里`,
+        );
+    }
+});
+
+// 非认证 Trakt 请求也要走请求阶段改写 trakt-api-key；漏掉通用规则时脚本根本不会运行
+const NON_OAUTH_REQUEST_TARGETS = [
+    "https://api.trakt.tv/sync/history",
+    "https://apiz.trakt.tv/sync/history",
+    "https://api.trakt.tv/users/me/watchlist",
+    "https://api.trakt.tv/shows/1/seasons",
+];
+
+test("非 OAuth 的 Trakt API 请求会被请求阶段规则覆盖", () => {
+    const requestRules = scriptRules.filter((rule) => rule.phase === "http-request");
+    for (const url of NON_OAUTH_REQUEST_TARGETS) {
+        assert.ok(
+            requestRules.some((rule) => new RegExp(rule.pattern).test(url)),
+            `http-request ${url} 应被模块清单规则覆盖`,
         );
     }
 });
