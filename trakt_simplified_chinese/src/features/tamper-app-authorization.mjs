@@ -336,8 +336,11 @@ function shouldRewriteTraktApiKey(context) {
     return backfillTamperTokenFromFlowState(context, accessToken);
 }
 
+// 这里只改写 trakt-api-key、不动请求体，必须原样保留 content-length 等长度头：
+// QX 只对 body 相关重写自动处理长度/编码头，header-only 重写会原样使用返回的头，
+// 去掉 content-length 会让带 body 的 POST 变成没有请求体
 function buildTraktApiHeaders(sourceHeaders) {
-    const headers = copyRequestHeaders(sourceHeaders);
+    const headers = copyHeaders(sourceHeaders);
     setHeader(headers, "trakt-api-key", TRAKT_TAMPER_CLIENT_ID);
     return headers;
 }
