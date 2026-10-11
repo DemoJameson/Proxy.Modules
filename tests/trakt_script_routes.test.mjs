@@ -3169,7 +3169,38 @@ test("篡改应用授权会把带 access token 的非认证请求 trakt-api-key 
     assert.equal(result.url, "https://api.trakt.tv/sync/history");
     assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
     assert.equal(result.headers.authorization, `Bearer ${accessToken}`);
-    assert.equal(Object.hasOwn(result.headers, "content-length"), false);
+    // 只改 trakt-api-key、不动请求体：必须原样保留 content-length，QX 的 header-only 重写不会自动补长度头
+    assert.equal(result.headers["content-length"], "101");
+    assert.equal(Object.hasOwn(result, "body"), false);
+});
+
+// QX 的 script-request-header 只回 headers：丢了 content-length 会让带 body 的 POST 变成没有请求体
+test("篡改应用授权在 QX 请求头脚本里改写 trakt-api-key 时保留 content-length", async () => {
+    const accessToken = "qx-watchlist-access";
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord(accessToken, "refresh-token")],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/watchlist",
+        headers: {
+            "content-type": "application/json",
+            "content-length": "42",
+            authorization: `Bearer ${accessToken}`,
+            "trakt-api-key": "third-party-client",
+        },
+        requestBody: JSON.stringify({ movies: [{ ids: { trakt: 1 } }] }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(result.headers["content-length"], "42");
+    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
 });
 
 test("篡改应用授权非认证请求未带 access token 时不改写 trakt-api-key", async () => {
