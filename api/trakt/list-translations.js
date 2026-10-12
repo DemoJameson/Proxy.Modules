@@ -2,6 +2,7 @@ const {
     CACHE_STATUS,
     getKvConfig,
     normalizeListTranslationEntry,
+    normalizeLocale,
     parseIds,
     readJsonBody,
     readManyListTranslationEntriesFromKv,
@@ -22,13 +23,18 @@ async function handleGet(req, res, kvConfig) {
         return;
     }
 
-    const { lists } = await readManyListTranslationEntriesFromKv(kvConfig, listIds);
+    const locale = normalizeLocale(req.query.locale);
+    const { lists, cn } = await readManyListTranslationEntriesFromKv(kvConfig, listIds, { locale });
 
     // 区分完整/部分命中：部分命中说明客户端即将回写缺失条目，CDN 不能长缓存
     const foundCount = Object.keys(lists).length;
     const cacheStatus = foundCount === 0 ? CACHE_STATUS.NOT_FOUND : foundCount >= listIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.PARTIAL_FOUND;
     setResponseCacheHeaders(res, cacheStatus);
-    res.status(200).json({ lists });
+    const response = { lists };
+    if (cn && Object.keys(cn).length > 0) {
+        response.cn = { lists: cn };
+    }
+    res.status(200).json(response);
 }
 
 async function handlePost(req, res, kvConfig) {
@@ -49,7 +55,16 @@ async function handlePost(req, res, kvConfig) {
         }
     });
 
-    await writeManyListTranslationEntriesToKv(kvConfig, validEntries);
+    const incomingCn = payload?.cn?.lists && typeof payload.cn.lists === "object" ? payload.cn.lists : {};
+    const validCnEntries = {};
+    Object.entries(incomingCn).forEach(([id, entry]) => {
+        const normalizedId = /^\d+$/.test(String(id).trim()) ? String(id).trim() : "";
+        if (normalizedId && normalizeListTranslationEntry(entry)) {
+            validCnEntries[normalizedId] = entry;
+        }
+    });
+
+    await writeManyListTranslationEntriesToKv(kvConfig, validEntries, { locale: normalizeLocale(payload?.locale), cn: validCnEntries });
 
     res.status(200).json({
         counts: {

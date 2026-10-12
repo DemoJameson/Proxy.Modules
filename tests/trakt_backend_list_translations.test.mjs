@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 
+import { createPipelineResponse, jsonValue } from "./helpers/kv-rest-mock.mjs";
+
 const require = createRequire(import.meta.url);
 const listTranslationsHandler = require("../api/trakt/list-translations.js");
 
 const LIST_TRANSLATION_42 = "trakt:list-translation:42";
 const LIST_TRANSLATION_99 = "trakt:list-translation:99";
-const LIST_TRANSLATION_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 function createListTranslationEntry(sourceTextHash = "hash-1", translatedText = "最佳影片合集") {
     return {
@@ -37,11 +38,32 @@ function createResponse() {
     };
 }
 
-function jsonValue(value) {
-    return {
-        __redisJson: true,
-        value,
-    };
+// cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
+function collectCnWrite(store, rootFields) {
+    assert.equal(store.msetCommands.length, 1);
+    const command = store.msetCommands[0];
+    assert.equal(command[0], "JSON.MSET");
+    const written = {};
+    for (let index = 1; index < command.length; index += 3) {
+        const key = command[index];
+        const path = command[index + 1];
+        const value = command[index + 2];
+        if (path === "$.cn") {
+            written[key] = JSON.parse(value);
+        } else {
+            assert.ok(rootFields.includes(path.replace(`$.`, ``)), `只应清空旧根字段：${path}`);
+            assert.equal(value, "null", `${path} 应以 JSON null 清空`);
+        }
+    }
+    assert.equal(store.expireCommands, undefined);
+    assert.equal(store.pttlCommands, undefined);
+    return written;
+}
+
+function withoutExpiresAt(entry) {
+    const copy = { ...entry };
+    delete copy.expiresAt;
+    return copy;
 }
 
 function createKvFetch(store) {
@@ -50,37 +72,7 @@ function createKvFetch(store) {
         const path = parsed.pathname;
 
         if (path === "/pipeline") {
-            const commands = JSON.parse(init.body || "[]");
-            store.pipelineRequests = [...(store.pipelineRequests || []), commands];
-            const results = [];
-            for (const command of commands) {
-                const [name, key] = command;
-                if (name === "JSON.MSET") {
-                    store.msetCommands = [...(store.msetCommands || []), command];
-                    for (let index = 1; index < command.length; index += 3) {
-                        store.set(command[index], jsonValue(JSON.parse(command[index + 2])));
-                    }
-                    results.push("OK");
-                } else if (name === "JSON.MGET") {
-                    store.mgetCommands = [...(store.mgetCommands || []), command];
-                    const keys = command.slice(1, -1);
-                    results.push(
-                        keys.map((itemKey) => {
-                            const stored = store.get(itemKey);
-                            return stored && stored.__redisJson === true ? [stored.value] : null;
-                        }),
-                    );
-                } else if (name === "EXPIRE") {
-                    store.expireCommands = [...(store.expireCommands || []), command];
-                    results.push(store.has(key) ? 1 : 0);
-                } else {
-                    results.push(null);
-                }
-            }
-            return {
-                ok: true,
-                json: async () => results.map((result) => ({ result })),
-            };
+            return createPipelineResponse(store, init);
         }
 
         return {
@@ -275,7 +267,7 @@ test("list-translations 接口在 KV 未配置时返回 500", async () => {
     );
 });
 
-test("list-translations POST 写入合法条目并设置 90 天 EXPIRE，再 GET 命中", async () => {
+test("list-translations POST 写入合法条目并在数据里记录 90 天过期时间，再 GET 命中", async () => {
     const store = new Map();
     const entry42 = { name: { sourceTextHash: "hash-n1", translatedText: "科幻经典" }, description: { sourceTextHash: "hash-1", translatedText: "最佳科幻影片合集" } };
     const entry99 = createListTranslationEntry("hash-2", "年度佳剧清单");
@@ -298,24 +290,20 @@ test("list-translations POST 写入合法条目并设置 90 天 EXPIRE，再 GET
             },
         });
 
-        // 单条 pipeline 内一条 JSON.MSET 携带多个 key 三元组，每条 key 一个 90 天 EXPIRE
         assert.equal(store.pipelineRequests.length, 1);
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", LIST_TRANSLATION_42, "$", JSON.stringify(entry42), LIST_TRANSLATION_99, "$", JSON.stringify(entry99)]]);
-        assert.deepEqual(store.expireCommands, [
-            ["EXPIRE", LIST_TRANSLATION_42, LIST_TRANSLATION_TTL_SECONDS],
-            ["EXPIRE", LIST_TRANSLATION_99, LIST_TRANSLATION_TTL_SECONDS],
-        ]);
+        const written = collectCnWrite(store, ["name", "description"]);
+        Object.entries(written).forEach(([, entry]) => {
+            assert.ok(Number.isFinite(entry.expiresAt), "90 天过期时间应写入数据");
+        });
+        assert.deepEqual(written[LIST_TRANSLATION_42], { ...entry42, expiresAt: written[LIST_TRANSLATION_42].expiresAt });
+        assert.deepEqual(written[LIST_TRANSLATION_99], { ...entry99, expiresAt: written[LIST_TRANSLATION_99].expiresAt });
 
         const getRes = await invoke({
             method: "GET",
             query: { lists: "42,99" },
         });
-        assert.deepEqual(getRes.jsonBody, {
-            lists: {
-                42: entry42,
-                99: entry99,
-            },
-        });
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.lists["42"]), entry42);
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.lists["99"]), entry99);
     });
 });
 
@@ -341,8 +329,9 @@ test("list-translations POST 跳过缺字段与非法 ID 的条目", async () =>
                 lists: 1,
             },
         });
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", LIST_TRANSLATION_42, "$", JSON.stringify(createListTranslationEntry("hash-1", "最佳影片合集"))]]);
-        assert.deepEqual(store.expireCommands, [["EXPIRE", LIST_TRANSLATION_42, LIST_TRANSLATION_TTL_SECONDS]]);
+        const written = collectCnWrite(store, ["name", "description"]);
+        const expected = createListTranslationEntry("hash-1", "最佳影片合集");
+        assert.deepEqual(written[LIST_TRANSLATION_42], { ...expected, expiresAt: written[LIST_TRANSLATION_42].expiresAt });
     });
 });
 
