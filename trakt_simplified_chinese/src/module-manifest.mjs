@@ -8,7 +8,7 @@ const DEFAULT_BACKEND_BASE_URL = "https://proxy-modules.demojameson.de5.net";
 const metadata = {
     name: "Trakt 增强",
     description:
-        "Trakt App 各页面从英文改为简体中文，支持中文标题、简介和海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 和 SofaTime 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
+        "Trakt App 各页面从英文改为简体中文或港台繁体；历史页面剧集类别的已观看记录按电视剧合并；Trakt 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
     icon: `${RAW_BASE_URL}/${TRAKT_MODULE_PATH}/images/trakt.webp`,
     homepage: REPOSITORY_URL,
     openUrl: "https://apps.apple.com/app/id1514873602",
@@ -30,20 +30,22 @@ const argumentFields = [
         desc: "启用后伪装为 Trakt VIP 会员，移除 App 中的广告",
     },
     {
+        key: "chineseLocale",
+        defaultValue: "cn",
+        type: "select",
+        options: ["简体中文", "繁體中文（台灣）", "繁體中文（香港）"],
+        optionValues: ["cn", "tw", "hk"],
+        tag: "目标语言",
+        desc: "选择目标语言：简体中文、繁體中文（台灣）或繁體中文（香港）",
+    },
+    {
         key: "posterImageMode",
         defaultValue: "original",
         type: "select",
-        options: ["原片语言", "中文", "原图"],
-        optionValues: ["original", "chinese", "default"],
+        options: ["原片语言", "简体中文", "繁體中文（台灣）", "繁體中文（香港）", "原图"],
+        optionValues: ["original", "cn", "tw", "hk", "default"],
         tag: "海报语言",
-        desc: "原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图",
-    },
-    {
-        key: "historyEpisodesMergedByShow",
-        defaultValue: true,
-        type: "boolean",
-        tag: "历史剧集按电视剧合并",
-        desc: "启用后会将历史页面电视剧类别的观看记录按电视剧合并",
+        desc: "原片语言使用 TMDb 影片原始语言图片；中文按所选语言优先匹配海报；原图保留 Trakt 原图",
     },
     {
         key: "translationEngine",
@@ -60,6 +62,13 @@ const argumentFields = [
         type: "boolean",
         tag: "用豆瓣翻译角色名",
         desc: "启用后会用豆瓣翻译角色名",
+    },
+    {
+        key: "historyEpisodesMergedByShow",
+        defaultValue: true,
+        type: "boolean",
+        tag: "历史剧集按电视剧合并",
+        desc: "启用后会将历史页面电视剧类别的观看记录按电视剧合并",
     },
     {
         key: "forwardButtonOrder",

@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { TMDB_PERSON_NAME_TTL_MS } from "../trakt_simplified_chinese/src/features/people-name-cache.mjs";
 import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
 import { createRequestPhaseRoutes } from "../trakt_simplified_chinese/src/request.mjs";
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
+import { TRAKT_TAMPER_CLIENT_ID } from "../trakt_simplified_chinese/src/shared/tamper-app-constants.mjs";
 
 import {
     createScriptRequestHeaders,
@@ -30,9 +32,29 @@ import {
     createSentimentTranslationCache,
     createUnifiedPersistentData,
     createWatchnowIdsEntry,
+    parseTamperAuthorization,
     parseUnifiedCache,
     readFixture,
 } from "./helpers/trakt-test-helpers.mjs";
+
+// 篡改流程签发的 token 记录：让 oauth/token 路由识别出这是篡改流程并改写 client
+function createTamperTokenPersistentData(clientId, refreshToken) {
+    return createUnifiedPersistentData({
+        tamperAppAuthorization: {
+            records: [],
+            tokens: [
+                {
+                    accessToken: "tamper-access-token",
+                    refreshToken,
+                    clientId,
+                    expiresAt: Date.now() + 60 * 60 * 1000,
+                    createdAt: Date.now(),
+                },
+            ],
+            pending: [],
+        },
+    });
+}
 
 function createWrappedMovieItems(movie) {
     return [
@@ -90,7 +112,7 @@ function createMirPayload(movie) {
 
 function createEpisodeTranslationCache(sample, title = "中文剧集标题") {
     return {
-        [`episode:${sample.traktId}:${sample.seasonNumber}:${sample.episodeNumber}`]: {
+        [`episode:${sample.traktId}:${sample.seasonNumber}:${sample.episodeNumber}:cn`]: {
             status: 1,
             translation: {
                 title,
@@ -135,6 +157,117 @@ function collectMatchedResponseEntryIds(routes, urls) {
     });
 
     return matchedRouteIds;
+}
+
+// 篡改授权响应路由（oauth.callback / oauth.response）不依赖 live 样本：
+// 既放进响应矩阵参与覆盖断言，也单独执行一次，保证样本不可用（矩阵整体 skip）时这两条安全敏感路由仍有校验
+const TAMPER_RESPONSE_MATRIX_CASES = [
+    {
+        url: "https://trakt.tv/api/auth/oauth2/authorize?code=live-callback-code&state=live-challenge",
+        argument: { tamperAppAuthorizationEnabled: true },
+        responseStatus: 302,
+        responseHeaders: { location: "trakt://auth?code=live-callback-code" },
+        body: "",
+        // fixture 用工厂延迟到用例执行时求值：tamper state 有 5 分钟 TTL，模块加载时定型会在长跑后过期
+        persistentData: () =>
+            createUnifiedPersistentData({
+                tamperAppAuthorization: {
+                    records: [
+                        {
+                            id: "live-challenge",
+                            clientId: "old-client",
+                            redirectUri: "thirdparty://oauth/callback",
+                            originalState: "original-state",
+                            codeVerifier: "live-verifier",
+                            codeChallenge: "live-challenge",
+                            createdAt: Date.now(),
+                        },
+                    ],
+                    tokens: [],
+                    pending: [],
+                },
+            }),
+        assertResult(result) {
+            assert.equal(result.status, 302);
+            assert.equal(result.headers.Location, "thirdparty://oauth/callback?code=live-callback-code&state=original-state");
+        },
+    },
+    {
+        url: "https://api.trakt.tv/oauth/device/code",
+        argument: { tamperAppAuthorizationEnabled: true },
+        body: JSON.stringify({
+            device_code: "live-device-code",
+            user_code: "LIVE1234",
+            verification_url: "https://auth.trakt.tv/activate",
+            expires_in: 600,
+            interval: 6,
+        }),
+        persistentData: () =>
+            createUnifiedPersistentData({
+                tamperAppAuthorization: {
+                    records: [],
+                    tokens: [],
+                    pending: [
+                        {
+                            kind: "device_flow",
+                            id: "device-flow",
+                            clientId: "old-client",
+                            createdAt: Date.now(),
+                        },
+                    ],
+                },
+            }),
+        assertResult(result, persistentData) {
+            assert.equal(Object.keys(result).length, 0, "device/code 响应应放行，只更新篡改流程 pending");
+            const pending = parseTamperAuthorization(persistentData).pending;
+            assert.ok(
+                pending.some((entry) => entry.kind === "device_code" && entry.id === "live-device-code"),
+                "应把 device_code 写入 pending",
+            );
+            assert.equal(
+                pending.some((entry) => entry.kind === "device_flow"),
+                false,
+                "device_flow 标记应被替换",
+            );
+        },
+    },
+];
+
+// 响应矩阵单条用例：样本类断言 JSON body，篡改授权类自带 assertResult（可能没有 JSON body）
+async function runResponseMatrixCase(config, item) {
+    const { result, persistentData } = await runLiveResponseCase(config, {
+        url: item.url,
+        argument: {
+            backendBaseUrl: config.backendBaseUrl,
+            ...(item.argument ?? {}),
+        },
+        headers: {
+            ...createScriptRequestHeaders(config),
+            ...(item.headers ?? {}),
+        },
+        body: item.body,
+        responseStatus: item.responseStatus,
+        responseHeaders: item.responseHeaders,
+        requestBody: item.requestBody,
+        omitRequestBody: item.omitRequestBody,
+        // persistentData 支持传工厂：tamper 授权 fixture 带 5 分钟 TTL，必须在用例执行时求值
+        persistentData: typeof item.persistentData === "function" ? item.persistentData() : item.persistentData,
+        httpGetMocks: {
+            [`${config.backendBaseUrl}/api/trakt/translation-overrides`]: JSON.stringify({
+                shows: {},
+                movies: {},
+                episodes: {},
+            }),
+            ...(item.httpGetMocks ?? {}),
+        },
+    });
+
+    if (item.assertResult) {
+        item.assertResult(result, persistentData);
+        return;
+    }
+
+    item.assertPayload(JSON.parse(result.body));
 }
 
 async function resolveListDescriptionSample(config) {
@@ -389,7 +522,7 @@ test("live script: /shows/popular 会命中列表翻译路由并应用缓存中�
         body: sample.listBody,
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                [`show:${sample.traktId}`]: createMediaTranslationEntry({
+                [`show:${sample.traktId}:cn`]: createMediaTranslationEntry({
                     translation: {
                         title: String(cnTranslation?.title ?? ""),
                         overview: String(cnTranslation?.overview ?? ""),
@@ -443,7 +576,7 @@ test("live script: /movies/popular 会命中列表翻译路由并应用缓存中
         body: sample.listBody,
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                [`movie:${sample.traktId}`]: createMediaTranslationEntry({
+                [`movie:${sample.traktId}:cn`]: createMediaTranslationEntry({
                     translation: {
                         title: String(cnTranslation?.title ?? ""),
                         overview: String(cnTranslation?.overview ?? ""),
@@ -496,11 +629,13 @@ test("live script: /people/:id 会应用缓存中的中文姓名和 biography", 
         body: JSON.stringify(sample.personDetail),
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                [sample.personId]: {
+                // 用 tmdb 来源 + 未过期 TTL 造缓存，避免线上 TMDb 中文名覆盖缓存译文导致断言不稳定
+                [`${sample.personId}:cn`]: {
                     name: {
                         sourceTextHash: computeStringHash(originalName),
                         translatedText: translatedName,
-                        source: "google",
+                        source: "tmdb",
+                        expiresAt: Date.now() + TMDB_PERSON_NAME_TTL_MS,
                     },
                     biography: {
                         sourceTextHash: computeStringHash(originalBiography),
@@ -543,11 +678,13 @@ test("live script: /movies/:id/people 会应用缓存中的中文姓名", async 
         body: JSON.stringify(sample.people),
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                [sample.personId]: {
+                // 同上：tmdb 来源 + 未过期 TTL，确保走「应用缓存译文」而不是线上 TMDb 查询
+                [`${sample.personId}:cn`]: {
                     name: {
                         sourceTextHash: computeStringHash(originalName),
                         translatedText: translatedName,
-                        source: "google",
+                        source: "tmdb",
+                        expiresAt: Date.now() + TMDB_PERSON_NAME_TTL_MS,
                     },
                 },
             },
@@ -586,7 +723,7 @@ test("live script: comments 响应会应用缓存中的评论翻译", async (t) 
         body: JSON.stringify(sample.comments),
         persistentData: createUnifiedPersistentData({
             googleComments: {
-                [commentId]: {
+                [`${commentId}:cn`]: {
                     comment: {
                         sourceTextHash: computeStringHash(originalComment),
                         translatedText: translatedComment,
@@ -639,7 +776,7 @@ test("live script: /movies/:id/sentiments 会应用缓存中的情绪翻译", as
         body: JSON.stringify(sample.sentiments),
         persistentData: createUnifiedPersistentData({
             googleSentiments: {
-                [`movie:${sample.traktId}`]: {
+                [`movie:${sample.traktId}:cn`]: {
                     translation: {
                         aspect: {
                             pros: (Array.isArray(sample.sentiments?.aspect?.pros) ? sample.sentiments.aspect.pros : []).map((item, index) => {
@@ -792,7 +929,7 @@ test("live script: response route coverage matrix covers all response phase rout
     }
 
     const wrappedMovieItems = createWrappedMovieItems(movieSample.movie);
-    const _wrappedShowItems = createWrappedShowItems(showSample.show);
+    const wrappedShowItems = createWrappedShowItems(showSample.show);
     const directMovieItems = [directMovieSample.movie];
     const directShowItems = [showSample.show];
     const episodeItems = createMergedHistoryEpisodeItems(episodeSample);
@@ -801,14 +938,14 @@ test("live script: response route coverage matrix covers all response phase rout
     const mirPayload = createMirPayload(movieSample.movie);
 
     const movieTranslation = {
-        [`movie:${movieSample.traktId}`]: createMediaTranslationEntry({
+        [`movie:${movieSample.traktId}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖中文电影",
                 overview: "覆盖中文简介",
                 tagline: "覆盖中文标语",
             },
         }),
-        [`movie:${directMovieSample.traktId}`]: createMediaTranslationEntry({
+        [`movie:${directMovieSample.traktId}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖直出中文电影",
                 overview: "覆盖直出中文简介",
@@ -817,7 +954,7 @@ test("live script: response route coverage matrix covers all response phase rout
         }),
     };
     const personCreditsMovieTranslation = {
-        [`movie:${personCreditsSample.movie.ids.trakt}`]: createMediaTranslationEntry({
+        [`movie:${personCreditsSample.movie.ids.trakt}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖人物作品中文电影",
                 overview: "覆盖人物作品中文简介",
@@ -827,7 +964,7 @@ test("live script: response route coverage matrix covers all response phase rout
     };
     const preferredShowTranslation = pickPreferredZhTranslation(showSample.translations);
     const showTranslation = {
-        [`show:${showSample.traktId}`]: createMediaTranslationEntry({
+        [`show:${showSample.traktId}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: String(preferredShowTranslation?.title ?? showSample.show.title ?? ""),
                 overview: String(preferredShowTranslation?.overview ?? showSample.show.overview ?? ""),
@@ -838,7 +975,7 @@ test("live script: response route coverage matrix covers all response phase rout
     const expectedShowTitle = String(preferredShowTranslation?.title ?? showSample.show.title ?? "");
     const episodeTranslation = createEpisodeTranslationCache(episodeSample);
     const listTranslation = {
-        [String(listSample.list.ids.trakt)]: {
+        [`${String(listSample.list.ids.trakt)}:cn`]: {
             description: {
                 sourceTextHash: computeStringHash(String(listSample.list.description)),
                 translatedText: "覆盖中文列表描述",
@@ -846,7 +983,7 @@ test("live script: response route coverage matrix covers all response phase rout
         },
     };
     const commentTranslation = {
-        [String(commentsSample.firstComment.id)]: {
+        [`${String(commentsSample.firstComment.id)}:cn`]: {
             comment: {
                 sourceTextHash: computeStringHash(String(commentsSample.firstComment.comment)),
                 translatedText: "覆盖中文评论",
@@ -1724,7 +1861,7 @@ test("live script: response route coverage matrix covers all response phase rout
             ]),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "show:456": createMediaTranslationEntry({
+                    "show:456:cn": createMediaTranslationEntry({
                         translation: {
                             title: "中文剧名",
                             overview: "中文剧集简介",
@@ -1743,14 +1880,14 @@ test("live script: response route coverage matrix covers all response phase rout
             persistentData: createUnifiedPersistentData({
                 persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
                 traktTranslation: {
-                    "episode:555:1:1": createMediaTranslationEntry({
+                    "episode:555:1:1:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第一集中文",
                             overview: "第一集中文简介",
                             tagline: "第一集中文标语",
                         },
                     }),
-                    "episode:555:1:2": createMediaTranslationEntry({
+                    "episode:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -1819,7 +1956,7 @@ test("live script: response route coverage matrix covers all response phase rout
             body: readFixture("movie-detail.json"),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "movie:123": createMediaTranslationEntry(),
+                    "movie:123:cn": createMediaTranslationEntry(),
                 },
             }),
             assertPayload(payload) {
@@ -1849,7 +1986,7 @@ test("live script: response route coverage matrix covers all response phase rout
             }),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "episode:555:1:2": createMediaTranslationEntry({
+                    "episode:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -1872,6 +2009,95 @@ test("live script: response route coverage matrix covers all response phase rout
                 assert.match(payload.name, /^汤姆·汉克斯/);
             },
         },
+        {
+            url: "https://api.trakt.tv/calendars/all/shows/2026-01-01/7",
+            body: JSON.stringify(wrappedShowItems),
+            persistentData: createUnifiedPersistentData({ traktTranslation: showTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload[0].show.title, expectedShowTitle);
+            },
+        },
+        {
+            url: "https://api.trakt.tv/smart-lists/movies/items",
+            body: JSON.stringify(wrappedMovieItems),
+            persistentData: createUnifiedPersistentData({ traktTranslation: movieTranslation }),
+            assertPayload(payload) {
+                assert.equal(payload[0].movie.title, "覆盖中文电影");
+            },
+        },
+        {
+            url: "https://api.trakt.tv/shows/123/seasons/1/people",
+            body: readFixture("media-people-list.json"),
+            persistentData: createUnifiedPersistentData({
+                googlePeople: JSON.parse(createPeopleTranslationCache()),
+            }),
+            assertPayload(payload) {
+                assert.match(payload.cast[0].person.name, /^汤姆·汉克斯/);
+            },
+        },
+        {
+            url: "https://api.trakt.tv/shows/123/seasons/1/comments/newest",
+            body: readFixture("comments.json"),
+            persistentData: createUnifiedPersistentData({
+                googleComments: JSON.parse(createCommentTranslationCache()),
+            }),
+            assertPayload(payload) {
+                assert.equal(payload[0].comment, "很棒的电影");
+            },
+        },
+        {
+            url: "https://api.trakt.tv/comments/9001",
+            body: JSON.stringify({
+                id: 9001,
+                language: "en",
+                comment: "Great movie",
+                spoiler: false,
+                review: false,
+                parent_id: 0,
+            }),
+            persistentData: createUnifiedPersistentData({
+                googleComments: JSON.parse(createCommentTranslationCache()),
+            }),
+            assertPayload(payload) {
+                assert.equal(payload.comment, "很棒的电影");
+            },
+        },
+        {
+            url: "https://api.trakt.tv/movies/123/videos",
+            argument: { translationEngine: "off" },
+            body: readFixture("videos.json"),
+            persistentData: createUnifiedPersistentData(),
+            assertPayload(payload) {
+                assert.equal(payload[0].title, "Official Trailer");
+                assert.equal(payload[3].title, "中文抢先看");
+            },
+        },
+        {
+            url: "https://api.trakt.tv/shows/555/seasons/1/info",
+            body: JSON.stringify({
+                title: "Season 1",
+                overview: "Original Season Overview",
+                number: 1,
+                ids: {
+                    trakt: 999,
+                },
+            }),
+            persistentData: createUnifiedPersistentData({
+                traktTranslation: {
+                    "season:555:1:cn": createMediaTranslationEntry({
+                        translation: {
+                            title: "第一季",
+                            overview: "第一季简介",
+                        },
+                    }),
+                },
+            }),
+            assertPayload(payload) {
+                assert.equal(payload.title, "第一季");
+                assert.equal(payload.overview, "第一季简介");
+            },
+        },
+        ...TAMPER_RESPONSE_MATRIX_CASES,
     ];
 
     const responseRoutes = createResponsePhaseRoutes();
@@ -1889,29 +2115,24 @@ test("live script: response route coverage matrix covers all response phase rout
 
     for (const item of responseCases) {
         await t.test(item.url, async () => {
-            const { result } = await runLiveResponseCase(config, {
-                url: item.url,
-                argument: {
-                    backendBaseUrl: config.backendBaseUrl,
-                },
-                headers: {
-                    ...createScriptRequestHeaders(config),
-                    ...(item.headers ?? {}),
-                },
-                body: item.body,
-                persistentData: item.persistentData,
-                httpGetMocks: {
-                    [`${config.backendBaseUrl}/api/trakt/translation-overrides`]: JSON.stringify({
-                        shows: {},
-                        movies: {},
-                        episodes: {},
-                    }),
-                    ...(item.httpGetMocks ?? {}),
-                },
-            });
+            await runResponseMatrixCase(config, item);
+        });
+    }
+});
 
-            const payload = JSON.parse(result.body);
-            item.assertPayload(payload);
+test("live script: 篡改授权响应路由不依赖 live 样本也能覆盖与校验", async (t) => {
+    const config = getLiveConfig();
+    const responseRoutes = createResponsePhaseRoutes();
+
+    const matchedRouteIds = collectMatchedResponseEntryIds(
+        responseRoutes,
+        TAMPER_RESPONSE_MATRIX_CASES.map((item) => item.url),
+    );
+    assert.deepEqual([...matchedRouteIds].sort(), ["oauth.callback", "oauth.response"]);
+
+    for (const item of TAMPER_RESPONSE_MATRIX_CASES) {
+        await t.test(item.url, async () => {
+            await runResponseMatrixCase(config, item);
         });
     }
 });
@@ -1960,6 +2181,80 @@ test("live script: request route coverage matrix covers all request phase routes
                 assert.equal(result.url, "https://api.trakt.tv/users/test/history/episodes?page=2&limit=500");
             },
         },
+        {
+            // 篡改应用授权：api.trakt.tv 的 device/code 会把第三方 client 改写成官方 client
+            url: "https://api.trakt.tv/oauth/device/code",
+            argument: { tamperAppAuthorizationEnabled: true },
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({ client_id: "old-client" }),
+            assertResult(result) {
+                assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID);
+            },
+        },
+        {
+            // auth.trakt.tv 的 refresh_token 换取：命中已签发 token 时改写 client 并去掉 client_secret
+            url: "https://auth.trakt.tv/oauth/token",
+            argument: { tamperAppAuthorizationEnabled: true },
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: "old-client",
+                refresh_token: "tamper-refresh-token",
+                grant_type: "refresh_token",
+            }),
+            persistentData: createTamperTokenPersistentData("old-client", "tamper-refresh-token"),
+            assertResult(result) {
+                const payload = JSON.parse(result.body);
+                assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+                assert.equal(Object.hasOwn(payload, "client_secret"), false);
+            },
+        },
+        {
+            // trakt.tv 的 refresh_token 换取：同上，覆盖 web 域名的 token 路由
+            url: "https://trakt.tv/oauth/token",
+            argument: { tamperAppAuthorizationEnabled: true },
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: "old-client",
+                refresh_token: "tamper-refresh-token",
+                grant_type: "refresh_token",
+            }),
+            persistentData: createTamperTokenPersistentData("old-client", "tamper-refresh-token"),
+            assertResult(result) {
+                const payload = JSON.parse(result.body);
+                assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+                assert.equal(Object.hasOwn(payload, "client_secret"), false);
+            },
+        },
+        {
+            // 篡改应用授权：trakt.tv 授权页会被改写到 auth.trakt.tv 并带上 PKCE
+            url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&state=original-state",
+            argument: { tamperAppAuthorizationEnabled: true },
+            assertResult(result) {
+                const target = new URL(result.url);
+                assert.equal(`${target.origin}${target.pathname}`, "https://auth.trakt.tv/oauth/authorize");
+                assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+                assert.equal(target.searchParams.get("redirect_uri"), "trakt://auth");
+                assert.ok(target.searchParams.get("code_challenge"), "应带上 PKCE challenge");
+            },
+        },
+        {
+            // 篡改应用授权：auth.trakt.tv 授权页走同一条改写链路
+            url: "https://auth.trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&state=original-state",
+            argument: { tamperAppAuthorizationEnabled: true },
+            assertResult(result) {
+                const target = new URL(result.url);
+                assert.equal(`${target.origin}${target.pathname}`, "https://auth.trakt.tv/oauth/authorize");
+                assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+                assert.equal(target.searchParams.get("redirect_uri"), "trakt://auth");
+                assert.ok(target.searchParams.get("code_challenge"), "应带上 PKCE challenge");
+            },
+        },
     ];
 
     const requestRoutes = createRequestPhaseRoutes();
@@ -1978,6 +2273,8 @@ test("live script: request route coverage matrix covers all request phase routes
             const { result } = await runLiveRequestCase(config, {
                 url: item.url,
                 argument: item.argument,
+                body: item.body,
+                persistentData: item.persistentData,
                 headers: item.headers ? createScriptRequestHeaders(config, item.headers) : createScriptRequestHeaders(config),
             });
 

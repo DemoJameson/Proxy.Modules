@@ -169,8 +169,8 @@ test("translationEngine=off 时 people detail 不触发 Google 翻译，仍保�
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
         false,
@@ -201,13 +201,13 @@ test("people detail 会通过 Google 翻译未命中的姓名和 biography 并�
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Tom Hanks", "An American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-    assert.equal(cache["42"].name.sourceTextHash, computeStringHash("Tom Hanks"));
-    assert.equal(cache["42"].name.source, "google");
-    assert.ok(cache["42"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
-    assert.ok(cache["42"].name.expiresAt <= Date.now() + 30 * 24 * 60 * 60 * 1000, "expected the google name entry within the 30-day TTL");
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
-    assert.equal(cache["42"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
+    assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(cache["42:cn"].name.sourceTextHash, computeStringHash("Tom Hanks"));
+    assert.equal(cache["42:cn"].name.source, "google");
+    assert.ok(cache["42:cn"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
+    assert.ok(cache["42:cn"].name.expiresAt <= Date.now() + 30 * 24 * 60 * 60 * 1000, "expected the google name entry within the 30-day TTL");
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget POST to the people-names backend");
@@ -241,7 +241,7 @@ test("translationEngine=off 时 people detail 不翻译 biography，且不触发
     const payload = JSON.parse(result.body);
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
     assert.equal(payload.biography, "An American actor and filmmaker.");
-    assert.equal(parseUnifiedCache(persistentData).google.people["42"].biography, undefined);
+    assert.equal(parseUnifiedCache(persistentData).google.people["42:cn"].biography, undefined);
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
         false,
@@ -274,8 +274,8 @@ test("people detail 遇到 sourceTextHash 不匹配的 biography 缓存时会忽
     assert.equal(payload.biography, "一位美国演员和电影制作人。");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
-    assert.equal(cache["42"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
 });
 
 test("people detail 遇到旧的 name.sourceText 缓存时会视为未命中并按新结构重建", async () => {
@@ -284,7 +284,7 @@ test("people detail 遇到旧的 name.sourceText 缓存时会视为未命中并�
         body: readFixture("people-detail.json"),
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceText: "Tom Hanks",
                         translatedText: "旧姓名",
@@ -301,10 +301,10 @@ test("people detail 遇到旧的 name.sourceText 缓存时会视为未命中并�
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.source, "google");
-    assert.equal(cache["42"].name.sourceTextHash, computeStringHash("Tom Hanks"));
-    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-    assert.ok(cache["42"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
+    assert.equal(cache["42:cn"].name.source, "google");
+    assert.equal(cache["42:cn"].name.sourceTextHash, computeStringHash("Tom Hanks"));
+    assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.ok(cache["42:cn"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
 });
 
 test("people detail 已有 google name 缓存时，TMDb 中文名会覆盖并改写为 tmdb 来源", async () => {
@@ -313,7 +313,7 @@ test("people detail 已有 google name 缓存时，TMDb 中文名会覆盖并改
         body: readFixture("people-detail.json"),
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Tom Hanks"),
                         translatedText: "谷歌译名",
@@ -336,7 +336,7 @@ test("people detail 已有 google name 缓存时，TMDb 中文名会覆盖并改
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 });
 
 test("people detail 已有 tmdb name 缓存时，Google 返回结果不能覆盖", async () => {
@@ -351,7 +351,7 @@ test("people detail 已有 tmdb name 缓存时，Google 返回结果不能覆盖
         }),
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Tom Hanks"),
                         translatedText: "汤姆·汉克斯",
@@ -370,7 +370,7 @@ test("people detail 已有 tmdb name 缓存时，Google 返回结果不能覆盖
     assert.equal(payload.name, "谷歌姓名\nThomas Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 });
 
 test("people detail 翻译 biography 时会用 TMDb 中文名作为 Google 语境并移除返回前缀", async () => {
@@ -403,8 +403,8 @@ test("people detail 翻译 biography 时会用 TMDb 中文名作为 Google 语�
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Tom Hanks (汤姆·汉克斯)\nAn American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].biography.sourceTextHash, computeStringHash("An American actor and filmmaker."));
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
 });
 
 test("people detail 翻译 biography 时不会删除冒号格式语境前缀", async () => {
@@ -434,7 +434,7 @@ test("people detail 翻译 biography 时不会删除冒号格式语境前缀", a
     assert.equal(payload.biography, "Tom Hanks (汤姆·汉克斯)：一位美国演员和电影制作人。");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].biography.translatedText, "Tom Hanks (汤姆·汉克斯)：一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].biography.translatedText, "Tom Hanks (汤姆·汉克斯)：一位美国演员和电影制作人。");
 });
 
 test("people detail 翻译 biography 时不会删除半角冒号前缀", async () => {
@@ -464,7 +464,7 @@ test("people detail 翻译 biography 时不会删除半角冒号前缀", async (
     assert.equal(payload.biography, "简介: 一位美国演员和电影制作人。");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].biography.translatedText, "简介: 一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].biography.translatedText, "简介: 一位美国演员和电影制作人。");
 });
 
 test("people detail 无 TMDb 姓名缓存时会先请求 TMDb 再用中文名翻译 biography", async () => {
@@ -489,9 +489,9 @@ test("people detail 无 TMDb 姓名缓存时会先请求 TMDb 再用中文名翻
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Tom Hanks (汤姆·汉克斯)\nAn American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-    assert.equal(cache["42"].name.source, "tmdb");
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(cache["42:cn"].name.source, "tmdb");
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
 });
 
 test("people detail 获取不到 TMDb 中文名时 biography 不添加 Google 语境", async () => {
@@ -516,9 +516,9 @@ test("people detail 获取不到 TMDb 中文名时 biography 不添加 Google �
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Tom Hanks", "An American actor and filmmaker."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-    assert.equal(cache["42"].name.source, "google");
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(cache["42:cn"].name.source, "google");
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
 });
 
 test("people detail 已有 TMDb 姓名缓存和 biography 缓存时不会请求 Google", async () => {
@@ -612,7 +612,7 @@ test("media people 列表会从 TMDb credits 补出中文姓名并写回缓存",
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 });
 
 test("media people 列表会用豆瓣补全一人一角并写入缓存", async () => {
@@ -1268,8 +1268,8 @@ test("translationEngine=off 时 media people 列表不触发 Google 回退，但
 
     const payload = JSON.parse(result.body);
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
-    assert.equal(parseUnifiedCache(persistentData).google.people["42"].name.translatedText, "汤姆·汉克斯");
-    assert.equal(parseUnifiedCache(persistentData).google.people["42"].name.source, "tmdb");
+    assert.equal(parseUnifiedCache(persistentData).google.people["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(parseUnifiedCache(persistentData).google.people["42:cn"].name.source, "tmdb");
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
         false,
@@ -1296,10 +1296,10 @@ mediaPeopleTmdbFallbackCases.forEach(({ name, mock }) => {
         assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
         const cache = parseUnifiedCache(persistentData).google.people;
-        assert.equal(cache["42"].name.source, "google");
-        assert.equal(cache["42"].name.sourceTextHash, computeStringHash("Tom Hanks"));
-        assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-        assert.ok(cache["42"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
+        assert.equal(cache["42:cn"].name.source, "google");
+        assert.equal(cache["42:cn"].name.sourceTextHash, computeStringHash("Tom Hanks"));
+        assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+        assert.ok(cache["42:cn"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
     });
 });
 
@@ -1310,7 +1310,7 @@ test("media people 列表先有 Google 缓存、后拿到 TMDb 名字时会被 T
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(createWatchnowIdsCache()),
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Tom Hanks"),
                         translatedText: "谷歌译名",
@@ -1326,7 +1326,7 @@ test("media people 列表先有 Google 缓存、后拿到 TMDb 名字时会被 T
 
     const payload = JSON.parse(result.body);
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
-    assertTmdbNameEntry(parseUnifiedCache(persistentData).google.people["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(parseUnifiedCache(persistentData).google.people["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 });
 
 test("media people 列表已有 tmdb 缓存时，Google 返回不同姓名也不会覆盖", async () => {
@@ -1352,7 +1352,7 @@ test("media people 列表已有 tmdb 缓存时，Google 返回不同姓名也不
         },
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Tom Hanks"),
                         translatedText: "汤姆·汉克斯",
@@ -1369,7 +1369,7 @@ test("media people 列表已有 tmdb 缓存时，Google 返回不同姓名也不
 
     const payload = JSON.parse(result.body);
     assert.equal(payload.cast[0].person.name, "谷歌姓名");
-    assertTmdbNameEntry(parseUnifiedCache(persistentData).google.people["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(parseUnifiedCache(persistentData).google.people["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 });
 
 test("media people 列表只更新姓名时会保留已有 biography 缓存", async () => {
@@ -1395,9 +1395,9 @@ test("media people 列表只更新姓名时会保留已有 biography 缓存", as
     });
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.translatedText, "汤姆·汉克斯");
-    assert.equal(cache["42"].name.source, "tmdb");
-    assert.equal(cache["42"].biography.translatedText, "一位美国演员和电影制作人。");
+    assert.equal(cache["42:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(cache["42:cn"].name.source, "tmdb");
+    assert.equal(cache["42:cn"].biography.translatedText, "一位美国演员和电影制作人。");
 });
 
 test("media people 列表在 TMDb 和 Google 都失败时会保留原文且不写入缓存", async () => {
@@ -1516,15 +1516,15 @@ test("search person 列表会用 Google 翻译未命中的姓名和 biography �
     assert.equal(payload[0].person.biography, "华裔新加坡女演员。");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.deepEqual(cache["99"].biography, {
+    assert.deepEqual(cache["99:cn"].biography, {
         sourceTextHash: computeStringHash("Chinese-born Singaporean actress."),
         translatedText: "华裔新加坡女演员。",
     });
-    assert.equal(cache["99"].name.source, "google");
-    assert.equal(cache["99"].name.sourceTextHash, computeStringHash("Gong Li"));
-    assert.equal(cache["99"].name.translatedText, "巩俐");
-    assert.ok(cache["99"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
-    assert.ok(cache["99"].name.expiresAt <= Date.now() + 30 * 24 * 60 * 60 * 1000, "expected the google name entry within the 30-day TTL");
+    assert.equal(cache["99:cn"].name.source, "google");
+    assert.equal(cache["99:cn"].name.sourceTextHash, computeStringHash("Gong Li"));
+    assert.equal(cache["99:cn"].name.translatedText, "巩俐");
+    assert.ok(cache["99:cn"].name.expiresAt > Date.now(), "expected a future expiresAt on the google name entry");
+    assert.ok(cache["99:cn"].name.expiresAt <= Date.now() + 30 * 24 * 60 * 60 * 1000, "expected the google name entry within the 30-day TTL");
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget POST to the people-names backend");
@@ -1561,7 +1561,7 @@ test("search person 列表翻译 biography 时会用 TMDb 中文名缓存作为 
         body,
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                99: {
+                "99:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Gong Li"),
                         translatedText: "巩俐",
@@ -1583,8 +1583,8 @@ test("search person 列表翻译 biography 时会用 TMDb 中文名缓存作为 
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Gong Li (巩俐)\nChinese-born Singaporean actress."]);
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["99"].name, "Gong Li", "巩俐");
-    assert.deepEqual(cache["99"].biography, {
+    assertTmdbNameEntry(cache["99:cn"].name, "Gong Li", "巩俐");
+    assert.deepEqual(cache["99:cn"].biography, {
         sourceTextHash: computeStringHash("Chinese-born Singaporean actress."),
         translatedText: "华裔新加坡女演员。",
     });
@@ -1656,7 +1656,7 @@ test("media people 列表会优先读取演职人员姓名后端缓存并跳过 
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === BACKEND_PEOPLE_NAMES_42_URL),
@@ -1692,7 +1692,7 @@ test("media people 列表在 TMDb 命中中文姓名后会回写演职人员姓�
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget POST to the people-names backend");
@@ -1726,9 +1726,9 @@ test("media people 列表仅 Google 缓存可用且 TMDb 无中文名时会回�
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.source, "google");
-    assert.ok(cache["42"].notFound.expiresAt > Date.now(), "expected a local negative cache entry");
-    assert.ok(cache["42"].notFound.expiresAt <= Date.now() + 7 * 24 * 60 * 60 * 1000, "expected the negative cache entry within the 7-day TTL");
+    assert.equal(cache["42:cn"].name.source, "google");
+    assert.ok(cache["42:cn"].notFound.expiresAt > Date.now(), "expected a local negative cache entry");
+    assert.ok(cache["42:cn"].notFound.expiresAt <= Date.now() + 7 * 24 * 60 * 60 * 1000, "expected the negative cache entry within the 7-day TTL");
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === BACKEND_PEOPLE_NAMES_42_URL),
@@ -1761,7 +1761,7 @@ test("people detail 会读取演职人员姓名后端缓存并跳过 TMDb person
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && /^https:\/\/api\.tmdb\.org\/3\/person\//.test(entry.url)),
@@ -1791,7 +1791,7 @@ test("people detail 走 TMDb 获取中文名后会回写演职人员姓名后端
     assert.equal(payload.name, "汤姆·汉克斯\nTom Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget POST to the people-names backend");
@@ -1826,8 +1826,8 @@ test("people detail 走 TMDb 查无中文名时会写本地负缓存并回写后
     assert.equal(payload.name, "Tom Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.ok(cache["42"].notFound.expiresAt > Date.now(), "expected a local negative cache entry");
-    assert.ok(cache["42"].notFound.expiresAt <= Date.now() + 7 * 24 * 60 * 60 * 1000, "expected the negative cache entry within the 7-day TTL");
+    assert.ok(cache["42:cn"].notFound.expiresAt > Date.now(), "expected a local negative cache entry");
+    assert.ok(cache["42:cn"].notFound.expiresAt <= Date.now() + 7 * 24 * 60 * 60 * 1000, "expected the negative cache entry within the 7-day TTL");
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget negative cache POST to the people-names backend");
@@ -1846,7 +1846,7 @@ test("people detail 有效负缓存会跳过 TMDb person 请求", async () => {
         body: readFixture("people-detail.json"),
         persistentData: createUnifiedPersistentData({
             googlePeople: {
-                42: {
+                "42:cn": {
                     notFound: {
                         expiresAt: Date.now() + 24 * 60 * 60 * 1000,
                     },
@@ -1875,7 +1875,7 @@ test("people detail 有效负缓存会跳过 TMDb person 请求", async () => {
     );
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].notFound.expiresAt > Date.now(), true);
+    assert.equal(cache["42:cn"].notFound.expiresAt > Date.now(), true);
 });
 
 test("media people 列表有效负缓存会跳过 TMDb credits 与后端请求", async () => {
@@ -1885,7 +1885,7 @@ test("media people 列表有效负缓存会跳过 TMDb credits 与后端请求",
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(createWatchnowIdsCache()),
             googlePeople: {
-                42: {
+                "42:cn": {
                     notFound: {
                         expiresAt: Date.now() + 24 * 60 * 60 * 1000,
                     },
@@ -1918,7 +1918,7 @@ test("media people 列表过期负缓存会重新请求 TMDb", async () => {
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(createWatchnowIdsCache()),
             googlePeople: {
-                42: {
+                "42:cn": {
                     notFound: {
                         expiresAt: Date.now() - 1000,
                     },
@@ -1934,8 +1934,8 @@ test("media people 列表过期负缓存会重新请求 TMDb", async () => {
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
-    assert.equal(cache["42"].notFound, undefined, "expected the stale negative entry to be cleared after the tmdb name is found");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
+    assert.equal(cache["42:cn"].notFound, undefined, "expected the stale negative entry to be cleared after the tmdb name is found");
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget POST to the people-names backend");
@@ -1959,7 +1959,7 @@ test("media people 列表过期 tmdb 姓名缓存会重新请求 TMDb", async ()
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(createWatchnowIdsCache()),
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Tom Hanks"),
                         translatedText: "汤姆·汉克斯",
@@ -1978,7 +1978,7 @@ test("media people 列表过期 tmdb 姓名缓存会重新请求 TMDb", async ()
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && /^https:\/\/api\.tmdb\.org\/3\/movie\/456\?/.test(entry.url)),
@@ -2008,8 +2008,8 @@ test("people detail 后端返回负缓存时会落到本地并跳过 TMDb person
     assert.equal(payload.name, "Tom Hanks");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.ok(cache["42"].notFound.expiresAt > Date.now(), "expected the hydrated negative entry to land locally");
-    assert.ok(cache["42"].notFound.expiresAt <= Date.now() + 7 * 24 * 60 * 60 * 1000, "expected the hydrated negative entry within the 7-day TTL");
+    assert.ok(cache["42:cn"].notFound.expiresAt > Date.now(), "expected the hydrated negative entry to land locally");
+    assert.ok(cache["42:cn"].notFound.expiresAt <= Date.now() + 7 * 24 * 60 * 60 * 1000, "expected the hydrated negative entry within the 7-day TTL");
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && /^https:\/\/api\.tmdb\.org\/3\/person\//.test(entry.url)),
@@ -2040,9 +2040,9 @@ test("media people 列表 TMDb 无中文名但 Google 成功时会回写 google 
     assert.equal(payload.cast[0].person.name, "谷歌译名");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assert.equal(cache["42"].name.source, "google");
-    assert.equal(cache["42"].name.translatedText, "谷歌译名");
-    assert.ok(cache["42"].notFound.expiresAt > Date.now(), "expected a local negative cache entry for the tmdb miss");
+    assert.equal(cache["42:cn"].name.source, "google");
+    assert.equal(cache["42:cn"].name.translatedText, "谷歌译名");
+    assert.ok(cache["42:cn"].notFound.expiresAt > Date.now(), "expected a local negative cache entry for the tmdb miss");
 
     // 负缓存先入队、google 姓名后入队：最终 POST 只含 google 姓名条目
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
@@ -2067,7 +2067,7 @@ test("media people 列表过期 google 姓名缓存会重新请求并升级为 t
         persistentData: createUnifiedPersistentData({
             traktLinkIds: JSON.parse(createWatchnowIdsCache()),
             googlePeople: {
-                42: {
+                "42:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Tom Hanks"),
                         translatedText: "过期谷歌译名",
@@ -2086,7 +2086,7 @@ test("media people 列表过期 google 姓名缓存会重新请求并升级为 t
     assert.equal(payload.cast[0].person.name, "汤姆·汉克斯");
 
     const cache = parseUnifiedCache(persistentData).google.people;
-    assertTmdbNameEntry(cache["42"].name, "Tom Hanks", "汤姆·汉克斯");
+    assertTmdbNameEntry(cache["42:cn"].name, "Tom Hanks", "汤姆·汉克斯");
 
     const peopleNamesPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === BACKEND_PEOPLE_NAMES_URL);
     assert.ok(peopleNamesPost, "expected a fire-and-forget POST to the people-names backend");

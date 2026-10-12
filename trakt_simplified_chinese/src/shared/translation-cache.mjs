@@ -1,9 +1,15 @@
 import * as commonUtils from "../utils/common.mjs";
 
-import * as chineseScriptConverter from "./chinese-script-converter.mjs";
+import * as chineseLocale from "./chinese-script-converter.mjs";
 
 const TRANSLATION_FIELDS = ["title", "overview", "tagline"];
-const TRANSLATION_FALLBACK_REGIONS = ["sg", "tw", "hk"];
+// 简体沿用历史顺序；港台优先本地区原生翻译，再退到另一繁体地区、大陆、新加坡
+const TRANSLATION_REGION_PREFERENCE = {
+    cn: ["cn", "sg", "tw", "hk"],
+    tw: ["tw", "hk", "cn", "sg"],
+    hk: ["hk", "tw", "cn", "sg"],
+};
+const TRANSLATION_FALLBACK_REGIONS = TRANSLATION_REGION_PREFERENCE.cn.slice(1);
 const EPISODE_PLACEHOLDER_TITLE_RE = /^\s*episode\s+0*(\d+)\s*$/i;
 const OVERVIEW_FULL_WIDTH_SPACE_BREAK_RE = /\u3000{2,}/g;
 const CJK_CHARACTER_RE = /[\u4e00-\u9fff\u3400-\u4dbf]/;
@@ -13,6 +19,14 @@ const CACHE_STATUS = {
     PARTIAL_FOUND: 2,
     NOT_FOUND: 3,
 };
+
+function resolveLocale(locale) {
+    return locale === undefined ? chineseLocale.resolveChineseLocale() : chineseLocale.normalizeChineseLocale(locale);
+}
+
+function getRegionPreference(locale) {
+    return TRANSLATION_REGION_PREFERENCE[resolveLocale(locale)] ?? TRANSLATION_REGION_PREFERENCE.cn;
+}
 
 function isEmptyTranslationValue(value) {
     return value === undefined || value === null || value === "";
@@ -32,18 +46,18 @@ function containsChineseText(value) {
     return text !== null && CJK_CHARACTER_RE.test(text);
 }
 
-function normalizeTranslationFieldValue(field, value) {
+function normalizeTranslationFieldValue(field, value, locale, options = {}) {
     const normalized = normalizeTranslationText(value);
     if (normalized === null) {
         return null;
     }
 
-    const simplified = chineseScriptConverter.convertTraditionalChineseToSimplified(normalized);
+    const converted = chineseLocale.normalizeChineseForLocale(normalized, resolveLocale(locale), options);
     if (field === "overview") {
-        return normalizeTranslationText(simplified.replace(OVERVIEW_FULL_WIDTH_SPACE_BREAK_RE, "\n"));
+        return normalizeTranslationText(converted.replace(OVERVIEW_FULL_WIDTH_SPACE_BREAK_RE, "\n"));
     }
 
-    return simplified;
+    return converted;
 }
 
 function extractEpisodePlaceholderNumber(value) {
@@ -101,27 +115,27 @@ function normalizeTranslationStatus(status) {
     return status === CACHE_STATUS.FOUND ? CACHE_STATUS.FOUND : status === CACHE_STATUS.PARTIAL_FOUND ? CACHE_STATUS.PARTIAL_FOUND : CACHE_STATUS.NOT_FOUND;
 }
 
-function normalizeTranslationPayload(translation) {
+function normalizeTranslationPayload(translation, locale, options = {}) {
     if (!translation || typeof translation !== "object") {
         return null;
     }
 
     const normalized = {
-        title: normalizeTranslationFieldValue("title", translation.title),
-        overview: normalizeTranslationFieldValue("overview", translation.overview),
-        tagline: normalizeTranslationFieldValue("tagline", translation.tagline),
+        title: normalizeTranslationFieldValue("title", translation.title, locale, options),
+        overview: normalizeTranslationFieldValue("overview", translation.overview, locale, options),
+        tagline: normalizeTranslationFieldValue("tagline", translation.tagline, locale, options),
     };
 
     return hasUsefulTranslation(normalized) ? normalized : null;
 }
 
-function normalizeTranslationFieldsInPlace(translation) {
+function normalizeTranslationFieldsInPlace(translation, locale, options = {}) {
     if (!translation || typeof translation !== "object") {
         return translation;
     }
 
     TRANSLATION_FIELDS.forEach((field) => {
-        const normalizedValue = normalizeTranslationFieldValue(field, translation[field]);
+        const normalizedValue = normalizeTranslationFieldValue(field, translation[field], locale, options);
         if (normalizedValue === null) {
             delete translation[field];
             return;
@@ -144,73 +158,106 @@ function isChineseTranslation(item) {
     return String(item?.language ?? "").toLowerCase() === "zh";
 }
 
-function copyFallbackFieldToCnTranslation(cnTranslation, items, field) {
-    if (!isEmptyTranslationValue(cnTranslation[field])) {
+function copyFallbackFieldToPrimaryTranslation(primaryTranslation, items, field, fallbackRegions, locale) {
+    if (!isEmptyTranslationValue(primaryTranslation[field])) {
         return;
     }
 
-    for (let i = 0; i < TRANSLATION_FALLBACK_REGIONS.length; i += 1) {
-        const region = TRANSLATION_FALLBACK_REGIONS[i];
+    for (let i = 0; i < fallbackRegions.length; i += 1) {
+        const region = fallbackRegions[i];
         const fallback = findTranslationByRegion(items, region);
         if (fallback && !isEmptyTranslationValue(fallback[field])) {
-            cnTranslation[field] = fallback[field];
+            // 回退字段按来源地区转换：只有 cn/sg 来源才需要简→繁，繁体来源直接透传
+            const normalizedValue = normalizeTranslationFieldValue(field, fallback[field], locale, {
+                fromSimplified: chineseLocale.isSimplifiedSourceRegion(region),
+            });
+            if (!isEmptyTranslationValue(normalizedValue)) {
+                primaryTranslation[field] = normalizedValue;
+            }
             return;
         }
     }
 }
 
-function normalizeTranslations(items) {
+function normalizeTranslations(items, locale) {
     if (commonUtils.isNotArray(items)) {
         items = [];
     }
 
-    let cnTranslation = findTranslationByRegion(items, "cn");
-    const originalCnHasTitle = !!(cnTranslation && !isEmptyTranslationValue(cnTranslation.title));
+    const resolvedLocale = resolveLocale(locale);
+    const [primaryRegion, ...fallbackRegions] = getRegionPreference(resolvedLocale);
+    let primaryTranslation = findTranslationByRegion(items, primaryRegion);
+    const originalPrimaryHasTitle = !!(primaryTranslation && !isEmptyTranslationValue(primaryTranslation.title));
     const hasAnyChineseField = items.some((item) => {
         return isChineseTranslation(item) && TRANSLATION_FIELDS.some((field) => !isEmptyTranslationValue(item[field]));
     });
 
-    if (!cnTranslation) {
-        cnTranslation = {
+    if (!primaryTranslation) {
+        primaryTranslation = {
             language: "zh",
-            country: "cn",
+            country: primaryRegion,
         };
-        items.unshift(cnTranslation);
+        items.unshift(primaryTranslation);
     }
 
-    TRANSLATION_FIELDS.forEach((field) => {
-        copyFallbackFieldToCnTranslation(cnTranslation, items, field);
+    // 主条目字段按主地区来源转换（tw/hk 只转换 cn/sg 来源），再补回退字段（各自按来源地区转换）
+    normalizeTranslationFieldsInPlace(primaryTranslation, resolvedLocale, {
+        fromSimplified: chineseLocale.isSimplifiedSourceRegion(primaryRegion),
     });
-    normalizeTranslationFieldsInPlace(cnTranslation);
+    TRANSLATION_FIELDS.forEach((field) => {
+        copyFallbackFieldToPrimaryTranslation(primaryTranslation, items, field, fallbackRegions, resolvedLocale);
+    });
 
-    cnTranslation.status = originalCnHasTitle ? CACHE_STATUS.FOUND : hasAnyChineseField ? CACHE_STATUS.PARTIAL_FOUND : CACHE_STATUS.NOT_FOUND;
+    primaryTranslation.status = originalPrimaryHasTitle ? CACHE_STATUS.FOUND : hasAnyChineseField ? CACHE_STATUS.PARTIAL_FOUND : CACHE_STATUS.NOT_FOUND;
 
     return items;
 }
 
+// 兼容旧调用：默认取简体条目
 function pickCnTranslation(items) {
+    return pickLocaleTranslation(items, chineseLocale.CHINESE_LOCALE.CN);
+}
+
+function pickLocaleTranslation(items, locale) {
     if (commonUtils.isNotArray(items) || items.length === 0) {
         return null;
     }
 
+    const primaryRegion = getRegionPreference(locale)[0];
     return (
         items.find((item) => {
-            return String(item?.language ?? "").toLowerCase() === "zh" && String(item?.country ?? "").toLowerCase() === "cn";
+            return String(item?.language ?? "").toLowerCase() === "zh" && String(item?.country ?? "").toLowerCase() === primaryRegion;
         }) ?? null
     );
 }
 
-function extractNormalizedTranslation(items) {
-    const cnTranslation = pickCnTranslation(items);
+function extractNormalizedTranslation(items, locale) {
+    const primaryTranslation = pickLocaleTranslation(items, locale);
     return {
-        status: cnTranslation?.status ?? CACHE_STATUS.NOT_FOUND,
-        translation: normalizeTranslationPayload(cnTranslation),
+        status: primaryTranslation?.status ?? CACHE_STATUS.NOT_FOUND,
+        translation: normalizeTranslationPayload(primaryTranslation, locale),
     };
 }
 
-function areTranslationsEqual(left, right) {
-    const normalizedLeft = normalizeTranslationPayload(left);
-    const normalizedRight = normalizeTranslationPayload(right);
+// tw/hk 场景下从同一次上游响应派生 cn 槽位数据：状态按内容推导（有 title → FOUND，有任一字段 → PARTIAL）
+function buildCnFoldEntry(items, locale) {
+    if (resolveLocale(locale) === chineseLocale.CHINESE_LOCALE.CN) {
+        return null;
+    }
+    const cnEntry = extractNormalizedTranslation(items, chineseLocale.CHINESE_LOCALE.CN);
+    if (!cnEntry?.translation) {
+        return null;
+    }
+    return {
+        status: deriveTranslationStatus(cnEntry.translation),
+        translation: cnEntry.translation,
+        complete: true,
+    };
+}
+
+function areTranslationsEqual(left, right, locale) {
+    const normalizedLeft = normalizeTranslationPayload(left, locale);
+    const normalizedRight = normalizeTranslationPayload(right, locale);
 
     if (!normalizedLeft && !normalizedRight) {
         return true;
@@ -225,12 +272,14 @@ function areTranslationsEqual(left, right) {
 
 export {
     areTranslationsEqual,
+    buildCnFoldEntry,
     CACHE_STATUS,
     containsChineseText,
     deriveTranslationStatus,
     extractEpisodePlaceholderNumber,
     extractNormalizedTranslation,
     findTranslationByRegion,
+    getRegionPreference,
     hasUsefulTranslation,
     isChineseTranslation,
     isEmptyTranslationValue,
@@ -241,7 +290,9 @@ export {
     normalizeTranslations,
     normalizeTranslationText,
     pickCnTranslation,
+    pickLocaleTranslation,
     sortTranslations,
     TRANSLATION_FALLBACK_REGIONS,
     TRANSLATION_FIELDS,
+    TRANSLATION_REGION_PREFERENCE,
 };

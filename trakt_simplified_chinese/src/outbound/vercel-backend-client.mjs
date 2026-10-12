@@ -1,3 +1,4 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as httpUtils from "../utils/http.mjs";
 import * as scriptUserAgent from "../utils/script-user-agent.mjs";
 
@@ -36,11 +37,30 @@ function postJsonWithDispatchDelay(url, payload) {
     return delay(POST_DISPATCH_DELAY_MS).then(() => requestPromise);
 }
 
+function currentLocale() {
+    return chineseLocale.resolveChineseLocale();
+}
+
+// cn 是历史默认值：不追加参数，保持与旧后端/旧测试完全一致的请求形态
+function withLocaleQuery(query, locale = currentLocale()) {
+    const normalized = locale || "cn";
+    if (normalized === "cn") {
+        return query;
+    }
+    return `${query}${query ? "&" : ""}locale=${normalized}`;
+}
+
+function withLocalePayload(payload, locale = currentLocale()) {
+    const base = payload && typeof payload === "object" ? payload : {};
+    const normalized = locale || "cn";
+    return normalized === "cn" ? base : { ...base, locale: normalized };
+}
+
 function fetchTranslations(query) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve(null);
     }
-    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/translations?${query}`);
+    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/translations?${withLocaleQuery(query)}`);
 }
 
 // 下发第三方 API key（当前只有 TMDb）。刻意不受 debugMode 的远端开关影响：
@@ -49,11 +69,11 @@ function fetchApiKeys() {
     return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/apikeys`);
 }
 
-function fetchImages(query) {
+function fetchImages(query, locale) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve(null);
     }
-    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/images?${query}`);
+    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/images?${withLocaleQuery(query, locale)}`);
 }
 
 function fetchTranslationOverrides() {
@@ -74,35 +94,35 @@ function fetchPeopleNames(query) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve(null);
     }
-    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/people-names?${query}`);
+    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/people-names?${withLocaleQuery(query)}`);
 }
 
 function fetchCommentTranslations(query) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve(null);
     }
-    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/comment-translations?${query}`);
+    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/comment-translations?${withLocaleQuery(query)}`);
 }
 
 function fetchListTranslations(query) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve(null);
     }
-    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/list-translations?${query}`);
+    return fetchBackendJson(`${resolveBackendBaseUrl()}/api/trakt/list-translations?${withLocaleQuery(query)}`);
 }
 
 function postTranslations(payload) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve();
     }
-    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/translations`, payload);
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/translations`, withLocalePayload(payload));
 }
 
-function postImages(payload) {
+function postImages(payload, locale) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve();
     }
-    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/images`, payload);
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/images`, withLocalePayload(payload, locale));
 }
 
 function postDoubanCache(payload) {
@@ -116,21 +136,21 @@ function postPeopleNames(payload) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve();
     }
-    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/people-names`, payload);
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/people-names`, withLocalePayload(payload));
 }
 
 function postCommentTranslations(payload) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve();
     }
-    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/comment-translations`, payload);
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/comment-translations`, withLocalePayload(payload));
 }
 
 function postListTranslations(payload) {
     if (isRemoteCacheDisabled()) {
         return Promise.resolve();
     }
-    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/list-translations`, payload);
+    return postJsonWithDispatchDelay(`${resolveBackendBaseUrl()}/api/trakt/list-translations`, withLocalePayload(payload));
 }
 
 export {

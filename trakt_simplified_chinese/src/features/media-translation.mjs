@@ -1,3 +1,4 @@
+import * as chineseLocaleModule from "../shared/chinese-script-converter.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as traktLinkIds from "../shared/trakt-link-ids.mjs";
 import * as traktTranslationHelper from "../shared/trakt-translation-helper.mjs";
@@ -7,7 +8,12 @@ import * as commonUtils from "../utils/common.mjs";
 import * as googleFallbackTranslation from "./google-fallback-translation.mjs";
 
 function isFieldOverridden(override, field) {
-    return !translationCache.isEmptyTranslationValue(override?.translation?.[field]);
+    return traktTranslationHelper.hasOverrideField(override, field);
+}
+
+// 官方 Trakt App 的 UA 以 Trakt 开头（与海报替换的 UA 判断保持一致）
+function isTraktAppUserAgent(userAgent) {
+    return /^Trakt/i.test(String(userAgent ?? "").trim());
 }
 
 async function handleCurrentSeasonRequest() {
@@ -92,25 +98,29 @@ async function handleMediaDetail() {
     }
 
     const cache = cacheUtils.loadCache(context.env);
-    const backendState = traktTranslationHelper.createBackendState(traktTranslationHelper.MEDIA_CONFIG);
-    let cacheChanged = false;
-    try {
-        cacheChanged = await traktTranslationHelper.ensureDetailTranslation(
-            cache,
-            mediaType,
-            {
-                ...ref,
-                availableTranslations: commonUtils.isArray(data?.available_translations) ? data.available_translations : null,
-            },
-            backendState,
-        );
-    } catch (error) {
-        context.env.log(`Trakt detail translation fetch failed: ${error}`);
+    // 官方 Trakt App 进入详情页后会自行请求 /translations/zh（由响应阶段的 handleTranslations 负责缓存），
+    // 无需脚本代劳；其它 Trakt 兼容客户端不会请求该接口，这里按需补全（后端缓存 → 直查 Trakt）
+    if (!isTraktAppUserAgent(context.userAgent)) {
+        const backendState = traktTranslationHelper.createBackendState(traktTranslationHelper.MEDIA_CONFIG);
+        let cacheChanged = false;
+        try {
+            cacheChanged = await traktTranslationHelper.ensureDetailTranslation(
+                cache,
+                mediaType,
+                {
+                    ...ref,
+                    availableTranslations: commonUtils.isArray(data?.available_translations) ? data.available_translations : null,
+                },
+                backendState,
+            );
+        } catch (error) {
+            context.env.log(`Trakt detail translation fetch failed: ${error}`);
+        }
+        if (cacheChanged) {
+            cacheUtils.saveCache(context.env, cache);
+        }
+        traktTranslationHelper.flushBackendWrites(backendState);
     }
-    if (cacheChanged) {
-        cacheUtils.saveCache(context.env, cache);
-    }
-    traktTranslationHelper.flushBackendWrites(backendState);
     traktTranslationHelper.applyTranslation(context.userAgent, data, traktTranslationHelper.getCachedTranslation(cache, mediaType, ref), mediaType);
 
     let override = null;
@@ -147,7 +157,8 @@ async function handleTranslations() {
     }
 
     const target = traktTranslationHelper.resolveTranslationRequestTarget(context.url);
-    const merged = translationCache.normalizeTranslations(translationCache.sortTranslations(arr, traktTranslationHelper.PREFERRED_TRANSLATION_LANGUAGE));
+    const locale = chineseLocaleModule.resolveChineseLocale();
+    const merged = translationCache.normalizeTranslations(translationCache.sortTranslations(arr, traktTranslationHelper.resolvePreferredTranslationLanguage(locale)), locale);
 
     if (!traktTranslationHelper.isScriptInitiatedTranslationRequest() && target && traktTranslationHelper.buildMediaCacheLookupKey(target.mediaType, target)) {
         const normalized = translationCache.extractNormalizedTranslation(merged);
@@ -162,7 +173,8 @@ async function handleTranslations() {
             cacheUtils.saveCache(context.env, cache);
 
             const backendState = traktTranslationHelper.createBackendState(traktTranslationHelper.MEDIA_CONFIG);
-            traktTranslationHelper.queueBackendWrite(backendState, target.mediaType, target, completeEntry);
+            // App 自己请求 /translations/zh 时同样顺带折叠 cn 数据，避免 tw/hk 用户写出的后端条目缺少 cn 槽位
+            traktTranslationHelper.queueBackendWrite(backendState, target.mediaType, target, completeEntry, translationCache.buildCnFoldEntry(merged, locale));
             try {
                 traktTranslationHelper.flushBackendWrites(backendState);
             } catch (error) {

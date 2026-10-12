@@ -131,6 +131,35 @@ test("runMigration --prune-expired 清理已过期地区字段", async () => {
     assert.deepEqual(getJsonValue(store, "trakt:person-name:42"), { cn: null, tw: { name: { translatedText: "舊名", expiresAt: now + 1000 } } });
 });
 
+test("runMigration --prune-expired 按 poster/logo 字段判断图片地区条目", async () => {
+    const store = new Map();
+    const now = Date.now();
+    store.set(
+        "trakt:image:chinese:movies:123",
+        jsonValue({
+            cn: {
+                poster: { status: 2, url: "https://image.tmdb.org/t/p/original/cn-poster.jpg", expiresAt: now - 1000 },
+                logo: { status: 2, url: "https://image.tmdb.org/t/p/original/cn-logo.png", expiresAt: now - 1000 },
+            },
+            tw: {
+                poster: { status: 2, url: "https://image.tmdb.org/t/p/original/tw-poster.jpg", expiresAt: now - 1000 },
+                logo: { status: 2, url: "https://image.tmdb.org/t/p/original/tw-logo.png", expiresAt: now + 1000 },
+            },
+        }),
+    );
+
+    const stats = await runMigration(
+        { execute: true, pruneExpired: true, scanCount: 100, batchSize: 10, maxKeys: 1000 },
+        { config: TEST_CONFIG, fetchImpl: createRedisFetch(store), now },
+    );
+
+    assert.equal(stats.prunedEntries, 1);
+    const value = getJsonValue(store, "trakt:image:chinese:movies:123");
+    assert.equal(value.cn, null, "poster/logo 全部过期的地区字段应被清理");
+    assert.equal(value.tw.poster.url, "https://image.tmdb.org/t/p/original/tw-poster.jpg", "仍有未过期字段的地区条目应保留");
+    assert.equal(value.tw.logo.url, "https://image.tmdb.org/t/p/original/tw-logo.png");
+});
+
 test("runMigration --execute 清掉旧 key 上残留的 Redis TTL", async () => {
     const store = new Map();
     store.set("trakt:translation:movies:123", jsonValue({ status: 1, translation: { title: "标题" } }));

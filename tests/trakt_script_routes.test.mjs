@@ -12,7 +12,7 @@ import {
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
 import { REGION_CODES } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
 import { TRAKT_DIRECT_TRANSLATION_MAX_REFS } from "../trakt_simplified_chinese/src/shared/trakt-translation-helper.mjs";
-import { UNIFIED_CACHE_KEY } from "../trakt_simplified_chinese/src/utils/cache.mjs";
+import { TAMPER_AUTHORIZATION_KEY, UNIFIED_CACHE_KEY } from "../trakt_simplified_chinese/src/utils/cache.mjs";
 import { generatePkcePair } from "../trakt_simplified_chinese/src/utils/pkce.mjs";
 
 import {
@@ -25,19 +25,20 @@ import {
     createSentimentTranslationCache,
     createUnifiedPersistentData,
     createWrappedMovieBody,
+    parseTamperAuthorization,
     parseUnifiedCache,
     readFixture,
     runRequestCase,
     runResponseCase,
 } from "./helpers/trakt-test-helpers.mjs";
 
-// 授权流程状态、篡改签发的 token 与待回写标记都落在 unified cache 的 persistent.tamperAppAuthorization 里
+// 授权流程状态、篡改签发的 token 与待回写标记落在独立持久化 key 里，不再占用 unified cache
 function readTamperStore(persistentData) {
-    const store = parseUnifiedCache(persistentData).persistent?.tamperAppAuthorization;
+    const store = parseTamperAuthorization(persistentData);
     return {
-        records: Array.isArray(store?.records) ? store.records.slice() : [],
-        tokens: Array.isArray(store?.tokens) ? store.tokens.slice() : [],
-        pending: Array.isArray(store?.pending) ? store.pending.slice() : [],
+        records: store.records.slice(),
+        tokens: store.tokens.slice(),
+        pending: store.pending.slice(),
     };
 }
 
@@ -108,7 +109,7 @@ function createMoviePersistentData() {
 function createShowPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "show:456": createMediaTranslationEntry({
+            "show:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
@@ -122,14 +123,14 @@ function createShowPersistentData() {
 function createMixedDirectMediaPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "movie:123": createMediaTranslationEntry({
+            "movie:123:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文电影",
                     overview: "中文电影简介",
                     tagline: "中文电影标语",
                 },
             }),
-            "show:456": createMediaTranslationEntry({
+            "show:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
@@ -143,21 +144,21 @@ function createMixedDirectMediaPersistentData() {
 function createEpisodePersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "episode:555:1:1": createMediaTranslationEntry({
+            "episode:555:1:1:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第一集中文",
                     overview: "第一集中文简介",
                     tagline: "第一集中文标语",
                 },
             }),
-            "episode:555:1:2": createMediaTranslationEntry({
+            "episode:555:1:2:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第二集中文",
                     overview: "第二集中文简介",
                     tagline: "第二集中文标语",
                 },
             }),
-            "episode:777:2:1": createMediaTranslationEntry({
+            "episode:777:2:1:cn": createMediaTranslationEntry({
                 translation: {
                     title: "其他剧中文",
                     overview: "其他剧中文简介",
@@ -196,9 +197,10 @@ function createBackendTranslationOverridesBody(fieldName, lookupKey, entry) {
     });
 }
 
+// 覆盖条目按地区存放：cn/tw/hk 各一份 translation（旧文档的根字段 translation 等价 cn）
 function createTranslationOverrideEntry(translation) {
     return {
-        translation,
+        cn: { translation },
         updatedAt: 1710000000000,
     };
 }
@@ -341,14 +343,14 @@ function createCalendarPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
             ...JSON.parse(createMovieTranslationCache()),
-            "show:456": createMediaTranslationEntry({
+            "show:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
                     tagline: "中文剧集标语",
                 },
             }),
-            "episode:456:1:2": createMediaTranslationEntry({
+            "episode:456:1:2:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第二集中文",
                     overview: "第二集中文简介",
@@ -635,7 +637,7 @@ test("handleList 按 direct list、wrapped list 与 prominent list 路由分组�
     const persistentData = createUnifiedPersistentData({
         googleList: JSON.parse(
             createListTranslationCache({
-                321: {
+                "321:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Favorites"),
                         translatedText: "收藏夹",
@@ -1135,14 +1137,14 @@ test("handleWrapperMediaObject 覆盖 watching 单对象响应", async (t) => {
             body: createWatchingEpisodeBody(),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "show:555": createMediaTranslationEntry({
+                    "show:555:cn": createMediaTranslationEntry({
                         translation: {
                             title: "中文剧名",
                             overview: "中文剧集简介",
                             tagline: "中文剧集标语",
                         },
                     }),
-                    "episode:555:1:2": createMediaTranslationEntry({
+                    "episode:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -1222,6 +1224,7 @@ test("handleRecentCommentsList 覆盖 recent comments 媒体包装路由", async
 test("handleComments 覆盖 media comments、episode comments 与 replies 路由", async (t) => {
     const cases = [
         "https://api.trakt.tv/movies/123/comments/newest",
+        "https://api.trakt.tv/shows/555/seasons/1/comments/newest",
         "https://api.trakt.tv/shows/555/seasons/1/episodes/2/comments/newest",
         "https://api.trakt.tv/comments/123/replies",
         "https://apiz.trakt.tv/comments/453514?extended=reactions",
@@ -1243,7 +1246,12 @@ test("handleComments 覆盖 media comments、episode comments 与 replies 路由
 });
 
 test("handleMediaPeopleList 覆盖 movie、show 与 episode people 路由", async (t) => {
-    const cases = ["https://api.trakt.tv/movies/123/people", "https://api.trakt.tv/shows/555/people", "https://api.trakt.tv/shows/555/seasons/1/episodes/2/people"];
+    const cases = [
+        "https://api.trakt.tv/movies/123/people",
+        "https://api.trakt.tv/shows/555/people",
+        "https://api.trakt.tv/shows/555/seasons/1/people",
+        "https://api.trakt.tv/shows/555/seasons/1/episodes/2/people",
+    ];
 
     for (const url of cases) {
         await t.test(url, async () => {
@@ -1396,7 +1404,7 @@ test("handleMir 会叠加 translationOverrides 到 first_watched 媒体", async 
     assert.equal(payload.first_watched.movie.overview, "中文简介");
 });
 
-test("handleMediaDetail 覆盖 movie、show 与 episode detail 路由", async (t) => {
+test("handleMediaDetail 覆盖 movie、show、season info 与 episode detail 路由", async (t) => {
     const cases = [
         {
             name: "movie detail",
@@ -1405,7 +1413,7 @@ test("handleMediaDetail 覆盖 movie、show 与 episode detail 路由", async (t
             persistentData: createUnifiedPersistentData({
                 traktTranslation: JSON.parse(
                     createMovieTranslationCache({
-                        "movie:123": createMediaTranslationEntry({
+                        "movie:123:cn": createMediaTranslationEntry({
                             translation: {
                                 title: "中文电影",
                                 overview: "中文简介",
@@ -1435,6 +1443,32 @@ test("handleMediaDetail 覆盖 movie、show 与 episode detail 路由", async (t
             persistentData: createShowPersistentData(),
             assertPayload(payload) {
                 assert.equal(payload.title, "中文剧名");
+            },
+        },
+        {
+            name: "season info",
+            url: "https://api.trakt.tv/shows/555/seasons/1/info",
+            body: JSON.stringify({
+                number: 1,
+                title: "Original Season Title",
+                overview: "Original Season Overview",
+                ids: {
+                    trakt: 1002,
+                },
+            }),
+            persistentData: createUnifiedPersistentData({
+                traktTranslation: {
+                    "season:555:1:cn": createMediaTranslationEntry({
+                        translation: {
+                            title: "第一季",
+                            overview: "第一季简介",
+                        },
+                    }),
+                },
+            }),
+            assertPayload(payload) {
+                assert.equal(payload.title, "第一季");
+                assert.equal(payload.overview, "第一季简介");
             },
         },
         {
@@ -1735,6 +1769,38 @@ test("handleMediaDetail translationOverrides 在刷新周期内直接读本地�
     );
 });
 
+test("handleMediaDetail 只含 tw/hk 的覆盖条目在刷新周期内仍生效", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMovieTranslationCache()),
+            translationOverrides: {
+                fetchedAt: Date.now(),
+                shows: {},
+                episodes: {},
+                movies: {
+                    123: {
+                        tw: { translation: { title: "台灣覆蓋標題" } },
+                    },
+                },
+            },
+        }),
+        argument: {
+            chineseLocale: "tw",
+            backendBaseUrl: "https://backend.example",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "台灣覆蓋標題");
+    assert.equal(
+        httpLogs.some((item) => item.method === "GET" && item.url === "https://backend.example/api/trakt/translation-overrides"),
+        false,
+        "刷新周期内应直接使用本地覆盖缓存",
+    );
+});
+
 test("debugMode=disableLocal 时禁用本地缓存，每次从远端获取 translationOverrides", async () => {
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
@@ -1890,7 +1956,7 @@ test("debugMode=disableAll 时既不请求远端缓存也不读写本地", async
 
 test("handleSentiments 覆盖原生 sentiments 与代理兼容路由", async (t) => {
     const googleSentiments = JSON.parse(createSentimentTranslationCache());
-    googleSentiments["movie:853702"] = JSON.parse(JSON.stringify(googleSentiments["movie:123"]));
+    googleSentiments["movie:853702:cn"] = JSON.parse(JSON.stringify(googleSentiments["movie:123:cn"]));
 
     const cases = [
         {
@@ -1930,14 +1996,14 @@ test("handleSeasonEpisodesList 覆盖 /shows/:id/seasons 路由", async () => {
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: {
-                "episode:555:1:1": createMediaTranslationEntry({
+                "episode:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                         overview: "第一集中文简介",
                         tagline: "第一集中文标语",
                     },
                 }),
-                "episode:555:1:2": createMediaTranslationEntry({
+                "episode:555:1:2:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第二集中文",
                         overview: "第二集中文简介",
@@ -1960,14 +2026,14 @@ test("handleSeasonEpisodesList 会叠加 episode translationOverrides", async ()
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: {
-                "episode:555:1:1": createMediaTranslationEntry({
+                "episode:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                         overview: "第一集中文简介",
                         tagline: "第一集中文标语",
                     },
                 }),
-                "episode:555:1:2": createMediaTranslationEntry({
+                "episode:555:1:2:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第二集中文",
                         overview: "第二集中文简介",
@@ -2028,9 +2094,11 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["watchnow.sources", "https://api.trakt.tv/watchnow/sources"],
         ["media.people", "https://api.trakt.tv/movies/123/people"],
         ["media.people", "https://api.trakt.tv/shows/123/people"],
+        ["shows.season.people", "https://api.trakt.tv/shows/123/seasons/1/people"],
         ["shows.episode.people", "https://api.trakt.tv/shows/123/seasons/1/episodes/2/people"],
         ["media.comments", "https://api.trakt.tv/movies/123/comments/newest"],
         ["media.comments", "https://api.trakt.tv/shows/123/comments/newest"],
+        ["shows.season.comments", "https://api.trakt.tv/shows/123/seasons/1/comments/newest"],
         ["shows.episode.comments", "https://api.trakt.tv/shows/123/seasons/1/episodes/2/comments/newest"],
         ["comments.replies", "https://api.trakt.tv/comments/123/replies"],
         ["comments.detail", "https://apiz.trakt.tv/comments/453514?extended=reactions"],
@@ -2049,6 +2117,7 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["media.sentiments", "https://api.trakt.tv/shows/123/sentiments"],
         ["movies.summary", "https://api.trakt.tv/movies/123"],
         ["shows.summary", "https://api.trakt.tv/shows/123"],
+        ["shows.season.info", "https://api.trakt.tv/shows/123/seasons/1/info"],
         ["shows.episode.summary", "https://api.trakt.tv/shows/123/seasons/1/episodes/2"],
         ["people.summary", "https://api.trakt.tv/people/42"],
     ];
@@ -2696,11 +2765,8 @@ test("篡改应用授权 token 响应写入记录后状态过期仍能改写 ref
         },
     });
 
-    assert.equal(
-        Object.keys(callbackRun.persistentData).some((key) => key.startsWith("dj_trakt_tamper")),
-        false,
-        "篡改功能不应再使用独立持久化 key",
-    );
+    assert.equal(Object.hasOwn(callbackRun.persistentData, TAMPER_AUTHORIZATION_KEY), true, "篡改授权状态写入独立持久化 key");
+    assert.equal(Object.hasOwn(parseUnifiedCache(callbackRun.persistentData).persistent, "tamperAppAuthorization"), false, "篡改授权状态不再占用 unified cache");
 
     const tokenRequestBody = JSON.stringify({
         client_id: clientId,
@@ -3583,6 +3649,7 @@ test("篡改应用授权 device/token 轮询不再写 unified cache", async () =
     });
 
     assert.equal(Object.hasOwn(persistentData, UNIFIED_CACHE_KEY), false, "轮询不应写 unified cache");
+    assert.equal(Object.hasOwn(persistentData, TAMPER_AUTHORIZATION_KEY), false, "轮询也不写独立的篡改授权 key");
 });
 
 test("篡改应用授权 token 记录超过上限时保留最新记录", async () => {

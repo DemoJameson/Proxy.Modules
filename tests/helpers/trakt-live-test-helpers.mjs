@@ -444,6 +444,9 @@ async function runLiveRequestCase(config, input) {
     return runLiveResponseCase(config, {
         hasResponse: false,
         ...input,
+        // 与离线 harness 的 runRequestCase 一致：请求阶段 $request.body 取请求体本身；
+        // 响应阶段保持 undefined（真机响应脚本拿不到请求体）
+        requestBody: input?.requestBody ?? input?.body,
     });
 }
 

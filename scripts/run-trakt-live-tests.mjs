@@ -94,7 +94,7 @@ function isRateLimitedResponse(response) {
     return Number(response?.status) === 429 || errorName === "rate_limited" || errorName === "slow_down";
 }
 
-async function ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecret) {
+async function ensureOAuthToken(rl, currentConfig, traktApiKey) {
     let traktOAuthToken = String(process.env.TRAKT_OAUTH_TOKEN ?? currentConfig.TRAKT_OAUTH_TOKEN ?? "").trim();
 
     if (traktOAuthToken) {
@@ -105,10 +105,14 @@ async function ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecre
         });
 
         if (validateResponse.status >= 200 && validateResponse.status < 300) {
-            return {
-                TRAKT_OAUTH_TOKEN: traktOAuthToken,
-                TRAKT_CLIENT_SECRET: traktClientSecret,
-            };
+            return traktOAuthToken;
+        }
+
+        // 只有明确 401/403 才算 token 失效；429/5xx（例如 Cloudflare 限流）不能据此清掉已保存的 token
+        if (validateResponse.status !== 401 && validateResponse.status !== 403) {
+            console.log("");
+            console.log(`校验 TRAKT_OAUTH_TOKEN 失败（HTTP ${validateResponse.status}），本次继续沿用已保存的 token。`);
+            return traktOAuthToken;
         }
 
         console.log("");
@@ -116,23 +120,9 @@ async function ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecre
         traktOAuthToken = "";
     }
 
-    if (traktOAuthToken) {
-        return {
-            TRAKT_OAUTH_TOKEN: traktOAuthToken,
-            TRAKT_CLIENT_SECRET: traktClientSecret,
-        };
-    }
-
     console.log("");
     console.log("要启用已登录接口测试，需要先完成 Trakt 登录授权。");
     console.log("推荐直接在这里走设备授权登录，完成后会自动保存 access token。");
-
-    if (!traktClientSecret) {
-        return {
-            TRAKT_OAUTH_TOKEN: "",
-            TRAKT_CLIENT_SECRET: "",
-        };
-    }
 
     const deviceCodeResponse = await postJson(TRAKT_DEVICE_CODE_URL, {
         client_id: traktApiKey,
@@ -141,10 +131,7 @@ async function ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecre
     if (isRateLimitedResponse(deviceCodeResponse)) {
         console.log("");
         console.log("Trakt 设备授权当前被限流，先跳过登录态 live tests，仅运行非登录态用例。");
-        return {
-            TRAKT_OAUTH_TOKEN: "",
-            TRAKT_CLIENT_SECRET: traktClientSecret,
-        };
+        return "";
     }
 
     if (deviceCodeResponse.status < 200 || deviceCodeResponse.status >= 300 || !deviceCodeResponse.json) {
@@ -175,19 +162,16 @@ async function ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecre
     while (Date.now() - startedAt < expiresInSeconds * 1000) {
         await sleep(intervalSeconds * 1000);
 
+        // Trakt 已废弃 client_secret：设备授权只用 client_id + device code
         const tokenResponse = await postJson(TRAKT_DEVICE_TOKEN_URL, {
             code: deviceCode,
             client_id: traktApiKey,
-            client_secret: traktClientSecret,
         });
 
         if (tokenResponse.status === 200 && tokenResponse.json?.access_token) {
             traktOAuthToken = String(tokenResponse.json.access_token).trim();
             console.log("Trakt 登录授权成功，已获取 access token。");
-            return {
-                TRAKT_OAUTH_TOKEN: traktOAuthToken,
-                TRAKT_CLIENT_SECRET: traktClientSecret,
-            };
+            return traktOAuthToken;
         }
 
         const errorCode = String(tokenResponse.json?.error ?? "");
@@ -195,8 +179,19 @@ async function ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecre
             continue;
         }
 
-        if (errorCode === "access_denied" || errorCode === "expired_token") {
-            throw new Error(`Trakt device auth failed: ${errorCode}`);
+        if (errorCode === "access_denied") {
+            throw new Error("Trakt 设备授权被拒绝（access_denied），如需重试请重新运行 npm run test:trakt:live");
+        }
+
+        // 410 Gone = device code 过期（Trakt 用空响应体返回状态码）
+        if (errorCode === "expired_token" || tokenResponse.status === 410) {
+            throw new Error("Trakt 设备授权已过期（device code 失效），请重新运行 npm run test:trakt:live");
+        }
+
+        // Trakt 现在对「等待用户授权」返回 400、对轮询过快返回 429，且响应体为空：
+        // 没有 error 字段时按待授权处理，继续轮询直到超时
+        if (!errorCode && (tokenResponse.status === 400 || tokenResponse.status === 429)) {
+            continue;
         }
 
         if (tokenResponse.status >= 400) {
@@ -219,23 +214,17 @@ async function promptForMissingValues(currentConfig) {
             traktApiKey = String(await rl.question("请输入 TRAKT_API_KEY（Trakt app 的 client_id）: ")).trim();
         }
 
-        let traktClientSecret = String(process.env.TRAKT_CLIENT_SECRET ?? currentConfig.TRAKT_CLIENT_SECRET ?? "").trim();
-        if (!traktClientSecret) {
-            traktClientSecret = String(await rl.question("请输入 TRAKT_CLIENT_SECRET，留空则跳过登录态接口测试: ")).trim();
-        }
-
         let backendBaseUrl = String(process.env.TRAKT_BACKEND_BASE_URL ?? currentConfig.TRAKT_BACKEND_BASE_URL ?? "").trim();
         if (!backendBaseUrl) {
             const answer = String(await rl.question(`请输入 TRAKT_BACKEND_BASE_URL，留空则使用默认值 ${DEFAULT_BACKEND_BASE_URL}: `)).trim();
             backendBaseUrl = answer || DEFAULT_BACKEND_BASE_URL;
         }
-        const oauthConfig = await ensureOAuthToken(rl, currentConfig, traktApiKey, traktClientSecret);
+        const traktOAuthToken = await ensureOAuthToken(rl, currentConfig, traktApiKey);
 
         return {
             TRAKT_API_KEY: traktApiKey,
             TRAKT_BACKEND_BASE_URL: backendBaseUrl,
-            TRAKT_OAUTH_TOKEN: oauthConfig.TRAKT_OAUTH_TOKEN,
-            TRAKT_CLIENT_SECRET: oauthConfig.TRAKT_CLIENT_SECRET,
+            TRAKT_OAUTH_TOKEN: traktOAuthToken,
         };
     } finally {
         rl.close();
@@ -265,10 +254,15 @@ async function main() {
     const localConfig = readLocalConfig();
     const resolvedConfig = await promptForMissingValues(localConfig);
 
-    writeLocalConfig({
+    const nextConfig = {
         ...localConfig,
         ...resolvedConfig,
-    });
+    };
+    // 没拿到新 token 时不要覆盖已保存的 token（例如设备授权被限流或用户跳过授权）
+    if (!nextConfig.TRAKT_OAUTH_TOKEN && localConfig.TRAKT_OAUTH_TOKEN) {
+        nextConfig.TRAKT_OAUTH_TOKEN = localConfig.TRAKT_OAUTH_TOKEN;
+    }
+    writeLocalConfig(nextConfig);
 
     const testEnv = {
         TRAKT_API_KEY: resolvedConfig.TRAKT_API_KEY,
@@ -281,10 +275,6 @@ async function main() {
 
     if (resolvedConfig.TRAKT_OAUTH_TOKEN) {
         testEnv.TRAKT_OAUTH_TOKEN = resolvedConfig.TRAKT_OAUTH_TOKEN;
-    }
-
-    if (resolvedConfig.TRAKT_CLIENT_SECRET) {
-        testEnv.TRAKT_CLIENT_SECRET = resolvedConfig.TRAKT_CLIENT_SECRET;
     }
 
     if (process.env.LIVE_TEST_ALLOW_GOOGLE_TRANSLATE) {

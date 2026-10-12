@@ -25,6 +25,25 @@
 - 写入：先对每个 key 发一条 `JSON.SET key $ "{}" NX` 建空文档（真实 RedisJSON 不允许对不存在的 key 写非根路径，`NX` 保证已存在文档不被覆盖），再用一条原子 `JSON.MSET` 写 `$.cn`/`$.tw`/`$.hk`。REST pipeline 只接受字符串/数字参数，因此 JSON 值必须序列化成字符串，清空旧根字段用字符串 `"null"`（写入 JSON null，读取侧按缺失处理）。只有拿到 cn 数据（读取响应回带的 `cn` 提示或上游数据）时才清空根字段，不会出现"根字段已清、cn 缺失"。
 - 过期时间写在数据字段 `expiresAt`（毫秒时间戳）：`FOUND` 为 `null`，`PARTIAL_FOUND` 30 天，`NOT_FOUND` 1 天；后端**不再发送 `EXPIRE`/`PTTL`**，读取时过滤已过期条目（图片按 poster/logo 字段过滤），缺少 `expiresAt` 的旧条目按不过期处理。
 
+### 旧缓存结构迁移
+
+旧部署升级后建议对已有缓存执行一次迁移，把根字段平铺结构折叠为 `cn`/`tw`/`hk` 地区字段：
+
+```bash
+# 1) dry-run：只读取并统计，不写入
+npm run migrate:trakt:translation-layout
+
+# 2) 确认统计后执行：折叠旧根字段，并对写过的 key 补发 PERSIST
+npm run migrate:trakt:translation-layout -- --execute
+
+# 可选：同时清理已过期的地区字段（图片按 poster/logo 字段判断）
+npm run migrate:trakt:translation-layout -- --execute --prune-expired
+```
+
+- 运行环境需配置 `KV_REST_API_URL` / `KV_REST_API_TOKEN`（或 Upstash 同名变量）。
+- 不执行迁移也能正常工作：读取会回退旧根字段，写入会在拿到 cn 数据时折叠。但旧 key 上残留的 Redis TTL 不会被清除，折叠进去的新数据会随旧 TTL 到期一起消失，因此**建议执行一次 `--execute`**。
+- 脚本幂等，可重复执行；`--scan-count`、`--batch-size`、`--max-keys` 控制扫描与批次大小。
+
 ## 接口说明
 
 ### GET `/api/trakt/translations`

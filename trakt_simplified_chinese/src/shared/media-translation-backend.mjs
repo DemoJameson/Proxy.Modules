@@ -4,6 +4,7 @@ import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
 
+import * as chineseLocale from "./chinese-script-converter.mjs";
 import * as mediaTypes from "./media-types.mjs";
 import { TRAKT_TAMPER_CLIENT_ID } from "./tamper-app-constants.mjs";
 import * as translationCache from "./translation-cache.mjs";
@@ -40,6 +41,15 @@ const SEASON_EPISODE_TRANSLATION_LIMIT = 200;
 const TRAKT_DIRECT_TRANSLATION_MAX_REFS = 200;
 const TRAKT_BULK_TRANSLATION_MAX_REFS = 1000;
 const PREFERRED_TRANSLATION_LANGUAGE = "zh-CN";
+const PREFERRED_TRANSLATION_LANGUAGE_BY_LOCALE = {
+    cn: "zh-CN",
+    tw: "zh-TW",
+    hk: "zh-HK",
+};
+
+function resolvePreferredTranslationLanguage(locale = chineseLocale.resolveChineseLocale()) {
+    return PREFERRED_TRANSLATION_LANGUAGE_BY_LOCALE[chineseLocale.normalizeChineseLocale(locale)] ?? PREFERRED_TRANSLATION_LANGUAGE;
+}
 const BACKEND_FETCH_MIN_REFS = 3;
 const BACKEND_WRITE_BATCH_SIZE = 50;
 const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
@@ -48,6 +58,14 @@ const TRANSLATION_NOT_FOUND_TTL_MS = 1 * 24 * 60 * 60 * 1000;
 const BULK_API_MAX_IDS_PER_CATEGORY = 100;
 const BULK_API_MIN_REFS = 10;
 const BULK_API_COUNTRIES = ["cn", "sg", "tw", "hk"];
+
+// 后端在 tw/hk 命中旧结构文档时回带的 cn 数据：写回时一并折叠根字段
+const translationCnHints = {};
+
+function buildBackendHintKey(mediaType, ref) {
+    const lookupKey = buildMediaCacheLookupKey(mediaType, ref);
+    return lookupKey ? `${mediaType}:${lookupKey}` : "";
+}
 
 const SCRIPT_TRANSLATION_REQUEST_HEADER = "x-script-trakt-translation-request";
 const SCRIPT_TRANSLATION_REQUEST_VALUE = "true";
@@ -133,9 +151,10 @@ function buildMediaCacheLookupKey(mediaType, ref) {
     return commonUtils.isNonNullish(ref.traktId) ? String(ref.traktId) : "";
 }
 
+// 本地缓存按地区分键（设备本地）：统一 `<mediaType>:<lookupKey>:<locale>`，cn 也显式带后缀
 function buildMediaCacheKey(mediaType, ref) {
     const lookupKey = buildMediaCacheLookupKey(mediaType, ref);
-    return lookupKey ? `${mediaType}:${lookupKey}` : "";
+    return lookupKey ? cacheUtils.buildLocaleCacheKey(`${mediaType}:${lookupKey}`) : "";
 }
 
 // 相同条目不重复标记缓存变更：status/complete/translation 一致即视为相同。
@@ -163,7 +182,7 @@ function storeTranslationEntry(cache, mediaType, ref, entry) {
     if (!cacheKey) {
         return null;
     }
-    const translation = translationCache.normalizeTranslationPayload(entry?.translation ?? null);
+    const translation = translationCache.normalizeTranslationPayload(entry?.translation ?? null, chineseLocale.resolveChineseLocale());
     // normalizeTranslationPayload 保留 null 字段，落盘前剥离空值，与加载期归一化的产出形状保持一致
     const canonicalTranslation = translation ? Object.fromEntries(Object.entries(translation).filter(([, value]) => !translationCache.isEmptyTranslationValue(value))) : null;
     const status = translationCache.normalizeTranslationStatus(entry?.status);
@@ -224,6 +243,10 @@ function createBackendState(mediaConfig) {
         backendWriteBatchSize: BACKEND_WRITE_BATCH_SIZE,
         mediaConfig,
         pendingBackendWrites: Object.keys(mediaConfig).reduce((map, mediaType) => {
+            map[mediaType] = {};
+            return map;
+        }, {}),
+        pendingCnWrites: Object.keys(mediaConfig).reduce((map, mediaType) => {
             map[mediaType] = {};
             return map;
         }, {}),
@@ -336,6 +359,13 @@ async function fetchTranslationsFromBackend(backendState, cache, refsByType) {
     }
 
     const payload = await vercelBackendClientModule.fetchTranslations(query.join("&"));
+    const cnPayload = commonUtils.ensureObject(payload?.cn);
+    Object.keys(backendState.mediaConfig).forEach((mediaType) => {
+        const cnEntries = commonUtils.ensureObject(cnPayload[getMediaBackendField(mediaType)]);
+        Object.keys(cnEntries).forEach((id) => {
+            translationCnHints[`${mediaType}:${id}`] = cnEntries[id];
+        });
+    });
     let cacheChanged = false;
     Object.keys(backendState.mediaConfig).forEach((mediaType) => {
         const entries = commonUtils.ensureObject(payload?.[getMediaBackendField(mediaType)]);
@@ -360,6 +390,15 @@ function getPendingBackendWriteCount(backendState) {
     }, 0);
 }
 
+// 只有存在折叠数据时才带上 cn 段：cn 用户的请求体与旧版本完全一致。
+// 批次被截断时也必须先挂载，否则循环里已消费掉的 cn 提示会随 return 一起丢失
+function attachCnFoldPayload(payload, cnPayload) {
+    if (Object.values(cnPayload).some((entries) => Object.keys(entries).length > 0)) {
+        payload.cn = cnPayload;
+    }
+    return payload;
+}
+
 function extractBackendWritePayload(backendState, maxBatchSize) {
     const payload = {};
     const batchSize = Number(maxBatchSize) > 0 ? Number(maxBatchSize) : backendState.backendWriteBatchSize;
@@ -369,19 +408,29 @@ function extractBackendWritePayload(backendState, maxBatchSize) {
         payload[getMediaBackendField(mediaType)] = {};
     });
 
+    const cnPayload = {};
+    Object.keys(backendState.mediaConfig).forEach((mediaType) => {
+        cnPayload[getMediaBackendField(mediaType)] = {};
+    });
+
     for (const mediaType of Object.keys(backendState.mediaConfig)) {
         const entries = commonUtils.ensureObject(backendState.pendingBackendWrites[mediaType]);
         for (const lookupKey of Object.keys(entries)) {
             if (count >= batchSize) {
-                return payload;
+                return attachCnFoldPayload(payload, cnPayload);
             }
             payload[getMediaBackendField(mediaType)][lookupKey] = entries[lookupKey];
+            const cnEntry = commonUtils.ensureObject(backendState.pendingCnWrites[mediaType])[lookupKey];
+            if (cnEntry) {
+                cnPayload[getMediaBackendField(mediaType)][lookupKey] = cnEntry;
+                delete backendState.pendingCnWrites[mediaType][lookupKey];
+            }
             delete backendState.pendingBackendWrites[mediaType][lookupKey];
             count += 1;
         }
     }
 
-    return payload;
+    return attachCnFoldPayload(payload, cnPayload);
 }
 
 function flushBackendWriteBatch(backendState, maxBatchSize) {
@@ -393,12 +442,20 @@ function flushBackendWriteBatch(backendState, maxBatchSize) {
     return true;
 }
 
-function queueBackendWrite(backendState, mediaType, ref, entry) {
+function queueBackendWrite(backendState, mediaType, ref, entry, cnEntry) {
     const lookupKey = buildMediaCacheLookupKey(mediaType, ref);
     if (!lookupKey) {
         return;
     }
     backendState.pendingBackendWrites[mediaType][lookupKey] = entry;
+    const hintKey = buildBackendHintKey(mediaType, ref);
+    const cnData = cnEntry ?? (hintKey ? translationCnHints[hintKey] : null);
+    if (cnData) {
+        backendState.pendingCnWrites[mediaType][lookupKey] = cnData;
+        if (hintKey) {
+            delete translationCnHints[hintKey];
+        }
+    }
     if (getPendingBackendWriteCount(backendState) >= backendState.backendWriteBatchSize) {
         flushBackendWriteBatch(backendState, backendState.backendWriteBatchSize);
     }
@@ -429,8 +486,81 @@ function fetchDirectTranslation(mediaType, ref) {
                     translation: null,
                 };
             }
-            return translationCache.extractNormalizedTranslation(translationCache.normalizeTranslations(responseJson));
+            const normalizedItems = translationCache.normalizeTranslations(responseJson);
+            const locale = chineseLocale.resolveChineseLocale();
+            const entry = translationCache.extractNormalizedTranslation(normalizedItems, locale);
+            // cn 槽位来自同一次上游响应：tw/hk 请求顺带折叠 cn，保持后端 cn 数据完整
+            return { ...entry, cn: translationCache.buildCnFoldEntry(normalizedItems, locale) };
         });
+}
+
+function isDetailTranslationIncomplete(entry) {
+    if (!entry) {
+        return true;
+    }
+    if (entry.complete === true) {
+        return false;
+    }
+    // 负缓存（NOT_FOUND）也视为不完整：详情页访问时强制重新请求中文翻译，使其有机会自愈
+    if (entry.status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        return true;
+    }
+    const translation = entry.translation;
+    if (!translation) {
+        return false;
+    }
+    return translationCache.TRANSLATION_FIELDS.some((field) => field !== "title" && translationCache.isEmptyTranslationValue(translation[field]));
+}
+
+function mergeDetailTranslationEntries(cachedEntry, directResult) {
+    const mergedFields = {};
+    translationCache.TRANSLATION_FIELDS.forEach((field) => {
+        mergedFields[field] = directResult?.translation?.[field] ?? cachedEntry?.translation?.[field] ?? null;
+    });
+    const translation = translationCache.normalizeTranslationPayload(mergedFields);
+    return {
+        status: translationCache.deriveTranslationStatus(translation),
+        translation,
+        complete: true,
+    };
+}
+
+// 兼容客户端（非官方 Trakt App）不会自行请求 /translations/zh，详情页在这里按需补全：
+// 先读后端缓存，未命中再直查 Trakt，并写回本地与后端缓存
+async function ensureDetailTranslation(cache, mediaType, ref, backendState) {
+    if (!ref || !buildMediaCacheLookupKey(mediaType, ref) || shouldSkipTranslationLookup(ref)) {
+        return false;
+    }
+
+    let detailRef;
+    if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
+        detailRef = { ...ref, backendLookupKey: buildEpisodeCompositeKey(ref.showId, ref.seasonNumber, ref.episodeNumber) };
+    } else if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
+        detailRef = { ...ref, backendLookupKey: buildSeasonCompositeKey(ref.showId, ref.seasonNumber) };
+    } else {
+        detailRef = ref;
+    }
+    if (!isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
+        return false;
+    }
+
+    try {
+        const hydrated = await fetchTranslationsFromBackend({ ...backendState, backendFetchMinRefs: 0 }, cache, {
+            [mediaType]: [detailRef],
+        });
+        if (hydrated && !isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
+            return true;
+        }
+    } catch (error) {
+        globalThis.$ctx.env.log(`Trakt backend cache read failed: ${error}`);
+    }
+
+    const directResult = await fetchDirectTranslation(mediaType, detailRef);
+    const mergedEntry = mergeDetailTranslationEntries(getCachedTranslation(cache, mediaType, detailRef), directResult);
+    storeTranslationEntry(cache, mediaType, detailRef, mergedEntry);
+    // directResult.cn 是 tw/hk 直查时从同一次上游响应派生的 cn 折叠数据
+    queueBackendWrite(backendState, mediaType, detailRef, mergedEntry, directResult?.cn ?? null);
+    return true;
 }
 
 function createMediaCollection(mediaConfig) {
@@ -467,78 +597,12 @@ async function fetchAndPersistMissing(cache, mediaType, refs, vercelBackendClien
             const merged = await fetchDirectTranslation(mediaType, ref);
             const completeEntry = { ...merged, complete: true };
             cacheChanged = !!storeTranslationEntry(cache, mediaType, ref, completeEntry) || cacheChanged;
-            queueBackendWrite(vercelBackendClient, mediaType, ref, completeEntry);
+            queueBackendWrite(vercelBackendClient, mediaType, ref, completeEntry, merged.cn);
         } catch (error) {
             globalThis.$ctx.env.log(`Trakt translation fetch failed for key=${buildMediaCacheLookupKey(mediaType, ref)}: ${error}`);
         }
     });
     return cacheChanged;
-}
-
-function isDetailTranslationIncomplete(entry) {
-    if (!entry) {
-        return true;
-    }
-    if (entry.complete === true) {
-        return false;
-    }
-    // 负缓存（NOT_FOUND）也视为不完整：详情页访问时强制重新请求中文翻译，使其有机会自愈
-    if (entry.status === translationCache.CACHE_STATUS.NOT_FOUND) {
-        return true;
-    }
-    const translation = entry.translation;
-    if (!translation) {
-        return false;
-    }
-    return translationCache.TRANSLATION_FIELDS.some((field) => field !== "title" && translationCache.isEmptyTranslationValue(translation[field]));
-}
-
-function mergeDetailTranslationEntries(cachedEntry, directResult) {
-    const mergedFields = {};
-    translationCache.TRANSLATION_FIELDS.forEach((field) => {
-        mergedFields[field] = directResult?.translation?.[field] ?? cachedEntry?.translation?.[field] ?? null;
-    });
-    const translation = translationCache.normalizeTranslationPayload(mergedFields);
-    return {
-        status: translationCache.deriveTranslationStatus(translation),
-        translation,
-        complete: true,
-    };
-}
-
-async function ensureDetailTranslation(cache, mediaType, ref, backendState) {
-    if (!ref || !buildMediaCacheLookupKey(mediaType, ref) || shouldSkipTranslationLookup(ref)) {
-        return false;
-    }
-
-    let detailRef;
-    if (mediaType === mediaTypes.MEDIA_TYPE.EPISODE) {
-        detailRef = { ...ref, backendLookupKey: buildEpisodeCompositeKey(ref.showId, ref.seasonNumber, ref.episodeNumber) };
-    } else if (mediaType === mediaTypes.MEDIA_TYPE.SEASON) {
-        detailRef = { ...ref, backendLookupKey: buildSeasonCompositeKey(ref.showId, ref.seasonNumber) };
-    } else {
-        detailRef = ref;
-    }
-    if (!isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
-        return false;
-    }
-
-    try {
-        const hydrated = await fetchTranslationsFromBackend({ ...backendState, backendFetchMinRefs: 0 }, cache, {
-            [mediaType]: [detailRef],
-        });
-        if (hydrated && !isDetailTranslationIncomplete(getCachedTranslation(cache, mediaType, detailRef))) {
-            return true;
-        }
-    } catch (error) {
-        globalThis.$ctx.env.log(`Trakt backend cache read failed: ${error}`);
-    }
-
-    const directResult = await fetchDirectTranslation(mediaType, detailRef);
-    const mergedEntry = mergeDetailTranslationEntries(getCachedTranslation(cache, mediaType, detailRef), directResult);
-    storeTranslationEntry(cache, mediaType, detailRef, mergedEntry);
-    queueBackendWrite(backendState, mediaType, detailRef, mergedEntry);
-    return true;
 }
 
 function getBulkApiIdForRef(mediaType, ref) {
@@ -587,14 +651,16 @@ function mergeBulkResultsByRegion(resultsByRegion) {
     return merged;
 }
 
-function pickBestBulkTitle(titlesByRegion) {
+function pickBestBulkTitle(titlesByRegion, locale = chineseLocale.resolveChineseLocale()) {
     if (!commonUtils.isPlainObject(titlesByRegion)) {
         return null;
     }
-    for (const region of BULK_API_COUNTRIES) {
+    for (const region of translationCache.getRegionPreference(locale)) {
         const title = titlesByRegion[region];
         if (translationCache.containsChineseText(title)) {
-            return translationCache.normalizeTranslationFieldValue("title", title);
+            return translationCache.normalizeTranslationFieldValue("title", title, locale, {
+                fromSimplified: chineseLocale.isSimplifiedSourceRegion(region),
+            });
         }
     }
     return null;
@@ -726,7 +792,9 @@ async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) 
                         return;
                     }
                     const titlesByRegion = merged[`${mediaType}:${bulkId}`];
-                    const bestTitle = pickBestBulkTitle(titlesByRegion);
+                    const locale = chineseLocale.resolveChineseLocale();
+                    const bestTitle = pickBestBulkTitle(titlesByRegion, locale);
+                    const cnTitle = locale === chineseLocale.CHINESE_LOCALE.CN ? null : pickBestBulkTitle(titlesByRegion, chineseLocale.CHINESE_LOCALE.CN);
                     if (!bestTitle) {
                         if (anyRegionFailed) {
                             // 抓取失败：保持 missing，交给逐条 /translations/zh 路径回源，避免误判 NOT_FOUND
@@ -743,10 +811,11 @@ async function fetchBulkTranslationsForMissing(cache, refsByType, backendState) 
                         status: translationCache.CACHE_STATUS.PARTIAL_FOUND,
                         translation: { title: bestTitle },
                     };
+                    const cnEntry = cnTitle ? { status: translationCache.CACHE_STATUS.PARTIAL_FOUND, translation: { title: cnTitle } } : null;
                     if (storeTranslationEntry(cache, mediaType, ref, entry)) {
                         cacheChanged = true;
                     }
-                    queueBackendWrite(backendState, mediaType, ref, entry);
+                    queueBackendWrite(backendState, mediaType, ref, entry, cnEntry);
                 });
             });
         };
@@ -800,15 +869,16 @@ export {
     loadTranslationOverrides,
     MEDIA_CONFIG,
     mergeBulkResultsByRegion,
-    mergeDetailTranslationEntries,
     normalizeTranslationOverridesPayload,
     PREFERRED_TRANSLATION_LANGUAGE,
+    PREFERRED_TRANSLATION_LANGUAGE_BY_LOCALE,
     parseEpisodeLookupKey,
     parseSeasonLookupKey,
     pickBestBulkTitle,
     processInBatches,
     queueBackendWrite,
     REQUEST_BATCH_SIZE,
+    resolvePreferredTranslationLanguage,
     SCRIPT_TRANSLATION_REQUEST_HEADER,
     SCRIPT_TRANSLATION_REQUEST_VALUE,
     SEASON_EPISODE_TRANSLATION_LIMIT,

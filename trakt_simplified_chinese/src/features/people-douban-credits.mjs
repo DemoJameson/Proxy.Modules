@@ -1,5 +1,6 @@
 import * as doubanClientModule from "../outbound/douban-client.mjs";
 import * as vercelBackendClientModule from "../outbound/vercel-backend-client.mjs";
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
@@ -89,7 +90,15 @@ function fetchDoubanCacheEntry(targetType, traktId) {
                 return null;
             }
             const entry = payload[normalizedTargetType]?.[normalizedTraktId];
-            return commonUtils.isPlainObject(entry) ? entry : null;
+            if (!commonUtils.isPlainObject(entry)) {
+                return null;
+            }
+            // 过期时间写在数据字段里：过期的远端条目按未命中处理
+            const expiresAt = Number(entry.expiresAt);
+            if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+                return null;
+            }
+            return entry;
         })
         .catch(() => null);
 }
@@ -458,7 +467,10 @@ function applyDoubanCharacterTranslations(data, credits) {
             return;
         }
 
-        const nextCharacters = characters.filter((character, index, array) => array.indexOf(character) === index);
+        // 豆瓣是大陆资料：落地时按当前地区转换字形/用词
+        const nextCharacters = characters
+            .filter((character, index, array) => array.indexOf(character) === index)
+            .map((character) => chineseLocale.normalizeChineseForLocale(character, undefined, { fromSimplified: true }));
         const nextCharacter = nextCharacters.join(" / ");
         if (JSON.stringify(commonUtils.ensureArray(castItem.characters)) !== JSON.stringify(nextCharacters)) {
             castItem.characters = nextCharacters;

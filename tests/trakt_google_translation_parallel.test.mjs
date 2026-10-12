@@ -35,6 +35,39 @@ function getRequestText(body) {
     return String(payload.text ?? "");
 }
 
+test("DeepLX 目标语言按中文地区：tw/hk → ZH-HANT，cn → ZH", async () => {
+    const originalContext = globalThis.$ctx;
+    const posts = [];
+    globalThis.$ctx = {
+        argument: { chineseLocale: "tw" },
+        env: {
+            http: {
+                post(options) {
+                    posts.push(options);
+                    return Promise.resolve({ status: 200, body: createDeepLxPayload(getRequestTexts(options.body)) });
+                },
+            },
+        },
+    };
+
+    try {
+        await translateTextsWithDeeplx(["hello"], "en");
+        assert.equal(JSON.parse(posts[0].body).target_lang, "ZH-HANT");
+
+        globalThis.$ctx.argument.chineseLocale = "hk";
+        posts.length = 0;
+        await translateTextsWithDeeplx(["hello"], "en");
+        assert.equal(JSON.parse(posts[0].body).target_lang, "ZH-HANT");
+
+        globalThis.$ctx.argument.chineseLocale = "cn";
+        posts.length = 0;
+        await translateTextsWithDeeplx(["hello"], "en");
+        assert.equal(JSON.parse(posts[0].body).target_lang, "ZH");
+    } finally {
+        globalThis.$ctx = originalContext;
+    }
+});
+
 test("DeepLX 兼容层超过 1500 字符上限时最多并行 20 个分批请求", async () => {
     const originalContext = globalThis.$ctx;
     const deferredResponses = [];

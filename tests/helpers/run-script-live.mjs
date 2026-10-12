@@ -162,6 +162,8 @@ function runScriptLive({
     argument,
     persistentData = {},
     hasResponse = true,
+    requestBody,
+    omitRequestBody = false,
     httpGetMocks = {},
     httpPostMocks = {},
     allowRealHttpHosts = [],
@@ -172,13 +174,19 @@ function runScriptLive({
         const httpLogs = [];
         const timeout = setTimeout(() => reject(new Error("Timed out waiting for $done")), 15000);
 
+        const requestContext = {
+            url,
+            headers,
+        };
+        // 与离线 harness 一致：QX 的 script-response-body / script-request-header 拿不到 $request.body
+        if (!omitRequestBody) {
+            requestContext.body = requestBody;
+        }
+
         const context = {
             $loon: {},
             $argument: argument,
-            $request: {
-                url,
-                headers,
-            },
+            $request: requestContext,
             $persistentStore: persistentStore,
             $httpClient: {
                 get(options, callback) {
