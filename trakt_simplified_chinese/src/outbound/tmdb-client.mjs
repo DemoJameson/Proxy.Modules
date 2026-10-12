@@ -1,8 +1,20 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
 import * as vercelBackendClientModule from "./vercel-backend-client.mjs";
+
+// TMDb 中文语言按地区：cn / tw / hk
+const TMDB_LANGUAGE_BY_LOCALE = {
+    cn: "zh-CN",
+    tw: "zh-TW",
+    hk: "zh-HK",
+};
+
+function resolveTmdbLanguage() {
+    return TMDB_LANGUAGE_BY_LOCALE[chineseLocale.resolveChineseLocale()] ?? "zh-CN";
+}
 
 const TMDB_API_BASE_URL = "https://api.tmdb.org/3";
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
@@ -223,7 +235,7 @@ async function fetchCredits(mediaType, tmdbId) {
 
     const normalizedMediaType = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "movie" : "tv";
     const appendField = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "credits" : "aggregate_credits";
-    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/${normalizedMediaType}/${tmdbId}?language=zh-CN&append_to_response=${appendField}&api_key=${apiKey}`);
+    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/${normalizedMediaType}/${tmdbId}?language=${resolveTmdbLanguage()}&append_to_response=${appendField}&api_key=${apiKey}`);
 }
 
 async function fetchPerson(tmdbPersonId) {
@@ -231,7 +243,7 @@ async function fetchPerson(tmdbPersonId) {
         return null;
     }
 
-    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/person/${tmdbPersonId}?language=zh-CN&api_key=${apiKey}`);
+    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/person/${tmdbPersonId}?language=${resolveTmdbLanguage()}&api_key=${apiKey}`);
 }
 
 function normalizeImageLanguage(language) {
@@ -346,4 +358,5 @@ export {
     fetchSeasonImages,
     hasApiKey,
     resizeImageUrl,
+    resolveTmdbLanguage,
 };

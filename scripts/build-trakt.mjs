@@ -157,8 +157,9 @@ function renderPluginArgumentLine(field) {
     return `${field.key} = ${inferPluginArgumentType(field.type)}, ${formatPluginArgumentValues(field)}, tag=${field.tag}, desc=${field.desc}`;
 }
 
+// Surge 模块参数表的默认值会被替换进 argument="..." 的内层，值本身不能再带引号，否则与外层引号冲突
 function formatSgmoduleArgumentValue(value) {
-    return `"${formatDefaultValue(value)}"`;
+    return formatDefaultValue(value);
 }
 
 function formatSgmoduleDefaultArgumentValue(field) {
@@ -308,7 +309,8 @@ function renderPlugin() {
 }
 
 function renderSgmodule() {
-    const argumentPairs = argumentFields.map((field) => `${field.key}:${formatSgmoduleDefaultArgumentValue(field)}`).join(", ");
+    // 参数之间只用逗号分隔，与 Surge 官方示例一致，避免参数名带上前导空格
+    const argumentPairs = argumentFields.map((field) => `${field.key}:${formatSgmoduleDefaultArgumentValue(field)}`).join(",");
     const argumentDescriptions = argumentFields.map((field) => `${field.key}: ${field.desc}`).join("\\n");
     const lines = [
         `#!name=${metadata.name}`,
@@ -334,7 +336,9 @@ function renderSgmodule() {
             }
             parts.push(`timeout=${rule.timeout}`);
             if (rule.argumentKeys?.length) {
-                parts.push(`argument=${buildArgumentList(rule.argumentKeys, (key) => `{{{${key}}}}`)}`);
+                // Surge 的 [Script] 行按逗号分隔 key=value 参数，含逗号的值必须用双引号包裹，
+                // 否则 argument 会在第一个逗号处截断，只有第一个位置参数能传给脚本
+                parts.push(`argument="${buildArgumentList(rule.argumentKeys, (key) => `{{{${key}}}}`)}"`);
             }
             parts.push(`script-path=${buildScriptUrl(rule.scriptFile)}`);
 

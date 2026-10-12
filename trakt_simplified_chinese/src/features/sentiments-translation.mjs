@@ -5,12 +5,13 @@ import * as translationEngine from "../shared/translation-engine.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
+// 本地情感翻译缓存按地区分键：统一 `<mediaType>:<traktId>:<locale>`，cn 也显式带后缀
 function buildSentimentCacheKey(mediaType, traktId) {
     if (!traktId || (mediaType !== mediaTypes.MEDIA_TYPE.SHOW && mediaType !== mediaTypes.MEDIA_TYPE.MOVIE)) {
         return "";
     }
 
-    return `${mediaType}:${traktId}`;
+    return cacheUtils.buildLocaleCacheKey(`${mediaType}:${traktId}`);
 }
 
 function resolveSentimentRequestTarget() {

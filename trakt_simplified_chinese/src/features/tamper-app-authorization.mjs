@@ -1,5 +1,14 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import { TRAKT_TAMPER_CLIENT_ID, TRAKT_TAMPER_EXEMPT_CLIENT_IDS } from "../shared/tamper-app-constants.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
+
+// Trakt 授权页语言按地区
+const TAMPER_AUTHORIZE_LANG_BY_LOCALE = {
+    cn: "zh-hans-cn",
+    tw: "zh-hant-tw",
+    hk: "zh-hant-hk",
+};
+
 import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
 
@@ -10,7 +19,7 @@ const TRAKT_TAMPER_CALLBACK_PATH = "/api/auth/oauth2/authorize";
 const TRAKT_TAMPER_STATE_TTL_MS = 5 * 60 * 1000;
 // 条数上限由缓存层统一定义，保证归一化与写入用的是同一个上限
 const TRAKT_TAMPER_STATE_RECORD_LIMIT = cacheUtils.TAMPER_AUTHORIZATION_RECORD_LIMIT;
-// 授权流程状态、篡改签发的 token 与待回写标记都落在 unified cache 的 persistent.tamperAppAuthorization 里，不额外占持久化 key
+// 授权流程状态、篡改签发的 token 与待回写标记落在独立持久化 key 里，不随 unified cache 版本升级被清空
 // Trakt access_token 的 expires_in 为 604800 秒（7 天），响应缺省时按它兜底
 const TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const TRAKT_TAMPER_TOKEN_RECORD_LIMIT = cacheUtils.TAMPER_AUTHORIZATION_TOKEN_LIMIT;
@@ -412,7 +421,7 @@ function normalizeTamperStore(value) {
 function loadTamperStore(env) {
     try {
         // 授权状态属于鉴权关键数据，与 authTokens 一样不受 debugMode 的本地缓存禁用影响
-        const store = cacheUtils.loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true }).persistent.tamperAppAuthorization;
+        const store = cacheUtils.loadTamperAuthorization(env);
         const normalized = normalizeTamperStore(store);
         return {
             records: normalized.records.filter((record) => isTamperStateFresh(record)),
@@ -467,15 +476,7 @@ function saveTamperStore(env, store) {
             tokens: pruneTamperTokens(commonUtils.ensureArray(store?.tokens)),
             pending: pruneTamperPending(commonUtils.ensureArray(store?.pending)),
         };
-        const unifiedCache = cacheUtils.loadUnifiedCache(env, undefined, undefined, undefined, undefined, { force: true });
-        unifiedCache.persistent.tamperAppAuthorization = nextStore;
-        cacheUtils.saveUnifiedCache(env, unifiedCache, undefined, undefined, undefined, {
-            force: true,
-            owner: {
-                path: ["persistent", "tamperAppAuthorization"],
-                value: nextStore,
-            },
-        });
+        cacheUtils.saveTamperAuthorization(env, nextStore);
     } catch (error) {
         env.log(`Trakt tamper app authorization state save failed: ${error}`);
     }
@@ -866,7 +867,7 @@ async function handleAuthorizeRequest() {
     targetUrl.searchParams.set("response_type", responseType);
     targetUrl.searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
     targetUrl.searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);
-    targetUrl.searchParams.set("lang", "zh-hans-cn");
+    targetUrl.searchParams.set("lang", TAMPER_AUTHORIZE_LANG_BY_LOCALE[chineseLocale.resolveChineseLocale()] ?? "zh-hans-cn");
     targetUrl.searchParams.set("code_challenge", pkce.challenge);
     targetUrl.searchParams.set("code_challenge_method", pkce.method);
     targetUrl.searchParams.set("state", pkce.challenge);

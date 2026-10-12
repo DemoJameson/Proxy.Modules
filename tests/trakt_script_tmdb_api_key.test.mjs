@@ -50,7 +50,7 @@ function runPosterCase({ argument = {}, persistentData, httpGetMocks = {} } = {}
                 logo: ["https://walter.trakt.tv/images/movies/000/000/123/logos/original.png"],
             },
         }),
-        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL, posterImageMode: "chinese", ...argument },
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL, posterImageMode: "cn", ...argument },
         persistentData: persistentData ?? createUnifiedPersistentData(),
         httpGetMocks: {
             // 兜底：original 模式的补充请求不参与断言，避免未 mock 的 URL 直接报错

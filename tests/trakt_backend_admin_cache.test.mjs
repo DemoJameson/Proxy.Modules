@@ -1920,6 +1920,23 @@ test("图片 cn 读取在混合文档（根 poster + tw）下回退根字段", a
     });
 });
 
+test("图片读取未传 locale 时按 cn 兜底", async () => {
+    const store = new Map();
+    store.set(
+        CHINESE_IMAGE_MOVIE_123,
+        jsonValue({
+            cn: { poster: { status: 1, url: "https://image.tmdb.org/t/p/original/cn-poster.jpg" } },
+            tw: { poster: { status: 1, url: "https://image.tmdb.org/t/p/original/tw-poster.jpg" } },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const imageStore = require("../lib/trakt-cache/image-store.js");
+        const entries = await imageStore.readManyImageGroupsFromKv({ url: "https://kv.example", token: "test-kv-token" }, { mode: "chinese", movies: ["123"] });
+        assert.equal(entries.movies["123"].poster.url, "https://image.tmdb.org/t/p/original/cn-poster.jpg");
+    });
+});
+
 test("admin 覆盖投影不把 cn 覆盖回退到 tw", async () => {
     const store = new Map();
     seedAutoEntry(store, AUTO_MOVIE_123, {

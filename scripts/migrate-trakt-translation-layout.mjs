@@ -7,6 +7,7 @@ const LOCALE_FIELDS = ["cn", "tw", "hk"];
 const DEFAULT_SCAN_COUNT = 1000;
 const DEFAULT_BATCH_SIZE = 50;
 const DEFAULT_MAX_KEYS = 200000;
+const IMAGE_LOCALE_FIELDS = ["poster", "logo"];
 
 // 每类 key 的旧根字段名：折叠时把根字段写进 cn 并把它们置 null
 const KEY_SPECS = [
@@ -109,9 +110,24 @@ function hasLocaleField(doc) {
     return !!doc && typeof doc === "object" && LOCALE_FIELDS.some((locale) => doc[locale] !== undefined);
 }
 
+// 图片条目的过期时间嵌在 poster/logo 字段内：只有所有存在的字段都过期，整个地区条目才算过期
+function isExpiredImageEntry(entry, now) {
+    const fields = IMAGE_LOCALE_FIELDS.filter((field) => entry?.[field] && typeof entry[field] === "object");
+    if (fields.length === 0) {
+        return false;
+    }
+    return fields.every((field) => {
+        const expiresAt = Number(entry[field].expiresAt);
+        return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;
+    });
+}
+
 function isExpiredEntry(entry, now = Date.now()) {
     if (!entry || typeof entry !== "object") {
         return false;
+    }
+    if (isExpiredImageEntry(entry, now)) {
+        return true;
     }
     const expiresAt = Number(entry.name?.expiresAt ?? entry.notFound?.expiresAt ?? entry.expiresAt);
     return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;

@@ -26,6 +26,25 @@ test("module manifest renders tracked Trakt subscription and BoxJs files", async
     }
 });
 
+test("Surge 模块的 argument 必须整体加双引号，避免逗号被 Surge 当作参数分隔符", () => {
+    const target = renderGeneratedTargets().find((item) => item.outputFile === "trakt_simplified_chinese/trakt_simplified_chinese.sgmodule");
+    assert.ok(target, "应生成 Surge 模块产物");
+
+    const content = normalizeLineEndings(target.content);
+    const argumentLines = content.split("\n").filter((line) => line.includes("argument="));
+    assert.ok(argumentLines.length > 0, "Surge 模块应包含带 argument 的脚本规则");
+    for (const line of argumentLines) {
+        assert.match(line, /argument="\{\{\{/, `argument 应以双引号包裹：${line}`);
+        assert.match(line, /\}\}\}"(?:,|$)/, `argument 应在双引号内结束：${line}`);
+    }
+    assert.equal(content.includes("argument={{{"), false, "Surge 模块不应存在未加引号的 argument");
+
+    // #!arguments 的默认值会被替换进 argument="..." 内层，默认值本身不能带引号
+    const argumentsLine = content.split("\n").find((line) => line.startsWith("#!arguments="));
+    assert.ok(argumentsLine, "Surge 模块应声明 #!arguments");
+    assert.equal(argumentsLine.includes('"'), false, "#!arguments 默认值不应带引号");
+});
+
 test("Quantumult X snippet 会按 requiresBody 选择请求体或响应头脚本类型", () => {
     const snippet = normalizeLineEndings(renderSnippet());
 
@@ -224,10 +243,30 @@ test("module manifest generates current BoxJs keys from argument fields", async 
         app.settings.map((setting) => setting.id),
         expectedKeys,
     );
+    // fakeVipEnabled 是配置第一项，chineseLocale 是第二项
     assert.equal(app.keys[0], `@${BOXJS_CONFIG_KEY}.fakeVipEnabled`);
     assert.equal(app.settings[0].id, `@${BOXJS_CONFIG_KEY}.fakeVipEnabled`);
-    assert.ok(app.keys.includes(`@${BOXJS_CONFIG_KEY}.historyEpisodesMergedByShow`));
-    assert.ok(app.keys.includes(`@${BOXJS_CONFIG_KEY}.characterTranslationEnabled`));
+    assert.equal(app.keys[1], `@${BOXJS_CONFIG_KEY}.chineseLocale`);
+    assert.equal(app.settings[1].id, `@${BOXJS_CONFIG_KEY}.chineseLocale`);
+    const localeSetting = app.settings.find((setting) => setting.id === `@${BOXJS_CONFIG_KEY}.chineseLocale`);
+    assert.ok(localeSetting);
+    assert.equal(localeSetting.name, "目标语言");
+    assert.deepEqual(
+        localeSetting.items.map((item) => item.label),
+        ["简体中文", "繁體中文（台灣）", "繁體中文（香港）"],
+    );
+
+    const posterSetting = app.settings.find((setting) => setting.id === `@${BOXJS_CONFIG_KEY}.posterImageMode`);
+    assert.ok(posterSetting);
+    assert.deepEqual(
+        posterSetting.items.map((item) => item.label),
+        ["原片语言", "简体中文", "繁體中文（台灣）", "繁體中文（香港）", "原图"],
+    );
+
+    const characterIndex = app.keys.indexOf(`@${BOXJS_CONFIG_KEY}.characterTranslationEnabled`);
+    const historyIndex = app.keys.indexOf(`@${BOXJS_CONFIG_KEY}.historyEpisodesMergedByShow`);
+    assert.equal(characterIndex, 4);
+    assert.equal(historyIndex, characterIndex + 1, "历史剧集按电视剧合并应在用豆瓣翻译角色名之后");
 
     const characterSetting = app.settings.find((setting) => setting.id === `@${BOXJS_CONFIG_KEY}.characterTranslationEnabled`);
     assert.ok(characterSetting);

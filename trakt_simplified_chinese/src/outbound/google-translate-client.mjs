@@ -1,3 +1,4 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import { ensureArray } from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
@@ -12,6 +13,12 @@ const { createConcurrencyLimiter, createTranslationItem, estimateUtf8Bytes, getI
 
 const GOOGLE_PA_TRANSLATE_URL = "https://translate-pa.googleapis.com/v1/translateHtml";
 const GOOGLE_TARGET_LANGUAGE = "ZH";
+// 港台直接用 Google 的繁体目标语言，避免二次转换
+const GOOGLE_TARGET_LANGUAGE_BY_LOCALE = {
+    cn: "ZH",
+    tw: "zh-TW",
+    hk: "zh-HK",
+};
 const GOOGLE_FALLBACK_API_KEY = [
     65, 73, 122, 97, 83, 121, 65, 84, 66, 88, 97, 106, 118, 122, 81, 76, 84, 68, 72, 69, 81, 98, 99, 112, 113, 48, 73, 104, 101, 48, 118, 87, 68, 72, 109, 79, 53, 50, 48,
 ].reduce((s, b) => s + String.fromCharCode(b), "");
@@ -90,8 +97,12 @@ const googleAuth = {
     },
 };
 
+function resolveGoogleTargetLanguage() {
+    return GOOGLE_TARGET_LANGUAGE_BY_LOCALE[chineseLocale.resolveChineseLocale()] ?? GOOGLE_TARGET_LANGUAGE;
+}
+
 function buildGoogleBody(texts, sourceLanguage) {
-    return JSON.stringify([[texts, normalizeSourceLanguage(sourceLanguage), GOOGLE_TARGET_LANGUAGE], "te"]);
+    return JSON.stringify([[texts, normalizeSourceLanguage(sourceLanguage), resolveGoogleTargetLanguage()], "te"]);
 }
 
 function isTransientStatusCode(statusCode) {

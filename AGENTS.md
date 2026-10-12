@@ -21,7 +21,7 @@
 - `npm run sync:env.js`：同步代理运行时 Env 适配文件。
 - `npm run check:trakt`：格式检查、构建 Trakt 产物，并对源码、vendor 和构建后的脚本做 `node --check`。
 - `npm test`：构建 Trakt 后运行默认离线测试，不依赖真实凭据或外部服务。
-- `npm run test:trakt:live`：运行真实 Trakt/Vercel 后端联调，可能需要 `TRAKT_API_KEY`、`TRAKT_CLIENT_SECRET`、`TRAKT_OAUTH_TOKEN`、`TRAKT_BACKEND_BASE_URL` 等本地配置。
+- `npm run test:trakt:live`：运行真实 Trakt/Vercel 后端联调，可能需要 `TRAKT_API_KEY`、`TRAKT_OAUTH_TOKEN`、`TRAKT_BACKEND_BASE_URL` 等本地配置。
 - `npm run test:trakt:all`：串行运行完整 Trakt 测试集合。
 - `node --test tests/xxx.test.mjs`：定向跑单个测试文件；必须前先执行 `npm run format` 和 `npm run build:trakt` 等待编译完成，确保脚本产物是最新的，之后才运行测试。
 

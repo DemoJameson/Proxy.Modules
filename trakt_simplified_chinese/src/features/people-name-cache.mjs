@@ -1,4 +1,5 @@
 import * as vercelBackendClientModule from "../outbound/vercel-backend-client.mjs";
+import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
 const PEOPLE_NAME_SOURCE = {
@@ -12,6 +13,8 @@ const TMDB_PERSON_NAME_NOT_FOUND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const PEOPLE_LIST_ORIGINAL_NAME_KEY = "__traktOriginalName";
 
 const peopleNameBackendWriteQueue = {};
+// 后端读取时回带的 cn 数据：写回时一并折叠根字段
+const peopleNameCnHints = {};
 
 function queuePeopleNameBackendWrite(personId, nameEntry) {
     const normalizedPersonId = String(personId ?? "").trim();
@@ -40,10 +43,18 @@ function flushPeopleNameBackendWrites() {
         return;
     }
     const payload = { people: {} };
+    const cnPayload = { people: {} };
     keys.forEach((key) => {
         payload.people[key] = peopleNameBackendWriteQueue[key];
         delete peopleNameBackendWriteQueue[key];
+        if (commonUtils.isPlainObject(peopleNameCnHints[key])) {
+            cnPayload.people[key] = peopleNameCnHints[key];
+            delete peopleNameCnHints[key];
+        }
     });
+    if (Object.keys(cnPayload.people).length > 0) {
+        payload.cn = cnPayload;
+    }
     if (vercelBackendClientModule.resolveBackendBaseUrl()) {
         vercelBackendClientModule.postPeopleNames(payload).catch(() => {});
     }
@@ -70,6 +81,12 @@ async function hydratePeopleNamesFromBackend(cache, personIds) {
 
     try {
         const payload = await vercelBackendClientModule.fetchPeopleNames(`people=${ids.join(",")}`);
+        const cnEntries = commonUtils.ensureObject(payload?.cn?.people);
+        Object.entries(cnEntries).forEach(([personId, entry]) => {
+            if (commonUtils.isPlainObject(entry)) {
+                peopleNameCnHints[personId] = entry;
+            }
+        });
         const entries = commonUtils.ensureObject(payload?.people);
         let changed = false;
         Object.entries(entries).forEach(([personId, entry]) => {
@@ -82,13 +99,22 @@ async function hydratePeopleNamesFromBackend(cache, personIds) {
     }
 }
 
+// 本地人物名缓存按地区分键：统一 `<personId>:<locale>`，cn 也显式带后缀，切换地区不会命中旧字形
+function buildPeopleTranslationCacheKey(personId) {
+    return commonUtils.isNullish(personId) ? "" : cacheUtils.buildLocaleCacheKey(String(personId));
+}
+
+function getPeopleTranslationCacheEntryByKey(cache, cacheKey) {
+    const entry = cacheKey ? cache?.[cacheKey] : null;
+    return commonUtils.isPlainObject(entry) ? entry : null;
+}
+
 function getPeopleTranslationCacheEntry(cache, personId) {
     if (!cache || commonUtils.isNullish(personId)) {
         return null;
     }
 
-    const entry = cache[String(personId)];
-    return commonUtils.isPlainObject(entry) ? entry : null;
+    return getPeopleTranslationCacheEntryByKey(cache, buildPeopleTranslationCacheKey(personId));
 }
 
 function isSupportedPersonNameSource(source) {
@@ -168,8 +194,11 @@ function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendNa
         return false;
     }
 
-    const key = String(personId);
-    const currentEntry = getPeopleTranslationCacheEntry(cache, key);
+    const key = buildPeopleTranslationCacheKey(personId);
+    if (!key) {
+        return false;
+    }
+    const currentEntry = getPeopleTranslationCacheEntryByKey(cache, key);
     const nextEntry = commonUtils.isPlainObject(currentEntry) ? { ...currentEntry } : {};
 
     // TMDB 查询无中文名：写 7 天负缓存；已有有效 tmdb 姓名或未过期负缓存时跳过
@@ -195,7 +224,8 @@ function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendNa
             }
             nextEntry.name = storedNameEntry;
             if (queueBackendName) {
-                queuePeopleNameBackendWrite(key, storedNameEntry);
+                // 后端写入队列按原始 personId 分键，不能带本地缓存地区后缀
+                queuePeopleNameBackendWrite(personId, storedNameEntry);
             }
         }
     }
@@ -290,6 +320,7 @@ function getCachedPersonBiographyTranslation(entry, sourceText) {
 
 export {
     applyPersonNameNotFoundCache,
+    buildPeopleTranslationCacheKey,
     buildPersonNameCacheEntry,
     buildPersonNameDisplay,
     flushPeopleNameBackendWrites,

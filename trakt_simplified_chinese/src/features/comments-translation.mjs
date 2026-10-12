@@ -10,6 +10,8 @@ import * as commonUtils from "../utils/common.mjs";
 
 const COMMENT_TRANSLATION_BACKEND_WRITE_BATCH_SIZE = 50;
 const commentTranslationBackendWriteQueue = {};
+// 后端读取时回带的 cn 数据：写回时一并折叠根字段，避免"清了根字段却没有 cn"的情况
+const commentTranslationCnHints = {};
 
 function isChineseLanguage(language) {
     const normalized = String(language ?? "")
@@ -236,10 +238,18 @@ function flushCommentTranslationBackendWrites() {
     for (let start = 0; start < keys.length; start += COMMENT_TRANSLATION_BACKEND_WRITE_BATCH_SIZE) {
         const batchKeys = keys.slice(start, start + COMMENT_TRANSLATION_BACKEND_WRITE_BATCH_SIZE);
         const payload = { comments: {} };
+        const cnPayload = { comments: {} };
         batchKeys.forEach((key) => {
             payload.comments[key] = commentTranslationBackendWriteQueue[key];
             delete commentTranslationBackendWriteQueue[key];
+            if (commonUtils.isPlainObject(commentTranslationCnHints[key])) {
+                cnPayload.comments[key] = commentTranslationCnHints[key];
+                delete commentTranslationCnHints[key];
+            }
         });
+        if (Object.keys(cnPayload.comments).length > 0) {
+            payload.cn = cnPayload;
+        }
         vercelBackendClientModule.postCommentTranslations(payload).catch(() => {});
     }
 }
@@ -261,7 +271,11 @@ function mergeBackendCommentTranslationEntry(cache, commentId, entry) {
         return false;
     }
 
-    const cacheKey = String(commentId);
+    const cacheKey = cacheUtils.buildFieldTranslationCacheKey(commentId);
+    if (!cacheKey) {
+        return false;
+    }
+
     const currentEntry = commonUtils.isPlainObject(cache?.[cacheKey]) ? cache[cacheKey] : {};
     const currentFieldEntry = commonUtils.isPlainObject(currentEntry.comment) ? currentEntry.comment : null;
     if (currentFieldEntry?.sourceTextHash === sourceTextHash && currentFieldEntry.translatedText === translatedText) {
@@ -286,6 +300,12 @@ async function hydrateCommentTranslationsFromBackend(cache, commentIds) {
 
     try {
         const payload = await vercelBackendClientModule.fetchCommentTranslations(`comments=${ids.join(",")}`);
+        const cnEntries = commonUtils.ensureObject(payload?.cn?.comments);
+        Object.entries(cnEntries).forEach(([commentId, entry]) => {
+            if (commonUtils.isPlainObject(entry)) {
+                commentTranslationCnHints[commentId] = entry;
+            }
+        });
         const entries = commonUtils.ensureObject(payload?.comments);
         let changed = false;
         Object.entries(entries).forEach(([commentId, entry]) => {
