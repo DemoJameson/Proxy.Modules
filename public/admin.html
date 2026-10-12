@@ -244,6 +244,10 @@
                 font-size: 13px;
             }
 
+            .override-hint {
+                color: var(--warning);
+            }
+
             .editor-title-line {
                 display: inline-flex;
                 min-width: 0;
@@ -646,6 +650,14 @@
                                     <option value="episodes">单集</option>
                                 </select>
                             </label>
+                            <label class="filter-field" for="locale">
+                                <span class="filter-label">中文地区</span>
+                                <select id="locale" aria-label="中文地区">
+                                    <option value="cn">简体</option>
+                                    <option value="tw">繁体（台湾）</option>
+                                    <option value="hk">繁体（香港）</option>
+                                </select>
+                            </label>
                             <label class="filter-field" for="override">
                                 <span class="filter-label">覆盖状态</span>
                                 <select id="override" aria-label="覆盖状态">
@@ -673,6 +685,7 @@
                             <span class="editor-meta">
                                 <span id="editorMeta" class="meta"></span>
                                 <span id="expiresMeta" class="meta expiry-meta"></span>
+                                <span id="overrideHint" class="meta override-hint" hidden></span>
                             </span>
                         </span>
                         <span class="editor-tools">
@@ -760,6 +773,7 @@
                 unlockAdmin: $("unlockAdmin"),
                 filters: $("filters"),
                 type: $("type"),
+                locale: $("locale"),
                 query: $("query"),
                 override: $("override"),
                 rows: $("rows"),
@@ -770,6 +784,7 @@
                 editorTitle: $("editorTitle"),
                 editorMeta: $("editorMeta"),
                 expiresMeta: $("expiresMeta"),
+                overrideHint: $("overrideHint"),
                 traktLink: $("traktLink"),
                 editorEmpty: $("editorEmpty"),
                 editorForm: $("editorForm"),
@@ -934,7 +949,10 @@
             }
 
             function getTranslationOverrides(entry) {
-                return (entry?.translation) || {};
+                // entry 是原始覆盖条目：编辑器只展示当前地区自己的槽位；
+                // cn 回退由 effectiveEntry 预览，避免把回退值误当成当前地区覆盖保存
+                const localized = entry?.[controls.locale.value]?.translation;
+                return localized || entry?.translation || {};
             }
 
             function getFieldControls(field) {
@@ -1058,8 +1076,8 @@
                 `;
                 for (const item of state.items) {
                     const translation = getTranslation(item.effectiveEntry);
-                    const translationOverrides = getTranslationOverrides(item.override);
-                    const overrideCount = fields.filter((field) => !isEmptyTranslationValue(translationOverrides[field])).length;
+                    const effectiveOverrides = getTranslation(item.override);
+                    const overrideCount = fields.filter((field) => !isEmptyTranslationValue(effectiveOverrides[field])).length;
                     const button = document.createElement("button");
                     button.type = "button";
                     button.className = `row ${state.selected && state.selected.type === item.type && state.selected.id === item.id ? "active" : ""}`;
@@ -1099,6 +1117,7 @@
                     action: "item",
                     type: item.type,
                     id: item.id,
+                    locale: controls.locale.value,
                 });
                 updateListItem(detail);
                 if (!state.selected || state.selected.type !== item.type || state.selected.id !== item.id) {
@@ -1119,19 +1138,27 @@
                     controls.editorTitle.textContent = "未选择条目";
                     controls.editorMeta.textContent = "";
                     controls.expiresMeta.textContent = "";
+                    controls.overrideHint.hidden = true;
+                    controls.overrideHint.textContent = "";
                     controls.traktLink.hidden = true;
                     controls.traktLink.href = "https://app.trakt.tv";
                     state.editorBaseline = {};
                     return;
                 }
 
-                const translationOverrides = getTranslationOverrides(item.override);
+                const translationOverrides = getTranslationOverrides(item.overrideEntry ?? item.override);
+                const effectiveOverrides = getTranslation(item.override);
+                const ignoredOverrideFields = fields.filter(
+                    (field) => !isEmptyTranslationValue(translationOverrides[field]) && isEmptyTranslationValue(effectiveOverrides[field]),
+                );
                 const originalTranslation = getTranslation(item.autoEntry);
                 const effectiveTranslation = getTranslation(item.effectiveEntry);
                 const traktUrl = getTraktUrl(item);
                 controls.editorTitle.textContent = `${mediaTypeLabel(item.type)} / ${item.id}`;
                 controls.editorMeta.textContent = statusLabel(item.effectiveEntry);
                 controls.expiresMeta.textContent = getExpiresLabel(item);
+                controls.overrideHint.hidden = ignoredOverrideFields.length === 0;
+                controls.overrideHint.textContent = ignoredOverrideFields.length > 0 ? "与简体中文相同，已被忽略" : "";
                 controls.traktLink.href = traktUrl;
                 controls.traktLink.hidden = !traktUrl;
                 controls.titleInput.value = translationOverrides.title || effectiveTranslation.title || "";
@@ -1211,6 +1238,7 @@
                         limit: 100,
                         q: query,
                         override: controls.override.value,
+                        locale: controls.locale.value,
                     });
                 } catch (error) {
                     if (requestId !== state.listRequestId) {
@@ -1306,7 +1334,7 @@
                 refreshFirstPage({ openFirstResult: shouldOpenFirstResult() }).catch((error) => setListStatus(error.message, "error"));
             });
 
-            [controls.type, controls.override].forEach((control) => {
+            [controls.type, controls.override, controls.locale].forEach((control) => {
                 control.addEventListener("change", () => {
                     refreshFirstPage({ openFirstResult: shouldOpenFirstResult() }).catch((error) => setListStatus(error.message, "error"));
                 });
@@ -1348,6 +1376,7 @@
                             type: state.selected.type,
                             id: state.selected.id,
                             target: "override",
+                            locale: controls.locale.value,
                         },
                         { method: "DELETE" },
                     );
@@ -1364,6 +1393,7 @@
                         body: JSON.stringify({
                             type: state.selected.type,
                             id: state.selected.id,
+                            locale: controls.locale.value,
                             translation: getTranslationOverridesPayload(),
                         }),
                     },
@@ -1383,6 +1413,7 @@
                         type: state.selected.type,
                         id: state.selected.id,
                         target,
+                        locale: controls.locale.value,
                     },
                     { method: "DELETE" },
                 );

@@ -2,10 +2,11 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 
+import { createPipelineResponse, getJsonValue, jsonValue } from "./helpers/kv-rest-mock.mjs";
+
 const require = createRequire(import.meta.url);
 const doubanHandler = require("../api/trakt/credits.js");
 
-const DOUBAN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const CREDIT_MOVIE_123 = "trakt:credit:movies:123";
 const CREDIT_TV_456 = "trakt:credit:shows:456";
 
@@ -28,16 +29,23 @@ function createResponse() {
     };
 }
 
-function jsonValue(value) {
-    return {
-        __redisJson: true,
-        value,
-    };
+// 写入条目会带 30 天 expiresAt（数据内过期，不再 EXPIRE）
+function expectStoredCreditEntry(command, key, entry) {
+    assert.equal(command[0], "JSON.MSET");
+    assert.equal(command[1], key);
+    assert.equal(command[2], "$");
+    const stored = JSON.parse(command[3]);
+    const { expiresAt, ...rest } = stored;
+    assert.deepEqual(rest, entry);
+    assert.ok(Number.isFinite(expiresAt), "expiresAt 应写入数据字段");
+    const ttlMs = expiresAt - Date.now();
+    assert.ok(ttlMs > 29 * 24 * 60 * 60 * 1000 && ttlMs <= 30 * 24 * 60 * 60 * 1000 + 1000, `expiresAt 应约为 30 天后，实际 ${ttlMs}`);
 }
 
-function getJsonValue(store, key) {
-    const stored = store.get(key);
-    return stored && stored.__redisJson === true ? stored.value : null;
+function withoutExpiresAt(entry) {
+    const copy = { ...entry };
+    delete copy.expiresAt;
+    return copy;
 }
 
 function createKvFetch(store) {
@@ -46,37 +54,7 @@ function createKvFetch(store) {
         const path = parsed.pathname;
 
         if (path === "/pipeline") {
-            const commands = JSON.parse(init.body || "[]");
-            store.pipelineRequests = [...(store.pipelineRequests || []), commands];
-            const results = [];
-            for (const command of commands) {
-                const [name, key, , _arg4] = command;
-                if (name === "JSON.MSET") {
-                    store.msetCommands = [...(store.msetCommands || []), command];
-                    for (let index = 1; index < command.length; index += 3) {
-                        store.set(command[index], jsonValue(JSON.parse(command[index + 2])));
-                    }
-                    results.push("OK");
-                } else if (name === "JSON.MGET") {
-                    store.mgetCommands = [...(store.mgetCommands || []), command];
-                    const keys = command.slice(1, -1);
-                    results.push(
-                        keys.map((itemKey) => {
-                            const stored = store.get(itemKey);
-                            return stored && stored.__redisJson === true ? [stored.value] : null;
-                        }),
-                    );
-                } else if (name === "EXPIRE") {
-                    store.expireCommands = [...(store.expireCommands || []), command];
-                    results.push(store.has(key) ? 1 : 0);
-                } else {
-                    results.push(null);
-                }
-            }
-            return {
-                ok: true,
-                json: async () => results.map((result) => ({ result })),
-            };
+            return createPipelineResponse(store, init);
         }
 
         return {
@@ -231,14 +209,11 @@ test("douban POST 写入 movie/tv 后再 GET 命中，并对每个 key 设置 30
             store.msetCommands.map((command) => command[0]),
             ["JSON.MSET", "JSON.MSET"],
         );
-        assert.deepEqual(store.msetCommands, [
-            ["JSON.MSET", CREDIT_MOVIE_123, "$", JSON.stringify(movieEntry)],
-            ["JSON.MSET", CREDIT_TV_456, "$", JSON.stringify(tvEntry)],
-        ]);
-        assert.deepEqual(store.expireCommands, [
-            ["EXPIRE", CREDIT_MOVIE_123, DOUBAN_TTL_SECONDS],
-            ["EXPIRE", CREDIT_TV_456, DOUBAN_TTL_SECONDS],
-        ]);
+        assert.equal(store.msetCommands.length, 2);
+        expectStoredCreditEntry(store.msetCommands[0], CREDIT_MOVIE_123, movieEntry);
+        expectStoredCreditEntry(store.msetCommands[1], CREDIT_TV_456, tvEntry);
+        assert.equal(store.expireCommands, undefined);
+        assert.equal(store.pttlCommands, undefined);
 
         const getRes = await invoke({
             method: "GET",
@@ -248,8 +223,8 @@ test("douban POST 写入 movie/tv 后再 GET 命中，并对每个 key 设置 30
             },
         });
         assert.equal(getRes.statusCode, 200);
-        assert.deepEqual(getRes.jsonBody.movies, moviePayload);
-        assert.deepEqual(getRes.jsonBody.shows, tvPayload);
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.movies["123"]), moviePayload["123"]);
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.shows["456"]), tvPayload["456"]);
     });
 });
 
@@ -335,29 +310,20 @@ test("douban POST partial 字段不覆盖已存的其他字段", async () => {
 
         // read-modify-write：先 GET 现有 entry，merge incoming.credits 后 MSET 完整 entry
         assert.deepEqual(store.mgetCommands, [["JSON.MGET", CREDIT_MOVIE_123, "$"]]);
-        assert.deepEqual(store.msetCommands, [
-            [
-                "JSON.MSET",
-                CREDIT_MOVIE_123,
-                "$",
-                JSON.stringify({
-                    subject: { id: "35517044", targetType: "movies" },
-                    seasons: { ids: ["s1"] },
-                    credits: { 汤姆·汉克斯: ["张一昂"] },
-                }),
-            ],
-        ]);
+        expectStoredCreditEntry(store.msetCommands[0], CREDIT_MOVIE_123, {
+            subject: { id: "35517044", targetType: "movies" },
+            seasons: { ids: ["s1"] },
+            credits: { 汤姆·汉克斯: ["张一昂"] },
+        });
 
         const getRes = await invoke({
             method: "GET",
             query: { movies: "123" },
         });
-        assert.deepEqual(getRes.jsonBody.movies, {
-            123: {
-                subject: { id: "35517044", targetType: "movies" },
-                seasons: { ids: ["s1"] },
-                credits: { 汤姆·汉克斯: ["张一昂"] },
-            },
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.movies["123"]), {
+            subject: { id: "35517044", targetType: "movies" },
+            seasons: { ids: ["s1"] },
+            credits: { 汤姆·汉克斯: ["张一昂"] },
         });
     });
 });
@@ -382,11 +348,11 @@ test("douban POST 完整 entry（三字段齐全）跳过 GET 直接整体写", 
         // 完整 entry 跳过 GET，只发一次 write pipeline
         assert.equal(store.mgetCommands, undefined);
         assert.equal(store.pipelineRequests.length, 1);
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", CREDIT_MOVIE_123, "$", JSON.stringify(completeEntry)]]);
-        assert.deepEqual(store.expireCommands, [["EXPIRE", CREDIT_MOVIE_123, DOUBAN_TTL_SECONDS]]);
+        expectStoredCreditEntry(store.msetCommands[0], CREDIT_MOVIE_123, completeEntry);
+        assert.equal(store.expireCommands, undefined);
 
         const getRes = await invoke({ method: "GET", query: { movies: "123" } });
-        assert.deepEqual(getRes.jsonBody.movies, { 123: completeEntry });
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.movies["123"]), completeEntry);
     });
 });
 
@@ -420,31 +386,22 @@ test("douban POST 混合完整与 partial entry 时只对 partial 发 GET", asyn
         // 只对 partial（shows:456）发 GET，完整（movies:123）跳过
         assert.deepEqual(store.mgetCommands, [["JSON.MGET", CREDIT_TV_456, "$"]]);
         // movie 整体写，tv merge 后整体写
-        assert.deepEqual(store.msetCommands, [
-            ["JSON.MSET", CREDIT_MOVIE_123, "$", JSON.stringify(completeMovie)],
-            [
-                "JSON.MSET",
-                CREDIT_TV_456,
-                "$",
-                JSON.stringify({
-                    subject: { id: "4707205", targetType: "shows" },
-                    seasons: { ids: ["s1"] },
-                    credits: { 王骁: ["张三"] },
-                }),
-            ],
-        ]);
+        expectStoredCreditEntry(store.msetCommands[0], CREDIT_MOVIE_123, completeMovie);
+        expectStoredCreditEntry(store.msetCommands[1], CREDIT_TV_456, {
+            subject: { id: "4707205", targetType: "shows" },
+            seasons: { ids: ["s1"] },
+            credits: { 王骁: ["张三"] },
+        });
 
         const getRes = await invoke({
             method: "GET",
             query: { movies: "123", shows: "456" },
         });
-        assert.deepEqual(getRes.jsonBody.movies, { 123: completeMovie });
-        assert.deepEqual(getRes.jsonBody.shows, {
-            456: {
-                subject: { id: "4707205", targetType: "shows" },
-                seasons: { ids: ["s1"] },
-                credits: { 王骁: ["张三"] },
-            },
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.movies["123"]), completeMovie);
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.shows["456"]), {
+            subject: { id: "4707205", targetType: "shows" },
+            seasons: { ids: ["s1"] },
+            credits: { 王骁: ["张三"] },
         });
     });
 });
@@ -489,4 +446,18 @@ test("getJsonValue helper 读取已存豆瓣条目", () => {
     seedDouban(store, CREDIT_MOVIE_123, { subject: { id: "35517044", targetType: "movies" } });
     assert.deepEqual(getJsonValue(store, CREDIT_MOVIE_123), { subject: { id: "35517044", targetType: "movies" } });
     assert.equal(getJsonValue(store, "trakt:credit:movies:999"), null);
+});
+
+test("douban GET 过滤数据内 TTL 已过期的条目", async () => {
+    const store = new Map();
+    seedDouban(store, CREDIT_MOVIE_123, {
+        subject: { id: "35517044", targetType: "movies" },
+        expiresAt: Date.now() - 1000,
+    });
+
+    await withBackend(store, async () => {
+        const res = await invoke({ method: "GET", query: { movies: "123" } });
+        assert.equal(res.statusCode, 200);
+        assert.deepEqual(res.jsonBody.movies, {});
+    });
 });

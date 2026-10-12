@@ -1,6 +1,7 @@
 const {
     CACHE_STATUS,
     getKvConfig,
+    normalizeLocale,
     normalizePersonNameEntry,
     parseIds,
     readManyPersonNameEntriesFromKv,
@@ -22,13 +23,18 @@ async function handleGet(req, res, kvConfig) {
         return;
     }
 
-    const { people } = await readManyPersonNameEntriesFromKv(kvConfig, peopleIds);
+    const locale = normalizeLocale(req.query.locale);
+    const { people, cn } = await readManyPersonNameEntriesFromKv(kvConfig, peopleIds, { locale });
 
     // 区分完整/部分命中：部分命中说明客户端即将回写缺失条目，CDN 不能长缓存
     const foundCount = Object.keys(people).length;
     const cacheStatus = foundCount === 0 ? CACHE_STATUS.NOT_FOUND : foundCount >= peopleIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.PARTIAL_FOUND;
     setResponseCacheHeaders(res, cacheStatus);
-    res.status(200).json({ people });
+    const response = { people };
+    if (cn && Object.keys(cn).length > 0) {
+        response.cn = { people: cn };
+    }
+    res.status(200).json(response);
 }
 
 async function handlePost(req, res, kvConfig) {
@@ -49,7 +55,16 @@ async function handlePost(req, res, kvConfig) {
         }
     });
 
-    await writeManyPersonNameEntriesToKv(kvConfig, validEntries);
+    const incomingCn = payload?.cn?.people && typeof payload.cn.people === "object" ? payload.cn.people : {};
+    const validCnEntries = {};
+    Object.entries(incomingCn).forEach(([id, entry]) => {
+        const normalizedId = /^\d+$/.test(String(id).trim()) ? String(id).trim() : "";
+        if (normalizedId && normalizePersonNameEntry(entry)) {
+            validCnEntries[normalizedId] = entry;
+        }
+    });
+
+    await writeManyPersonNameEntriesToKv(kvConfig, validEntries, { locale: normalizeLocale(payload?.locale), cn: validCnEntries });
 
     res.status(200).json({
         counts: {

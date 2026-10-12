@@ -58,6 +58,8 @@ const {
 
 const { listCacheItemsFromKv } = require("../../lib/trakt-cache/admin-list");
 
+const { normalizeLocale } = require("../../lib/trakt-cache/locale");
+
 module.exports = {
     CACHE_STATUS,
     OVERRIDE_FIELDS,
@@ -83,6 +85,7 @@ module.exports = {
     normalizePersonNameEntry,
     normalizeCommentTranslationEntry,
     normalizeListTranslationEntry,
+    normalizeLocale,
     normalizeTranslationOverrideEntry,
     parseEpisodeKeys,
     splitCreditEntriesByCompleteness,

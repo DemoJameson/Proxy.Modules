@@ -2,12 +2,13 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 
+import { createPipelineResponse, jsonValue } from "./helpers/kv-rest-mock.mjs";
+
 const require = createRequire(import.meta.url);
 const commentTranslationsHandler = require("../api/trakt/comment-translations.js");
 
 const COMMENT_TRANSLATION_42 = "trakt:comment-translation:42";
 const COMMENT_TRANSLATION_99 = "trakt:comment-translation:99";
-const COMMENT_TRANSLATION_TTL_SECONDS = 90 * 24 * 60 * 60;
 
 function createCommentTranslationEntry(sourceTextHash = "hash-1", translatedText = "很棒的电影") {
     return {
@@ -37,11 +38,32 @@ function createResponse() {
     };
 }
 
-function jsonValue(value) {
-    return {
-        __redisJson: true,
-        value,
-    };
+// cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
+function collectCnWrite(store, rootFields) {
+    assert.equal(store.msetCommands.length, 1);
+    const command = store.msetCommands[0];
+    assert.equal(command[0], "JSON.MSET");
+    const written = {};
+    for (let index = 1; index < command.length; index += 3) {
+        const key = command[index];
+        const path = command[index + 1];
+        const value = command[index + 2];
+        if (path === "$.cn") {
+            written[key] = JSON.parse(value);
+        } else {
+            assert.ok(rootFields.includes(path.replace(`$.`, ``)), `只应清空旧根字段：${path}`);
+            assert.equal(value, "null", `${path} 应以 JSON null 清空`);
+        }
+    }
+    assert.equal(store.expireCommands, undefined);
+    assert.equal(store.pttlCommands, undefined);
+    return written;
+}
+
+function withoutExpiresAt(entry) {
+    const copy = { ...entry };
+    delete copy.expiresAt;
+    return copy;
 }
 
 function createKvFetch(store) {
@@ -50,37 +72,7 @@ function createKvFetch(store) {
         const path = parsed.pathname;
 
         if (path === "/pipeline") {
-            const commands = JSON.parse(init.body || "[]");
-            store.pipelineRequests = [...(store.pipelineRequests || []), commands];
-            const results = [];
-            for (const command of commands) {
-                const [name, key] = command;
-                if (name === "JSON.MSET") {
-                    store.msetCommands = [...(store.msetCommands || []), command];
-                    for (let index = 1; index < command.length; index += 3) {
-                        store.set(command[index], jsonValue(JSON.parse(command[index + 2])));
-                    }
-                    results.push("OK");
-                } else if (name === "JSON.MGET") {
-                    store.mgetCommands = [...(store.mgetCommands || []), command];
-                    const keys = command.slice(1, -1);
-                    results.push(
-                        keys.map((itemKey) => {
-                            const stored = store.get(itemKey);
-                            return stored && stored.__redisJson === true ? [stored.value] : null;
-                        }),
-                    );
-                } else if (name === "EXPIRE") {
-                    store.expireCommands = [...(store.expireCommands || []), command];
-                    results.push(store.has(key) ? 1 : 0);
-                } else {
-                    results.push(null);
-                }
-            }
-            return {
-                ok: true,
-                json: async () => results.map((result) => ({ result })),
-            };
+            return createPipelineResponse(store, init);
         }
 
         return {
@@ -249,7 +241,7 @@ test("comment-translations 接口在 KV 未配置时返回 500", async () => {
     );
 });
 
-test("comment-translations POST 写入合法条目并设置 90 天 EXPIRE，再 GET 命中", async () => {
+test("comment-translations POST 写入合法条目并在数据里记录 90 天过期时间，再 GET 命中", async () => {
     const store = new Map();
     const entry42 = createCommentTranslationEntry("hash-1", "很棒的电影");
     const entry99 = createCommentTranslationEntry("hash-2", "期待下一季");
@@ -272,24 +264,20 @@ test("comment-translations POST 写入合法条目并设置 90 天 EXPIRE，再 
             },
         });
 
-        // 单条 pipeline 内一条 JSON.MSET 携带多个 key 三元组，每条 key 一个 90 天 EXPIRE
         assert.equal(store.pipelineRequests.length, 1);
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", COMMENT_TRANSLATION_42, "$", JSON.stringify(entry42), COMMENT_TRANSLATION_99, "$", JSON.stringify(entry99)]]);
-        assert.deepEqual(store.expireCommands, [
-            ["EXPIRE", COMMENT_TRANSLATION_42, COMMENT_TRANSLATION_TTL_SECONDS],
-            ["EXPIRE", COMMENT_TRANSLATION_99, COMMENT_TRANSLATION_TTL_SECONDS],
-        ]);
+        const written = collectCnWrite(store, ["comment"]);
+        Object.entries(written).forEach(([, entry]) => {
+            assert.ok(Number.isFinite(entry.expiresAt), "90 天过期时间应写入数据");
+        });
+        assert.deepEqual(written[COMMENT_TRANSLATION_42].comment, entry42.comment);
+        assert.deepEqual(written[COMMENT_TRANSLATION_99].comment, entry99.comment);
 
         const getRes = await invoke({
             method: "GET",
             query: { comments: "42,99" },
         });
-        assert.deepEqual(getRes.jsonBody, {
-            comments: {
-                42: entry42,
-                99: entry99,
-            },
-        });
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.comments["42"]), entry42);
+        assert.deepEqual(withoutExpiresAt(getRes.jsonBody.comments["99"]), entry99);
     });
 });
 
@@ -315,8 +303,8 @@ test("comment-translations POST 跳过缺字段与非法 ID 的条目", async ()
                 comments: 1,
             },
         });
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", COMMENT_TRANSLATION_42, "$", JSON.stringify(createCommentTranslationEntry("hash-1", "很棒的电影"))]]);
-        assert.deepEqual(store.expireCommands, [["EXPIRE", COMMENT_TRANSLATION_42, COMMENT_TRANSLATION_TTL_SECONDS]]);
+        const written = collectCnWrite(store, ["comment"]);
+        assert.deepEqual(written[COMMENT_TRANSLATION_42].comment, createCommentTranslationEntry("hash-1", "很棒的电影").comment);
     });
 });
 
