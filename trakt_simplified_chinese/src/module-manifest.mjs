@@ -8,7 +8,7 @@ const DEFAULT_BACKEND_BASE_URL = "https://proxy-modules.demojameson.de5.net";
 const metadata = {
     name: "Trakt 增强",
     description:
-        "Trakt App 各页面从英文改为简体中文或港台繁体；历史页面剧集类别的已观看记录按电视剧合并；Trakt 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
+        "Trakt App 各页面从英文改为简体中文或港台繁体，包括海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
     icon: `${RAW_BASE_URL}/${TRAKT_MODULE_PATH}/images/trakt.webp`,
     homepage: REPOSITORY_URL,
     openUrl: "https://apps.apple.com/app/id1514873602",

@@ -39,7 +39,7 @@
 
 `trakt_simplified_chinese/*.js`、`*.plugin`、`*.sgmodule`、`*.snippet` 以及根目录 `boxjs.json` 是发布/订阅相关产物或配置。修改 Trakt 源码、模块参数、资源链接或 Env 适配时，运行 `npm run build:trakt` 并检查这些文件是否随之变化。
 
-`trakt_simplified_chinese/trakt_simplified_chinese.js` 开头带 5 行中文元信息（名称/描述/主页/作者/生成时间，固定按 +08:00 精确到分钟），因此每次构建都会改动该产物的头部，属于预期行为；`.plugin`、`.sgmodule`、`.snippet` 与 `boxjs.json` 不含时间戳，保持逐字节可比对。同一次构建时间还会作为脚本版本号（`YYMMDDHHmm`）注入产物，用于自建后端请求的 UA 标识（`TraktSimplifiedChinese/<版本号>`）。
+`trakt_simplified_chinese/trakt_simplified_chinese.js` 开头带 5 行中文元信息（名称/描述/主页/作者/生成时间，固定按 +08:00 精确到分钟），因此每次构建都会改动该产物的头部，属于预期行为；`.plugin`、`.sgmodule`、`.snippet` 的元信息里带同一次构建的 `#!updatedTime`（+08:00 精确到秒），每次构建同样会更新，`boxjs.json` 不含时间戳。同一次构建时间还会作为脚本版本号（`YYMMDDHHmm`）注入产物，用于自建后端请求的 UA 标识（`TraktSimplifiedChinese/<版本号>`）。
 
 发布链接在 `README.md` 中指向 GitHub raw 的 `main` 分支；调整目录名、产物名或新增模块时，同步更新 README 链接和对应平台配置。
 
