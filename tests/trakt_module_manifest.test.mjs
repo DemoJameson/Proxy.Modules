@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { formatBuildVersion, renderGeneratedTargets, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
+import { formatBuildDateTimeText, formatBuildVersion, renderGeneratedTargets, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
 import { argumentFields, BOXJS_CONFIG_KEY, metadata, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { createRequestPhaseRoutes } from "../trakt_simplified_chinese/src/request.mjs";
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
@@ -17,12 +17,51 @@ function normalizeLineEndings(value) {
     return String(value).replace(/\r\n/g, "\n");
 }
 
+// updatedTime 每次构建都会变化，比对产物一致性时先把这一行归一化
+function normalizeBuildUpdatedTime(value) {
+    return normalizeLineEndings(value).replace(/^#!updatedTime=.*$/gm, "#!updatedTime=<build-time>");
+}
+
 test("module manifest renders tracked Trakt subscription and BoxJs files", async () => {
     const generatedTargets = renderGeneratedTargets();
 
     for (const target of generatedTargets) {
         const actual = await readFile(path.join(rootDir, target.outputFile), "utf8");
-        assert.equal(normalizeLineEndings(actual), normalizeLineEndings(target.content), `${target.outputFile} should be generated from module-manifest.mjs`);
+        assert.equal(normalizeBuildUpdatedTime(actual), normalizeBuildUpdatedTime(target.content), `${target.outputFile} should be generated from module-manifest.mjs`);
+    }
+});
+
+test("Trakt 的 .plugin/.sgmodule/.snippet 在 metadata 末尾带构建时间 updatedTime", () => {
+    const buildTime = new Date("2026-10-12T14:33:00Z"); // +08:00 => 2026-10-12 22:33:00
+    const configTargets = renderGeneratedTargets(buildTime).filter((target) => /\.(plugin|sgmodule|snippet)$/.test(target.outputFile));
+    assert.equal(configTargets.length, 3, "应生成 .plugin、.sgmodule、.snippet 三个配置文件");
+    assert.equal(formatBuildDateTimeText(buildTime), "2026-10-12 22:33:00");
+
+    for (const target of configTargets) {
+        const lines = normalizeLineEndings(target.content).split("\n");
+        const authorIndex = lines.findIndex((line) => line.startsWith("#!author="));
+        assert.ok(authorIndex >= 0, `${target.outputFile} 应包含 #!author 元信息`);
+        assert.equal(lines[authorIndex + 1], "#!updatedTime=2026-10-12 22:33:00", `${target.outputFile} 的 updatedTime 应紧跟 #!author 下方且取自构建时间`);
+    }
+});
+
+test("配置文件 updatedTime 与脚本头部生成时间取自同一次构建", async () => {
+    const script = normalizeLineEndings(await readFile(path.join(rootDir, "trakt_simplified_chinese", "trakt_simplified_chinese.js"), "utf8"));
+    const buildTimeLine = script.split("\n").find((line) => line.startsWith("// 生成时间："));
+    assert.ok(buildTimeLine, "脚本产物应包含头部生成时间");
+    const bannerTime = buildTimeLine.slice("// 生成时间：".length);
+
+    for (const outputFile of [
+        "trakt_simplified_chinese/trakt_simplified_chinese.plugin",
+        "trakt_simplified_chinese/trakt_simplified_chinese.sgmodule",
+        "trakt_simplified_chinese/trakt_simplified_chinese.snippet",
+    ]) {
+        const content = normalizeLineEndings(await readFile(path.join(rootDir, outputFile), "utf8"));
+        const updatedTimeLine = content.split("\n").find((line) => line.startsWith("#!updatedTime="));
+        assert.ok(updatedTimeLine, `${outputFile} 应包含 #!updatedTime`);
+        const updatedTime = updatedTimeLine.slice("#!updatedTime=".length);
+        assert.match(updatedTime, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/, `${outputFile} 的 updatedTime 格式应为 YYYY-MM-DD HH:mm:ss`);
+        assert.equal(updatedTime.slice(0, 16), bannerTime, `${outputFile} 的 updatedTime 应与头部生成时间同源`);
     }
 });
 

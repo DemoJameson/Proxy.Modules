@@ -29,6 +29,25 @@ function formatBuildTimeText(date) {
     );
 }
 
+// 配置文件里的 updatedTime：与头部「生成时间」取自同一次构建，精确到秒
+function formatBuildDateTimeText(date) {
+    const shifted = new Date(date.getTime() + BUILD_TIME_OFFSET_MS);
+    const pad = (value) => String(value).padStart(2, "0");
+    return [
+        shifted.getUTCFullYear(),
+        "-",
+        pad(shifted.getUTCMonth() + 1),
+        "-",
+        pad(shifted.getUTCDate()),
+        " ",
+        pad(shifted.getUTCHours()),
+        ":",
+        pad(shifted.getUTCMinutes()),
+        ":",
+        pad(shifted.getUTCSeconds()),
+    ].join("");
+}
+
 // 产物 UA 使用的版本号：YYMMDDHHmm，与头部「生成时间」取自同一次构建
 function formatBuildVersion(date) {
     return formatBuildTimeText(date).replace(/[-: ]/g, "").slice(2);
@@ -269,7 +288,7 @@ function assertManifestIsValid(manifest) {
     });
 }
 
-function renderPlugin() {
+function renderPlugin(buildTime = new Date()) {
     const lines = [
         `#!name=${metadata.name}`,
         `#!desc=${metadata.description}`,
@@ -277,6 +296,7 @@ function renderPlugin() {
         `#!homepage=${metadata.homepage}`,
         `#!openUrl=${metadata.openUrl}`,
         `#!author=${metadata.author}`,
+        `#!updatedTime=${formatBuildDateTimeText(buildTime)}`,
         "",
         "[Argument]",
     ];
@@ -308,7 +328,7 @@ function renderPlugin() {
     return `${lines.join("\n")}\n`;
 }
 
-function renderSgmodule() {
+function renderSgmodule(buildTime = new Date()) {
     // 参数之间只用逗号分隔，与 Surge 官方示例一致，避免参数名带上前导空格
     const argumentPairs = argumentFields.map((field) => `${field.key}:${formatSgmoduleDefaultArgumentValue(field)}`).join(",");
     const argumentDescriptions = argumentFields.map((field) => `${field.key}: ${field.desc}`).join("\\n");
@@ -318,6 +338,7 @@ function renderSgmodule() {
         `#!icon=${metadata.icon}`,
         `#!homepage=${metadata.homepage}`,
         `#!author=${metadata.author}`,
+        `#!updatedTime=${formatBuildDateTimeText(buildTime)}`,
         `#!arguments=${argumentPairs}`,
         `#!arguments-desc=${argumentDescriptions}`,
         "",
@@ -350,13 +371,14 @@ function renderSgmodule() {
     return `${lines.join("\n")}\n`;
 }
 
-function renderSnippet() {
+function renderSnippet(buildTime = new Date()) {
     const lines = [
         `#!name=${metadata.name}`,
         `#!desc=${metadata.description}`,
         `#!icon=${metadata.icon}`,
         `#!homepage=${metadata.homepage}`,
         `#!author=${metadata.author}`,
+        `#!updatedTime=${formatBuildDateTimeText(buildTime)}`,
         "",
         "# [rewrite_remote]",
     ];
@@ -413,20 +435,20 @@ function renderBoxjs() {
     return `${JSON.stringify(payload, null, 4)}\n`;
 }
 
-function renderGeneratedTargets() {
+function renderGeneratedTargets(buildTime = new Date()) {
     const boxjsKeys = argumentFields.map((field) => field.key);
     assertManifestIsValid({ argumentFields, boxjsKeys, mitmHosts, scriptRules });
 
     return [
-        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.plugin", content: renderPlugin() },
-        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.sgmodule", content: renderSgmodule() },
-        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.snippet", content: renderSnippet() },
+        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.plugin", content: renderPlugin(buildTime) },
+        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.sgmodule", content: renderSgmodule(buildTime) },
+        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.snippet", content: renderSnippet(buildTime) },
         { outputFile: "boxjs.json", content: renderBoxjs() },
     ];
 }
 
-async function writeGeneratedTargets() {
-    for (const target of renderGeneratedTargets()) {
+async function writeGeneratedTargets(buildTime = new Date()) {
+    for (const target of renderGeneratedTargets(buildTime)) {
         await writeTarget(target.outputFile, target.content);
     }
 }
@@ -441,7 +463,7 @@ async function buildTrakt() {
     });
     await writeTarget(buildTarget.outputFile, renderScriptBanner(buildTime) + scriptSource);
 
-    await writeGeneratedTargets();
+    await writeGeneratedTargets(buildTime);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -451,4 +473,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
 }
 
-export { buildTrakt, formatBuildVersion, renderBoxjs, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSgmodule, renderSnippet };
+export { buildTrakt, formatBuildDateTimeText, formatBuildVersion, renderBoxjs, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSgmodule, renderSnippet };
