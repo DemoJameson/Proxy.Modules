@@ -23,6 +23,8 @@
   放 Sofa Time、TMDb provider、request/response route matrix、以及不适合归到其他主题的 route smoke tests。
 - `trakt_script_user_agent.test.mjs`
   放脚本出站请求的 UA 标识测试：仅自建后端追加 `TraktSimplifiedChinese/<版本号>`，Trakt API 与 TMDb 保持原样。
+- `trakt_live_runner.test.mjs`
+  测 live runner 的 OAuth 刷新：用 refresh token 换新 access token、缺省 refresh token 时保留旧值、永久失败回退设备授权、429/5xx/网络错误只跳过本次登录态用例。
 - `trakt_backend_*.test.mjs`
   直接测 Vercel 后端 `api/trakt/` 接口的行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）、`trakt_backend_api_keys.test.mjs`（API key 下发接口的环境变量与 UA 门槛）。
 
@@ -74,7 +76,7 @@ node --test tests/xxx.test.mjs
 npm run test:trakt:live
 ```
 
-首次运行如果缺少 `TRAKT_API_KEY` 或 `TRAKT_BACKEND_BASE_URL`，脚本会提示输入并保存到仓库根目录的 `.trakt-live-test.local.json`，下次自动复用。
+首次运行如果缺少 `TRAKT_API_KEY` 或 `TRAKT_BACKEND_BASE_URL`，脚本会提示输入并保存到仓库根目录的 `.trakt-live-test.local.json`，下次自动复用。设备授权成功后 `access token` 与 `refresh token` 都会保存；access token 失效时会先用 refresh token 刷新，只有 refresh token 确实失效才重新走设备授权。
 
 如果缺少 `TRAKT_OAUTH_TOKEN`，脚本会优先引导你走 Trakt Device Flow 登录：
 
