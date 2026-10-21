@@ -227,6 +227,10 @@ function buildArgumentList(argumentKeys, formatter) {
     return argumentKeys.map(formatter).join(",");
 }
 
+function buildPluginArgumentObject(argumentKeys) {
+    return `{${buildArgumentList(argumentKeys, (key) => `\${${key}}`).replaceAll(",", ", ")}}`;
+}
+
 function buildScriptUrl(scriptFile) {
     return `${scriptBaseUrl}/${scriptFile}`;
 }
@@ -311,16 +315,13 @@ function renderPlugin(buildTime = new Date()) {
         .filter((rule) => getRuleTargets(rule).includes("plugin"))
         .forEach((rule) => {
             lines.push(`# ${rule.comment}`);
-            const parts = [`${rule.phase} ${rule.pattern} script-path=${buildScriptUrl(rule.scriptFile)}`];
+            const action = rule.phase === "http-request" ? "request" : "response";
+            const argument = rule.argumentKeys?.length ? `, ${buildPluginArgumentObject(rule.argumentKeys)}` : "";
+            const options = [`tag="${rule.title}"`, `timeout=${rule.timeout}`];
             if (rule.requiresBody) {
-                parts.push("requires-body=true");
+                options.push("requires_body=true");
             }
-            parts.push(`timeout=${rule.timeout}`);
-            if (rule.argumentKeys?.length) {
-                parts.push(`argument=[${buildArgumentList(rule.argumentKeys, (key) => `{${key}}`)}]`);
-            }
-            parts.push(`tag=${rule.title}`);
-            lines.push(parts.join(", "));
+            lines.push(`${action} if \${url} ~= /${rule.pattern}/i then script("${buildScriptUrl(rule.scriptFile)}"${argument}) with ${options.join(", ")}`);
         });
 
     lines.push("", "[MITM]", `hostname = ${mitmHosts.join(", ")}`);
