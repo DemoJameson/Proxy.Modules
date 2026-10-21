@@ -40,6 +40,8 @@ function createResponse() {
 
 // cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
 function collectCnWrite(store, rootFields) {
+    assert.equal(store.evalCommands.length, 1);
+    assert.equal(store.mgetCommands.length, 1);
     assert.equal(store.msetCommands.length, 1);
     const command = store.msetCommands[0];
     assert.equal(command[0], "JSON.MSET");
@@ -48,13 +50,20 @@ function collectCnWrite(store, rootFields) {
         const key = command[index];
         const path = command[index + 1];
         const value = command[index + 2];
-        if (path === "$.cn") {
+        if (path === "$") {
+            const doc = JSON.parse(value);
+            written[key] = doc.cn;
+            rootFields.forEach((field) => {
+                assert.equal(Object.hasOwn(doc, field), false, `新 key 根文档不应包含旧根字段：${field}`);
+            });
+        } else if (path === "$.cn") {
             written[key] = JSON.parse(value);
         } else {
             assert.ok(rootFields.includes(path.replace(`$.`, ``)), `只应清空旧根字段：${path}`);
             assert.equal(value, "null", `${path} 应以 JSON null 清空`);
         }
     }
+    assert.equal(store.setCommands, undefined);
     assert.equal(store.expireCommands, undefined);
     assert.equal(store.pttlCommands, undefined);
     return written;
