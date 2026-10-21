@@ -266,6 +266,9 @@ test("backend translations GET returns auto entries while translation-overrides 
             method: "GET",
         });
         assert.equal(overrideRes.statusCode, 200);
+        assert.equal(overrideRes.headers["Cache-Control"], "public, max-age=60");
+        assert.equal(overrideRes.headers["CDN-Cache-Control"], "public, s-maxage=300");
+        assert.equal(overrideRes.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=300");
         assert.deepEqual(overrideRes.jsonBody.movies["123"], {
             cn: {
                 translation: {
@@ -450,6 +453,11 @@ test("backend images POST 写入 FOUND/NOT_FOUND 并在数据里记录 3 天过�
             movies: 2,
             seasons: 1,
         });
+        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
+        assert.equal(store.setCommands, undefined);
         assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.poster.url, "https://image.tmdb.org/t/p/original/movie.jpg");
         assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.logo.status, 3);
         assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.logo.expiresAt));
@@ -694,7 +702,10 @@ test("backend POST keeps writing auto cache while override stays separate", asyn
         });
         assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "新自动标题");
         assert.equal(store.pipelineRequests.length, 1);
-        // 真实 KV 要求 JSON 值序列化成字符串、清空根字段用字符串 "null"，新 key 先 NX 建空文档
+        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
+        // 真实 KV 要求 JSON 值序列化成字符串、清空根字段用字符串 "null"
         assert.deepEqual(store.msetCommands, [
             [
                 "JSON.MSET",
@@ -723,7 +734,7 @@ test("backend POST keeps writing auto cache while override stays separate", asyn
                 "null",
             ],
         ]);
-        assert.deepEqual(store.setCommands, [["JSON.SET", AUTO_MOVIE_123, "$", "{}", "NX"]]);
+        assert.equal(store.setCommands, undefined);
         assert.equal(store.persistCommands, undefined);
 
         const getRes = await invoke(translationsHandler, {
@@ -793,21 +804,24 @@ test("backend POST writes grouped auto entries with JSON.MSET and stores expires
             episodes: 1,
         });
         assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
         assert.deepEqual(
             store.msetCommands.map((command) => command[0]),
-            ["JSON.MSET", "JSON.MSET", "JSON.MSET"],
+            ["JSON.MSET"],
         );
         assert.equal(store.persistCommands, undefined);
         // 不再发送 EXPIRE：过期时间只写在数据字段里
         assert.equal(store.expireCommands, undefined);
         assert.equal(store.pttlCommands, undefined);
-        // 每个新 key 先 NX 建空文档（真实 RedisJSON 不允许对不存在的 key 写非根路径）
-        assert.deepEqual(store.setCommands, [
-            ["JSON.SET", "trakt:translation:shows:101", "$", "{}", "NX"],
-            ["JSON.SET", "trakt:translation:movies:201", "$", "{}", "NX"],
-            ["JSON.SET", "trakt:translation:movies:202", "$", "{}", "NX"],
-            ["JSON.SET", "trakt:translation:episodes:301:1:1", "$", "{}", "NX"],
-        ]);
+        // 新 key 直接写 $ 根文档，不再逐 key 发送 JSON.SET NX
+        assert.equal(store.setCommands, undefined);
+        const rootPaths = [];
+        for (let index = 1; index < store.msetCommands[0].length; index += 3) {
+            rootPaths.push(store.msetCommands[0][index + 1]);
+        }
+        assert.deepEqual(rootPaths, ["$", "$", "$", "$"]);
         assert.equal(getJsonValue(store, "trakt:translation:shows:101").cn.expiresAt, null);
         assert.equal(getJsonValue(store, "trakt:translation:movies:202").cn.translation.title, "完整电影标题");
         assert.equal(getJsonValue(store, "trakt:translation:movies:202").cn.expiresAt, null);
@@ -817,7 +831,59 @@ test("backend POST writes grouped auto entries with JSON.MSET and stores expires
     });
 });
 
-test("backend POST pipeline 只发送字符串/数字参数且新 key 先 NX 建空文档", async () => {
+test("backend POST batches existing and new keys into one JSON.MSET", async () => {
+    const store = new Map();
+    seedAuto(store, AUTO_MOVIE_123, {
+        title: "旧标题",
+        overview: null,
+        tagline: null,
+    });
+
+    await withBackend(store, async () => {
+        const res = await invoke(translationsHandler, {
+            method: "POST",
+            body: {
+                movies: {
+                    123: {
+                        status: 1,
+                        translation: {
+                            title: "更新标题",
+                            overview: null,
+                            tagline: null,
+                        },
+                    },
+                    456: {
+                        status: 1,
+                        translation: {
+                            title: "新增标题",
+                            overview: null,
+                            tagline: null,
+                        },
+                    },
+                },
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
+        assert.equal(store.setCommands, undefined);
+
+        const writes = [];
+        const command = store.msetCommands[0];
+        for (let index = 1; index < command.length; index += 3) {
+            writes.push({ key: command[index], path: command[index + 1] });
+        }
+        assert.ok(writes.some((write) => write.key === AUTO_MOVIE_123 && write.path === "$.cn"));
+        assert.ok(writes.some((write) => write.key === AUTO_MOVIE_456 && write.path === "$"));
+        assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "更新标题");
+        assert.equal(getJsonValue(store, AUTO_MOVIE_456).cn.translation.title, "新增标题");
+    });
+});
+
+test("backend POST EVAL 只发送字符串/数字参数且新 key 写根文档", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -842,8 +908,14 @@ test("backend POST pipeline 只发送字符串/数字参数且新 key 先 NX 建
                 assert.ok(typeof arg === "string" || typeof arg === "number", `命令参数必须是字符串或数字：${JSON.stringify(arg)}`);
             });
         });
-        // 真实 RedisJSON 不允许对不存在的 key 写非根路径，必须先 NX 建空文档
-        assert.deepEqual(store.setCommands, [["JSON.SET", AUTO_MOVIE_123, "$", "{}", "NX"]]);
+        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.setCommands, undefined);
+        assert.equal(store.msetCommands.length, 1);
+        assert.equal(store.msetCommands[0][1], AUTO_MOVIE_123);
+        assert.equal(store.msetCommands[0][2], "$");
+        assert.equal(JSON.parse(store.msetCommands[0][3]).cn.translation.title, "参数形态标题");
         assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "参数形态标题");
     });
 });

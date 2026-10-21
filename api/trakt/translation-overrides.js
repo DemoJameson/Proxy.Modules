@@ -14,7 +14,10 @@ module.exports = async (req, res) => {
             return;
         }
 
-        res.setHeader("Cache-Control", "public, max-age=8");
+        // 修订表是全局单 URL，CDN 缓存 5 分钟以降低 Redis 命令数；管理端修改最多延迟 5 分钟生效。
+        res.setHeader("Cache-Control", "public, max-age=60");
+        res.setHeader("CDN-Cache-Control", "public, s-maxage=300");
+        res.setHeader("Vercel-CDN-Cache-Control", "public, s-maxage=300");
         res.status(200).json(await readAllTranslationOverridesFromKv(kvConfig));
     } catch (error) {
         res.status(500).json({

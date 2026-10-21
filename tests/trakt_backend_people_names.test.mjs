@@ -41,6 +41,8 @@ function createResponse() {
 
 // cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
 function expectCnPersonNameWrite(store, expectedById) {
+    assert.equal(store.evalCommands.length, 1);
+    assert.equal(store.mgetCommands.length, 1);
     assert.equal(store.msetCommands.length, 1);
     const command = store.msetCommands[0];
     assert.equal(command[0], "JSON.MSET");
@@ -49,7 +51,12 @@ function expectCnPersonNameWrite(store, expectedById) {
         const key = command[index];
         const path = command[index + 1];
         const value = command[index + 2];
-        if (path === "$.cn") {
+        if (path === "$") {
+            const doc = JSON.parse(value);
+            written[key] = doc.cn;
+            assert.equal(Object.hasOwn(doc, "name"), false, "新 key 根文档不应包含旧 name 根字段");
+            assert.equal(Object.hasOwn(doc, "notFound"), false, "新 key 根文档不应包含旧 notFound 根字段");
+        } else if (path === "$.cn") {
             written[key] = JSON.parse(value);
         } else {
             assert.equal(value, "null", `${path} 应以 JSON null 清空`);
@@ -67,6 +74,7 @@ function expectCnPersonNameWrite(store, expectedById) {
             assert.ok(Number.isFinite(entry.notFound.expiresAt), "负缓存应写入 expiresAt");
         }
     });
+    assert.equal(store.setCommands, undefined);
     assert.equal(store.expireCommands, undefined);
     assert.equal(store.pttlCommands, undefined);
     return written;
@@ -231,9 +239,9 @@ test("people-names GET 返回 google 来源条目并丢弃缺字段的存储条�
                 42: googleEntry,
             },
         });
-        // 请求 2 条仅命中 1 条：部分命中仅允许 60 秒短缓存
+        // 请求 2 条仅命中 1 条：CDN 保留 5 分钟以降低 Redis 读取
         assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=300");
     });
 });
 
@@ -256,8 +264,8 @@ test("people-names GET 部分命中时使用 PARTIAL_FOUND 短缓存头", async 
             },
         });
         assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=60");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60");
+        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=300");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=300");
     });
 });
 
@@ -336,7 +344,7 @@ test("people-names POST 写入合法 tmdb 条目并在数据里记录 90 天过�
             },
         });
 
-        // 单条 pipeline 内一条 JSON.MSET 携带多个 key 三元组，过期时间写在数据字段里
+        // 写入阶段一条 JSON.MSET 携带多个 key 三元组，过期时间写在数据字段里
         assert.equal(store.pipelineRequests.length, 1);
         expectCnPersonNameWrite(store, { [PERSON_NAME_42]: entry42, [PERSON_NAME_99]: entry99 });
 
