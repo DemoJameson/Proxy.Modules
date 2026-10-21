@@ -35,5 +35,12 @@
             "maxDuration": 10
         }
     },
+    "git": {
+        "deploymentEnabled": {
+            "*": false,
+            "**": false,
+            "main": true
+        }
+    },
     "ignoreCommand": "node scripts/vercel-ignore-build.mjs"
 }

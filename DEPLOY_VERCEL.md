@@ -185,6 +185,8 @@ POST 请求体为 `{ "comments": { "9001": { "comment": { "sourceTextHash": "...
 6. 如需使用管理页面，继续配置 `ADMIN_TOKEN`；如需标题搜索，继续配置 `TRAKT_API_KEY`；如需中文海报等 TMDb 能力，继续配置 `TMDB_API_KEY`。
 7. 部署完成后，记录你的域名，例如 `https://your-project.vercel.app`。
 
+仓库的 `vercel.json` 只允许 `main` 分支触发自动部署；PR 和其它分支不会自动创建 Vercel 预览部署。如需临时预览，可在本地执行 `vercel deploy` 手动部署。
+
 常用环境变量：
 
 | 变量                                                  |         必需 | 说明                                                                 |
