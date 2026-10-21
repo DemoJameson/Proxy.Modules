@@ -49,7 +49,7 @@ async function runScriptOutboundCase() {
     });
 }
 
-// 海报替换链路会同时打到自建后端、Trakt API 与 TMDb，用来验证脚本 UA 只出现在自建后端
+// 海报替换链路会打到自建后端与 TMDb（详情页不再直查翻译，Trakt API 由 runScriptOutboundCase 覆盖）
 async function runPosterReplacementCase() {
     return runResponseCase({
         url: "https://api.trakt.tv/movies/123",
@@ -66,7 +66,7 @@ async function runPosterReplacementCase() {
                 logo: ["https://walter.trakt.tv/images/movies/000/000/123/logos/original.png"],
             },
         }),
-        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL, posterImageMode: "chinese" },
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL, posterImageMode: "cn" },
         persistentData: createUnifiedPersistentData(),
     });
 }
@@ -98,7 +98,10 @@ test("产物请求自建后端时携带脚本 UA，版本号与产物头部生�
 });
 
 test("只有自建后端请求带脚本 UA，Trakt API 与 TMDb 请求不受影响", async () => {
-    const { httpLogs } = await runPosterReplacementCase();
+    // 海报链路覆盖 TMDb + 自建后端；列表直查链路覆盖 Trakt API + 自建后端
+    const posterRun = await runPosterReplacementCase();
+    const listRun = await runScriptOutboundCase();
+    const httpLogs = [...posterRun.httpLogs, ...listRun.httpLogs];
     const backendRequests = httpLogs.filter((log) => BACKEND_REQUEST_PATTERN.test(log.url));
     const externalRequests = httpLogs.filter((log) => !BACKEND_REQUEST_PATTERN.test(log.url));
 

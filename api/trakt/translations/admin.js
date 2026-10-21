@@ -4,6 +4,7 @@ const {
     isSupportedMediaType,
     listCacheItemsFromKv,
     readCachePairFromKv,
+    normalizeLocale,
     readJsonBody,
     sendKvNotConfigured,
     writeTranslationOverrideEntryToKv,
@@ -37,6 +38,10 @@ function getType(req) {
     return String(getSingleValue(req.query.type) || "movies");
 }
 
+function getLocale(req) {
+    return normalizeLocale(getSingleValue(req.query.locale));
+}
+
 function getOverrideFilter(req) {
     return String(getSingleValue(req.query.override) || "all");
 }
@@ -65,6 +70,7 @@ async function handleList(req, res, kvConfig) {
         cursor: getSingleValue(req.query.cursor),
         limit: getSingleValue(req.query.limit),
         q: String(getSingleValue(req.query.q) || ""),
+        locale: getLocale(req),
         override: getOverrideFilter(req),
         status: String(getSingleValue(req.query.status) || "all"),
     });
@@ -91,7 +97,7 @@ async function handleItem(req, res, kvConfig) {
         type,
         id,
         ...(await readCachePairFromKv(kvConfig, type, id, {
-            hydrateMissingExpiresAt: true,
+            locale: getLocale(req),
         })),
     });
 }
@@ -109,24 +115,28 @@ async function handlePut(req, res, kvConfig) {
         return;
     }
 
+    const locale = normalizeLocale(body.locale || getSingleValue(req.query.locale));
     if (!hasAnyOverrideField(body.translation)) {
-        await deleteCacheEntriesFromKv(kvConfig, type, id, "override");
+        await deleteCacheEntriesFromKv(kvConfig, type, id, "override", { locale });
         res.status(200).json({
             type,
             id,
-            ...(await readCachePairFromKv(kvConfig, type, id, {
-                hydrateMissingExpiresAt: true,
-            })),
+            ...(await readCachePairFromKv(kvConfig, type, id, { locale })),
         });
         return;
     }
 
-    const override = await writeTranslationOverrideEntryToKv(kvConfig, type, id, {
-        translation: body.translation,
-    });
-    const pair = await readCachePairFromKv(kvConfig, type, id, {
-        hydrateMissingExpiresAt: true,
-    });
+    const override = await writeTranslationOverrideEntryToKv(
+        kvConfig,
+        type,
+        id,
+        {
+            // 按目标地区写入：cn → {cn:{translation}}，tw/hk → {tw|hk:{translation}}
+            [locale]: { translation: body.translation },
+        },
+        { locale },
+    );
+    const pair = await readCachePairFromKv(kvConfig, type, id, { locale });
 
     res.status(200).json({
         type,
@@ -153,15 +163,14 @@ async function handleDelete(req, res, kvConfig) {
         return;
     }
 
-    const deleted = await deleteCacheEntriesFromKv(kvConfig, type, id, target);
+    const locale = getLocale(req);
+    const deleted = await deleteCacheEntriesFromKv(kvConfig, type, id, target, { locale });
     res.status(200).json({
         type,
         id,
         target,
         deleted,
-        ...(await readCachePairFromKv(kvConfig, type, id, {
-            hydrateMissingExpiresAt: true,
-        })),
+        ...(await readCachePairFromKv(kvConfig, type, id, { locale })),
     });
 }
 

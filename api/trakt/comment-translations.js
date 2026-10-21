@@ -2,6 +2,7 @@ const {
     CACHE_STATUS,
     getKvConfig,
     normalizeCommentTranslationEntry,
+    normalizeLocale,
     parseIds,
     readManyCommentTranslationEntriesFromKv,
     readJsonBody,
@@ -22,10 +23,15 @@ async function handleGet(req, res, kvConfig) {
         return;
     }
 
-    const { comments } = await readManyCommentTranslationEntriesFromKv(kvConfig, commentIds);
+    const locale = normalizeLocale(req.query.locale);
+    const { comments, cn } = await readManyCommentTranslationEntriesFromKv(kvConfig, commentIds, { locale });
 
     setResponseCacheHeaders(res, Object.keys(comments).length > 0 ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND);
-    res.status(200).json({ comments });
+    const response = { comments };
+    if (cn && Object.keys(cn).length > 0) {
+        response.cn = { comments: cn };
+    }
+    res.status(200).json(response);
 }
 
 async function handlePost(req, res, kvConfig) {
@@ -46,7 +52,16 @@ async function handlePost(req, res, kvConfig) {
         }
     });
 
-    await writeManyCommentTranslationEntriesToKv(kvConfig, validEntries);
+    const incomingCn = payload?.cn?.comments && typeof payload.cn.comments === "object" ? payload.cn.comments : {};
+    const validCnEntries = {};
+    Object.entries(incomingCn).forEach(([id, entry]) => {
+        const normalizedId = /^\d+$/.test(String(id).trim()) ? String(id).trim() : "";
+        if (normalizedId && normalizeCommentTranslationEntry(entry)) {
+            validCnEntries[normalizedId] = entry;
+        }
+    });
+
+    await writeManyCommentTranslationEntriesToKv(kvConfig, validEntries, { locale: normalizeLocale(payload?.locale), cn: validCnEntries });
 
     res.status(200).json({
         counts: {

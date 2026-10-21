@@ -2,7 +2,13 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { DOUBAN_CACHE_TTL_MS, UNIFIED_CACHE_KEY, UNIFIED_CACHE_MAX_BYTES, UNIFIED_CACHE_SCHEMA_VERSION } from "../../trakt_simplified_chinese/src/utils/cache.mjs";
+import {
+    DOUBAN_CACHE_TTL_MS,
+    TAMPER_AUTHORIZATION_KEY,
+    UNIFIED_CACHE_KEY,
+    UNIFIED_CACHE_MAX_BYTES,
+    UNIFIED_CACHE_SCHEMA_VERSION,
+} from "../../trakt_simplified_chinese/src/utils/cache.mjs";
 
 import { runScript } from "./run-script.mjs";
 
@@ -38,9 +44,10 @@ function createMediaTranslationEntry(overrides = {}) {
     };
 }
 
+// 本地缓存键统一为 `<base>:<locale>`：测试默认造简体（cn）数据
 function createMediaTranslationCache(entries = {}) {
     return JSON.stringify({
-        "movie:123": createMediaTranslationEntry(),
+        "movie:123:cn": createMediaTranslationEntry(),
         ...entries,
     });
 }
@@ -81,18 +88,46 @@ function createUnifiedCache(overrides = {}) {
                 episodes: {},
             },
             authTokens: overrides.authTokens ?? {},
+            tmdbApiKey: overrides.tmdbApiKey ?? null,
         },
     });
 }
 
+// 篡改应用授权存在独立持久化 key：unified cache 版本升级清空缓存时不受影响
 function createUnifiedPersistentData(overrides = {}) {
-    return {
+    const data = {
         [UNIFIED_CACHE_KEY]: createUnifiedCache(overrides),
     };
+    if (Object.hasOwn(overrides, "tamperAppAuthorization")) {
+        const store = overrides.tamperAppAuthorization ?? {};
+        data[TAMPER_AUTHORIZATION_KEY] = JSON.stringify({
+            records: store.records ?? [],
+            tokens: store.tokens ?? [],
+            pending: store.pending ?? [],
+        });
+    }
+    return data;
 }
 
 function parseUnifiedCache(persistentData) {
     return JSON.parse(String(persistentData?.[UNIFIED_CACHE_KEY] ?? createUnifiedCache()));
+}
+
+function parseTamperAuthorization(persistentData) {
+    const raw = persistentData?.[TAMPER_AUTHORIZATION_KEY];
+    if (raw === undefined || raw === null) {
+        return { records: [], tokens: [], pending: [] };
+    }
+    try {
+        const parsed = JSON.parse(String(raw));
+        return {
+            records: Array.isArray(parsed?.records) ? parsed.records : [],
+            tokens: Array.isArray(parsed?.tokens) ? parsed.tokens : [],
+            pending: Array.isArray(parsed?.pending) ? parsed.pending : [],
+        };
+    } catch {
+        return { records: [], tokens: [], pending: [] };
+    }
 }
 
 function createMovieTranslationCache() {
@@ -122,14 +157,14 @@ function createPeopleTranslationCache(overrides = {}) {
     }
 
     return JSON.stringify({
-        42: mergedPerson,
+        "42:cn": mergedPerson,
         ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== "42")),
     });
 }
 
 function createCommentTranslationCache(overrides = {}) {
     return JSON.stringify({
-        9001: {
+        "9001:cn": {
             comment: {
                 sourceTextHash: computeStringHash("Great movie"),
                 translatedText: "很棒的电影",
@@ -141,7 +176,7 @@ function createCommentTranslationCache(overrides = {}) {
 
 function createListTranslationCache(overrides = {}) {
     return JSON.stringify({
-        321: {
+        "321:cn": {
             description: {
                 sourceTextHash: computeStringHash("A good list"),
                 translatedText: "一个不错的列表",
@@ -167,7 +202,7 @@ function createSentimentTranslationCache(overrides = {}) {
     };
 
     return JSON.stringify({
-        "movie:123": {
+        "movie:123:cn": {
             translation: defaultTranslation,
             ...overrides["movie:123"],
         },
@@ -296,10 +331,11 @@ function runResponseCase(input) {
 }
 
 function runRequestCase(input) {
-    const { argument, ...rest } = input ?? {};
+    const { argument, body, requestBody, ...rest } = input ?? {};
     return runScript({
         hasResponse: false,
         ...rest,
+        requestBody: requestBody ?? body,
         argument: {
             translationEngine: "deeplx",
             ...argument,
@@ -330,10 +366,12 @@ export {
     createWatchnowIdsEntry,
     createWrappedMovieBody,
     extractDeepLxRequestTexts,
+    parseTamperAuthorization,
     parseUnifiedCache,
     readFixture,
     runRequestCase,
     runResponseCase,
+    TAMPER_AUTHORIZATION_KEY,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_SCHEMA_VERSION,
 };

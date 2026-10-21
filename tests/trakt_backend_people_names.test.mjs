@@ -2,14 +2,13 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 
+import { createPipelineResponse, getJsonValue, jsonValue } from "./helpers/kv-rest-mock.mjs";
+
 const require = createRequire(import.meta.url);
 const peopleNamesHandler = require("../api/trakt/people-names.js");
 
 const PERSON_NAME_42 = "trakt:person-name:42";
 const PERSON_NAME_99 = "trakt:person-name:99";
-const PERSON_NAME_TTL_SECONDS = 90 * 24 * 60 * 60;
-const PERSON_NAME_GOOGLE_TTL_SECONDS = 30 * 24 * 60 * 60;
-const PERSON_NAME_NOT_FOUND_TTL_SECONDS = 7 * 24 * 60 * 60;
 
 function createPersonNameEntry(sourceTextHash = "hash-1", translatedText = "汤姆·汉克斯", source = "tmdb") {
     return {
@@ -40,11 +39,56 @@ function createResponse() {
     };
 }
 
-function jsonValue(value) {
-    return {
-        __redisJson: true,
-        value,
-    };
+// cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
+function expectCnPersonNameWrite(store, expectedById) {
+    assert.equal(store.mgetCommands.length, 1);
+    assert.equal(store.msetCommands.length, 1);
+    const command = store.msetCommands[0];
+    assert.equal(command[0], "JSON.MSET");
+    const written = {};
+    for (let index = 1; index < command.length; index += 3) {
+        const key = command[index];
+        const path = command[index + 1];
+        const value = command[index + 2];
+        if (path === "$") {
+            const doc = JSON.parse(value);
+            written[key] = doc.cn;
+            assert.equal(Object.hasOwn(doc, "name"), false, "新 key 根文档不应包含旧 name 根字段");
+            assert.equal(Object.hasOwn(doc, "notFound"), false, "新 key 根文档不应包含旧 notFound 根字段");
+        } else if (path === "$.cn") {
+            written[key] = JSON.parse(value);
+        } else {
+            assert.equal(value, "null", `${path} 应以 JSON null 清空`);
+        }
+    }
+    assert.deepEqual(Object.keys(written).sort(), Object.keys(expectedById).sort());
+    Object.entries(expectedById).forEach(([key, expected]) => {
+        const entry = written[key];
+        if (expected.name) {
+            assert.equal(entry.name.sourceTextHash, expected.name.sourceTextHash);
+            assert.equal(entry.name.translatedText, expected.name.translatedText);
+            assert.equal(entry.name.source, expected.name.source);
+            assert.ok(Number.isFinite(entry.name.expiresAt), "tmdb/google 姓名应写入 expiresAt");
+        } else {
+            assert.ok(Number.isFinite(entry.notFound.expiresAt), "负缓存应写入 expiresAt");
+        }
+    });
+    assert.equal(store.setCommands, undefined);
+    assert.equal(store.expireCommands, undefined);
+    assert.equal(store.pttlCommands, undefined);
+    return written;
+}
+
+function withoutPersonNameExpiresAt(entry) {
+    if (entry?.name) {
+        const { expiresAt, ...name } = entry.name;
+        return { name };
+    }
+    if (entry?.notFound) {
+        const { expiresAt, ...notFound } = entry.notFound;
+        return { notFound };
+    }
+    return entry;
 }
 
 function createKvFetch(store) {
@@ -53,37 +97,7 @@ function createKvFetch(store) {
         const path = parsed.pathname;
 
         if (path === "/pipeline") {
-            const commands = JSON.parse(init.body || "[]");
-            store.pipelineRequests = [...(store.pipelineRequests || []), commands];
-            const results = [];
-            for (const command of commands) {
-                const [name, key, , _arg4] = command;
-                if (name === "JSON.MSET") {
-                    store.msetCommands = [...(store.msetCommands || []), command];
-                    for (let index = 1; index < command.length; index += 3) {
-                        store.set(command[index], jsonValue(JSON.parse(command[index + 2])));
-                    }
-                    results.push("OK");
-                } else if (name === "JSON.MGET") {
-                    store.mgetCommands = [...(store.mgetCommands || []), command];
-                    const keys = command.slice(1, -1);
-                    results.push(
-                        keys.map((itemKey) => {
-                            const stored = store.get(itemKey);
-                            return stored && stored.__redisJson === true ? [stored.value] : null;
-                        }),
-                    );
-                } else if (name === "EXPIRE") {
-                    store.expireCommands = [...(store.expireCommands || []), command];
-                    results.push(store.has(key) ? 1 : 0);
-                } else {
-                    results.push(null);
-                }
-            }
-            return {
-                ok: true,
-                json: async () => results.map((result) => ({ result })),
-            };
+            return createPipelineResponse(store, init);
         }
 
         return {
@@ -224,9 +238,9 @@ test("people-names GET 返回 google 来源条目并丢弃缺字段的存储条�
                 42: googleEntry,
             },
         });
-        // 请求 2 条仅命中 1 条：部分命中仅允许 60 秒短缓存
+        // 请求 2 条仅命中 1 条：CDN 保留 5 分钟以降低 Redis 读取
         assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=300");
     });
 });
 
@@ -249,8 +263,8 @@ test("people-names GET 部分命中时使用 PARTIAL_FOUND 短缓存头", async 
             },
         });
         assert.deepEqual(res.headers["Cache-Control"], "public, max-age=60");
-        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=60");
-        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=60");
+        assert.deepEqual(res.headers["CDN-Cache-Control"], "public, s-maxage=300");
+        assert.deepEqual(res.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=300");
     });
 });
 
@@ -306,7 +320,7 @@ test("people-names 接口在 KV 未配置时返回 500", async () => {
     );
 });
 
-test("people-names POST 写入合法 tmdb 条目并设置 90 天 EXPIRE，再 GET 命中", async () => {
+test("people-names POST 写入合法 tmdb 条目并在数据里记录 90 天过期时间，再 GET 命中", async () => {
     const store = new Map();
     const entry42 = createPersonNameEntry("hash-1", "汤姆·汉克斯");
     const entry99 = createPersonNameEntry("hash-2", "巩俐");
@@ -329,28 +343,20 @@ test("people-names POST 写入合法 tmdb 条目并设置 90 天 EXPIRE，再 GE
             },
         });
 
-        // 单条 pipeline 内一条 JSON.MSET 携带多个 key 三元组，每条 key 一个 90 天 EXPIRE
-        assert.equal(store.pipelineRequests.length, 1);
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", PERSON_NAME_42, "$", JSON.stringify(entry42), PERSON_NAME_99, "$", JSON.stringify(entry99)]]);
-        assert.deepEqual(store.expireCommands, [
-            ["EXPIRE", PERSON_NAME_42, PERSON_NAME_TTL_SECONDS],
-            ["EXPIRE", PERSON_NAME_99, PERSON_NAME_TTL_SECONDS],
-        ]);
+        // 写入阶段一条 JSON.MSET 携带多个 key 三元组，过期时间写在数据字段里
+        assert.equal(store.pipelineRequests.length, 2);
+        expectCnPersonNameWrite(store, { [PERSON_NAME_42]: entry42, [PERSON_NAME_99]: entry99 });
 
         const getRes = await invoke({
             method: "GET",
             query: { people: "42,99" },
         });
-        assert.deepEqual(getRes.jsonBody, {
-            people: {
-                42: entry42,
-                99: entry99,
-            },
-        });
+        assert.deepEqual(withoutPersonNameExpiresAt(getRes.jsonBody.people["42"]), entry42);
+        assert.deepEqual(withoutPersonNameExpiresAt(getRes.jsonBody.people["99"]), entry99);
     });
 });
 
-test("people-names POST 写入负缓存条目并设置 7 天 EXPIRE", async () => {
+test("people-names POST 写入负缓存条目并记录 7 天过期时间", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -369,18 +375,14 @@ test("people-names POST 写入负缓存条目并设置 7 天 EXPIRE", async () =
                 people: 1,
             },
         });
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", PERSON_NAME_42, "$", JSON.stringify({ notFound: true })]]);
-        assert.deepEqual(store.expireCommands, [["EXPIRE", PERSON_NAME_42, PERSON_NAME_NOT_FOUND_TTL_SECONDS]]);
+        expectCnPersonNameWrite(store, { [PERSON_NAME_42]: { notFound: true } });
 
         const getRes = await invoke({
             method: "GET",
             query: { people: "42" },
         });
-        assert.deepEqual(getRes.jsonBody, {
-            people: {
-                42: { notFound: true },
-            },
-        });
+        // 线上形状保持 { notFound: true }（过期时间只在存储侧），客户端据此写本地 7 天负缓存
+        assert.deepEqual(getRes.jsonBody.people["42"], { notFound: true });
         assert.deepEqual(getRes.headers["Cache-Control"], "public, max-age=300");
     });
 });
@@ -406,15 +408,11 @@ test("people-names POST 混合姓名与负缓存条目时分别设置 TTL", asyn
                 people: 2,
             },
         });
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", PERSON_NAME_42, "$", JSON.stringify(entry42), PERSON_NAME_99, "$", JSON.stringify({ notFound: true })]]);
-        assert.deepEqual(store.expireCommands, [
-            ["EXPIRE", PERSON_NAME_42, PERSON_NAME_TTL_SECONDS],
-            ["EXPIRE", PERSON_NAME_99, PERSON_NAME_NOT_FOUND_TTL_SECONDS],
-        ]);
+        expectCnPersonNameWrite(store, { [PERSON_NAME_42]: entry42, [PERSON_NAME_99]: { notFound: true } });
     });
 });
 
-test("people-names POST 接受 google 条目并设置 30 天 EXPIRE", async () => {
+test("people-names POST 接受 google 条目并记录 30 天过期时间", async () => {
     const store = new Map();
     const googleEntry = createPersonNameEntry("hash-1", "谷歌译名", "google");
 
@@ -434,8 +432,7 @@ test("people-names POST 接受 google 条目并设置 30 天 EXPIRE", async () =
                 people: 1,
             },
         });
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", PERSON_NAME_42, "$", JSON.stringify(googleEntry)]]);
-        assert.deepEqual(store.expireCommands, [["EXPIRE", PERSON_NAME_42, PERSON_NAME_GOOGLE_TTL_SECONDS]]);
+        expectCnPersonNameWrite(store, { [PERSON_NAME_42]: googleEntry });
     });
 });
 
@@ -461,8 +458,7 @@ test("people-names POST 跳过缺字段与非法 ID 的条目", async () => {
                 people: 1,
             },
         });
-        assert.deepEqual(store.msetCommands, [["JSON.MSET", PERSON_NAME_42, "$", JSON.stringify(createPersonNameEntry("hash-1", "汤姆·汉克斯"))]]);
-        assert.deepEqual(store.expireCommands, [["EXPIRE", PERSON_NAME_42, PERSON_NAME_TTL_SECONDS]]);
+        expectCnPersonNameWrite(store, { [PERSON_NAME_42]: createPersonNameEntry("hash-1", "汤姆·汉克斯") });
     });
 });
 
@@ -494,5 +490,43 @@ test("people-names POST 非 people 结构 body 不写 KV", async () => {
         assert.equal(res.statusCode, 200);
         assert.deepEqual(res.jsonBody, { counts: { people: 0 } });
         assert.equal(store.msetCommands, undefined);
+    });
+});
+
+test("people-names POST 带 cn 折叠数据时写入 $.cn 并清空旧根字段", async () => {
+    const store = new Map();
+    const cnEntry = createPersonNameEntry("hash-cn", "汤姆·汉克斯");
+    const twEntry = createPersonNameEntry("hash-tw", "湯姆·漢克斯");
+    store.set(PERSON_NAME_42, jsonValue(cnEntry));
+
+    await withBackend(store, async () => {
+        const res = await invoke({
+            method: "POST",
+            body: {
+                locale: "tw",
+                people: { 42: twEntry },
+                cn: { people: { 42: cnEntry } },
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        const stored = getJsonValue(store, PERSON_NAME_42);
+        assert.equal(stored.cn.name.translatedText, "汤姆·汉克斯");
+        assert.equal(stored.tw.name.translatedText, "湯姆·漢克斯");
+        assert.equal(stored.name, null, "旧根字段应以 JSON null 清空");
+    });
+});
+
+test("people-names 旧格式 {notFound:true} 负缓存可读取，tw 请求回带 cn 提示", async () => {
+    const store = new Map();
+    store.set(PERSON_NAME_42, jsonValue({ notFound: true }));
+
+    await withBackend(store, async () => {
+        const cnRes = await invoke({ method: "GET", query: { people: "42" } });
+        assert.deepEqual(cnRes.jsonBody.people["42"], { notFound: true });
+
+        const twRes = await invoke({ method: "GET", query: { people: "42", locale: "tw" } });
+        assert.deepEqual(twRes.jsonBody.people, {});
+        assert.deepEqual(twRes.jsonBody.cn.people["42"], { notFound: true });
     });
 });

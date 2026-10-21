@@ -1,6 +1,7 @@
 const {
     getKvConfig,
     getResponseCacheStatus,
+    normalizeLocale,
     parseEpisodeKeys,
     parseIds,
     readManyAutoGroupsFromKv,
@@ -25,18 +26,23 @@ async function handleGet(req, res, kvConfig) {
         return;
     }
 
-    const { shows, movies, episodes } = await readManyAutoGroupsFromKv(kvConfig, {
-        shows: showIds,
-        movies: movieIds,
-        episodes: episodeKeys,
-    });
+    const locale = normalizeLocale(req.query.locale);
+    const { shows, movies, episodes, cn } = await readManyAutoGroupsFromKv(
+        kvConfig,
+        {
+            shows: showIds,
+            movies: movieIds,
+            episodes: episodeKeys,
+        },
+        { locale },
+    );
 
     setResponseCacheHeaders(res, getResponseCacheStatus(shows, movies, episodes));
-    res.status(200).json({
-        shows,
-        movies,
-        episodes,
-    });
+    const response = { shows, movies, episodes };
+    if (cn && Object.keys(cn.shows).length + Object.keys(cn.movies).length + Object.keys(cn.episodes).length > 0) {
+        response.cn = cn;
+    }
+    res.status(200).json(response);
 }
 
 async function handlePost(req, res, kvConfig) {
@@ -50,7 +56,7 @@ async function handlePost(req, res, kvConfig) {
     const movies = payload?.movies && typeof payload.movies === "object" ? payload.movies : {};
     const episodes = payload?.episodes && typeof payload.episodes === "object" ? payload.episodes : {};
 
-    await writeManyGroupsToKv(kvConfig, { shows, movies, episodes });
+    await writeManyGroupsToKv(kvConfig, { shows, movies, episodes }, { locale: normalizeLocale(payload?.locale), cn: payload?.cn });
 
     res.status(200).json({
         counts: {

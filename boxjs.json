@@ -11,14 +11,16 @@
             "name": "Trakt 增强",
             "keys": [
                 "@dj_trakt_boxjs_configs.fakeVipEnabled",
+                "@dj_trakt_boxjs_configs.chineseLocale",
                 "@dj_trakt_boxjs_configs.posterImageMode",
-                "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
                 "@dj_trakt_boxjs_configs.translationEngine",
                 "@dj_trakt_boxjs_configs.characterTranslationEnabled",
+                "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
                 "@dj_trakt_boxjs_configs.forwardButtonOrder",
                 "@dj_trakt_boxjs_configs.infuseButtonOrder",
                 "@dj_trakt_boxjs_configs.rexButtonOrder",
                 "@dj_trakt_boxjs_configs.backendBaseUrl",
+                "@dj_trakt_boxjs_configs.tamperAppAuthorizationEnabled",
                 "@dj_trakt_boxjs_configs.debugMode"
             ],
             "author": "@DemoJameson",
@@ -36,32 +38,54 @@
                     "desc": "启用后伪装为 Trakt VIP 会员，移除 App 中的广告"
                 },
                 {
+                    "id": "@dj_trakt_boxjs_configs.chineseLocale",
+                    "name": "目标语言",
+                    "val": "cn",
+                    "type": "select",
+                    "desc": "选择目标语言：简体中文、繁體中文（台灣）或繁體中文（香港）",
+                    "items": [
+                        {
+                            "key": "cn",
+                            "label": "简体中文"
+                        },
+                        {
+                            "key": "tw",
+                            "label": "繁體中文（台灣）"
+                        },
+                        {
+                            "key": "hk",
+                            "label": "繁體中文（香港）"
+                        }
+                    ]
+                },
+                {
                     "id": "@dj_trakt_boxjs_configs.posterImageMode",
                     "name": "海报语言",
                     "val": "original",
                     "type": "select",
-                    "desc": "原片语言使用 TMDb 影片原始语言图片；中文使用 TMDb 中文图片；原图保留 Trakt 原图",
+                    "desc": "原片语言使用 TMDb 影片原始语言图片；中文按所选语言优先匹配海报；原图保留 Trakt 原图",
                     "items": [
                         {
                             "key": "original",
                             "label": "原片语言"
                         },
                         {
-                            "key": "chinese",
-                            "label": "中文"
+                            "key": "cn",
+                            "label": "简体中文"
+                        },
+                        {
+                            "key": "tw",
+                            "label": "繁體中文（台灣）"
+                        },
+                        {
+                            "key": "hk",
+                            "label": "繁體中文（香港）"
                         },
                         {
                             "key": "default",
                             "label": "原图"
                         }
                     ]
-                },
-                {
-                    "id": "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
-                    "name": "历史剧集按电视剧合并",
-                    "val": true,
-                    "type": "boolean",
-                    "desc": "启用后会将历史页面电视剧类别的观看记录按电视剧合并"
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.translationEngine",
@@ -90,6 +114,13 @@
                     "val": true,
                     "type": "boolean",
                     "desc": "启用后会用豆瓣翻译角色名"
+                },
+                {
+                    "id": "@dj_trakt_boxjs_configs.historyEpisodesMergedByShow",
+                    "name": "历史剧集按电视剧合并",
+                    "val": true,
+                    "type": "boolean",
+                    "desc": "启用后会将历史页面电视剧类别的观看记录按电视剧合并"
                 },
                 {
                     "id": "@dj_trakt_boxjs_configs.forwardButtonOrder",
@@ -174,6 +205,13 @@
                     "desc": "用于批量获取 Trakt 的中文翻译，一般留空即可"
                 },
                 {
+                    "id": "@dj_trakt_boxjs_configs.tamperAppAuthorizationEnabled",
+                    "name": "篡改应用授权",
+                    "val": false,
+                    "type": "boolean",
+                    "desc": "启用后将第三方 App 的 Trakt 授权篡改成 Trakt 官方 App，规避应用连接数的限制，请仅在需要时开启"
+                },
+                {
                     "id": "@dj_trakt_boxjs_configs.debugMode",
                     "name": "调试模式",
                     "val": "off",
@@ -200,7 +238,7 @@
                 }
             ],
             "descs_html": [
-                "Trakt App 各页面从英文改为简体中文，支持中文标题、简介和海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 和 SofaTime 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
+                "Trakt App 各页面从英文改为简体中文或港台繁体，包括海报；历史页面剧集类别的已观看记录按电视剧合并；Trakt 的影片详情页添加 Forward、Infuse、Rex 跳转按钮；部分兼容其它使用了 Trakt API 的应用。",
                 "点此直达 <a href=\"https://github.com/DemoJameson/Proxy.Modules/tree/main/trakt_simplified_chinese\">项目目录</a>",
                 "Egern 安装：<a href=\"egern:/modules/new?name=%E4%BC%98%E5%8C%96%20Trakt%20%E7%AE%80%E4%BD%93%E4%B8%AD%E6%96%87%E4%BD%93%E9%AA%8C&amp;url=https%3A%2F%2Fraw.githubusercontent.com%2FDemoJameson%2FProxy.Modules%2Fmain%2Ftrakt_simplified_chinese%2Ftrakt_simplified_chinese.plugin\">安装模块</a>",
                 "Loon 安装：<a href=\"https://www.nsloon.com/openloon/import?plugin=https%3A%2F%2Fraw.githubusercontent.com%2FDemoJameson%2FProxy.Modules%2Fmain%2Ftrakt_simplified_chinese%2Ftrakt_simplified_chinese.plugin\">安装插件</a>",

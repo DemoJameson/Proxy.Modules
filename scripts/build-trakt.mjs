@@ -29,6 +29,25 @@ function formatBuildTimeText(date) {
     );
 }
 
+// 配置文件里的 updatedTime：与头部「生成时间」取自同一次构建，精确到秒
+function formatBuildDateTimeText(date) {
+    const shifted = new Date(date.getTime() + BUILD_TIME_OFFSET_MS);
+    const pad = (value) => String(value).padStart(2, "0");
+    return [
+        shifted.getUTCFullYear(),
+        "-",
+        pad(shifted.getUTCMonth() + 1),
+        "-",
+        pad(shifted.getUTCDate()),
+        " ",
+        pad(shifted.getUTCHours()),
+        ":",
+        pad(shifted.getUTCMinutes()),
+        ":",
+        pad(shifted.getUTCSeconds()),
+    ].join("");
+}
+
 // 产物 UA 使用的版本号：YYMMDDHHmm，与头部「生成时间」取自同一次构建
 function formatBuildVersion(date) {
     return formatBuildTimeText(date).replace(/[-: ]/g, "").slice(2);
@@ -157,8 +176,9 @@ function renderPluginArgumentLine(field) {
     return `${field.key} = ${inferPluginArgumentType(field.type)}, ${formatPluginArgumentValues(field)}, tag=${field.tag}, desc=${field.desc}`;
 }
 
+// Surge 模块参数表的默认值会被替换进 argument="..." 的内层，值本身不能再带引号，否则与外层引号冲突
 function formatSgmoduleArgumentValue(value) {
-    return `"${formatDefaultValue(value)}"`;
+    return formatDefaultValue(value);
 }
 
 function formatSgmoduleDefaultArgumentValue(field) {
@@ -205,6 +225,10 @@ function inferBoxjsSettingType(fieldType) {
 
 function buildArgumentList(argumentKeys, formatter) {
     return argumentKeys.map(formatter).join(",");
+}
+
+function buildPluginArgumentObject(argumentKeys) {
+    return `{${buildArgumentList(argumentKeys, (key) => `\${${key}}`).replaceAll(",", ", ")}}`;
 }
 
 function buildScriptUrl(scriptFile) {
@@ -268,7 +292,7 @@ function assertManifestIsValid(manifest) {
     });
 }
 
-function renderPlugin() {
+function renderPlugin(buildTime = new Date()) {
     const lines = [
         `#!name=${metadata.name}`,
         `#!desc=${metadata.description}`,
@@ -276,6 +300,7 @@ function renderPlugin() {
         `#!homepage=${metadata.homepage}`,
         `#!openUrl=${metadata.openUrl}`,
         `#!author=${metadata.author}`,
+        `#!updatedTime=${formatBuildDateTimeText(buildTime)}`,
         "",
         "[Argument]",
     ];
@@ -290,16 +315,13 @@ function renderPlugin() {
         .filter((rule) => getRuleTargets(rule).includes("plugin"))
         .forEach((rule) => {
             lines.push(`# ${rule.comment}`);
-            const parts = [`${rule.phase} ${rule.pattern} script-path=${buildScriptUrl(rule.scriptFile)}`];
+            const action = rule.phase === "http-request" ? "request" : "response";
+            const argument = rule.argumentKeys?.length ? `, ${buildPluginArgumentObject(rule.argumentKeys)}` : "";
+            const options = [`tag="${rule.title}"`, `timeout=${rule.timeout}`];
             if (rule.requiresBody) {
-                parts.push("requires-body=true");
+                options.push("requires_body=true");
             }
-            parts.push(`timeout=${rule.timeout}`);
-            if (rule.argumentKeys?.length) {
-                parts.push(`argument=[${buildArgumentList(rule.argumentKeys, (key) => `{${key}}`)}]`);
-            }
-            parts.push(`tag=${rule.title}`);
-            lines.push(parts.join(", "));
+            lines.push(`${action} if \${url} ~= /${rule.pattern}/i then script("${buildScriptUrl(rule.scriptFile)}"${argument}) with ${options.join(", ")}`);
         });
 
     lines.push("", "[MITM]", `hostname = ${mitmHosts.join(", ")}`);
@@ -307,8 +329,9 @@ function renderPlugin() {
     return `${lines.join("\n")}\n`;
 }
 
-function renderSgmodule() {
-    const argumentPairs = argumentFields.map((field) => `${field.key}:${formatSgmoduleDefaultArgumentValue(field)}`).join(", ");
+function renderSgmodule(buildTime = new Date()) {
+    // 参数之间只用逗号分隔，与 Surge 官方示例一致，避免参数名带上前导空格
+    const argumentPairs = argumentFields.map((field) => `${field.key}:${formatSgmoduleDefaultArgumentValue(field)}`).join(",");
     const argumentDescriptions = argumentFields.map((field) => `${field.key}: ${field.desc}`).join("\\n");
     const lines = [
         `#!name=${metadata.name}`,
@@ -316,6 +339,7 @@ function renderSgmodule() {
         `#!icon=${metadata.icon}`,
         `#!homepage=${metadata.homepage}`,
         `#!author=${metadata.author}`,
+        `#!updatedTime=${formatBuildDateTimeText(buildTime)}`,
         `#!arguments=${argumentPairs}`,
         `#!arguments-desc=${argumentDescriptions}`,
         "",
@@ -334,7 +358,9 @@ function renderSgmodule() {
             }
             parts.push(`timeout=${rule.timeout}`);
             if (rule.argumentKeys?.length) {
-                parts.push(`argument=${buildArgumentList(rule.argumentKeys, (key) => `{{{${key}}}}`)}`);
+                // Surge 的 [Script] 行按逗号分隔 key=value 参数，含逗号的值必须用双引号包裹，
+                // 否则 argument 会在第一个逗号处截断，只有第一个位置参数能传给脚本
+                parts.push(`argument="${buildArgumentList(rule.argumentKeys, (key) => `{{{${key}}}}`)}"`);
             }
             parts.push(`script-path=${buildScriptUrl(rule.scriptFile)}`);
 
@@ -346,13 +372,14 @@ function renderSgmodule() {
     return `${lines.join("\n")}\n`;
 }
 
-function renderSnippet() {
+function renderSnippet(buildTime = new Date()) {
     const lines = [
         `#!name=${metadata.name}`,
         `#!desc=${metadata.description}`,
         `#!icon=${metadata.icon}`,
         `#!homepage=${metadata.homepage}`,
         `#!author=${metadata.author}`,
+        `#!updatedTime=${formatBuildDateTimeText(buildTime)}`,
         "",
         "# [rewrite_remote]",
     ];
@@ -360,7 +387,14 @@ function renderSnippet() {
     scriptRules
         .filter((rule) => getRuleTargets(rule).includes("snippet"))
         .forEach((rule) => {
-            const snippetType = rule.phase === "http-request" ? "script-request-header" : "script-response-body";
+            const snippetType =
+                rule.phase === "http-request"
+                    ? rule.requiresBody
+                        ? "script-request-body"
+                        : "script-request-header"
+                    : rule.requiresBody
+                      ? "script-response-body"
+                      : "script-response-header";
             lines.push(`# ${rule.comment}`, `${rule.pattern} url ${snippetType} ${buildScriptUrl(rule.scriptFile)}`);
         });
 
@@ -402,20 +436,20 @@ function renderBoxjs() {
     return `${JSON.stringify(payload, null, 4)}\n`;
 }
 
-function renderGeneratedTargets() {
+function renderGeneratedTargets(buildTime = new Date()) {
     const boxjsKeys = argumentFields.map((field) => field.key);
     assertManifestIsValid({ argumentFields, boxjsKeys, mitmHosts, scriptRules });
 
     return [
-        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.plugin", content: renderPlugin() },
-        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.sgmodule", content: renderSgmodule() },
-        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.snippet", content: renderSnippet() },
+        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.plugin", content: renderPlugin(buildTime) },
+        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.sgmodule", content: renderSgmodule(buildTime) },
+        { outputFile: "trakt_simplified_chinese/trakt_simplified_chinese.snippet", content: renderSnippet(buildTime) },
         { outputFile: "boxjs.json", content: renderBoxjs() },
     ];
 }
 
-async function writeGeneratedTargets() {
-    for (const target of renderGeneratedTargets()) {
+async function writeGeneratedTargets(buildTime = new Date()) {
+    for (const target of renderGeneratedTargets(buildTime)) {
         await writeTarget(target.outputFile, target.content);
     }
 }
@@ -430,7 +464,7 @@ async function buildTrakt() {
     });
     await writeTarget(buildTarget.outputFile, renderScriptBanner(buildTime) + scriptSource);
 
-    await writeGeneratedTargets();
+    await writeGeneratedTargets(buildTime);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
@@ -440,4 +474,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
 }
 
-export { buildTrakt, formatBuildVersion, renderBoxjs, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSgmodule, renderSnippet };
+export { buildTrakt, formatBuildDateTimeText, formatBuildVersion, renderBoxjs, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSgmodule, renderSnippet };

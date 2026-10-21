@@ -1,9 +1,19 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
-
+import {
+    TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
+    TRAKT_TAMPER_CLIENT_ID,
+    TRAKT_TAMPER_EXEMPT_CLIENT_IDS,
+    TRAKT_TAMPER_REDIRECT_URI,
+    TRAKT_TAMPER_STATE_RECORD_LIMIT,
+    TRAKT_TAMPER_TOKEN_RECORD_LIMIT,
+} from "../trakt_simplified_chinese/src/features/tamper-app-authorization.mjs";
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
 import { REGION_CODES } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
 import { TRAKT_DIRECT_TRANSLATION_MAX_REFS } from "../trakt_simplified_chinese/src/shared/trakt-translation-helper.mjs";
+import { TAMPER_AUTHORIZATION_KEY, UNIFIED_CACHE_KEY } from "../trakt_simplified_chinese/src/utils/cache.mjs";
+import { generatePkcePair } from "../trakt_simplified_chinese/src/utils/pkce.mjs";
 
 import {
     computeStringHash,
@@ -15,10 +25,80 @@ import {
     createSentimentTranslationCache,
     createUnifiedPersistentData,
     createWrappedMovieBody,
+    parseTamperAuthorization,
+    parseUnifiedCache,
     readFixture,
     runRequestCase,
     runResponseCase,
 } from "./helpers/trakt-test-helpers.mjs";
+
+// 授权流程状态、篡改签发的 token 与待回写标记落在独立持久化 key 里，不再占用 unified cache
+function readTamperStore(persistentData) {
+    const store = parseTamperAuthorization(persistentData);
+    return {
+        records: store.records.slice(),
+        tokens: store.tokens.slice(),
+        pending: store.pending.slice(),
+    };
+}
+
+function readTamperRecords(persistentData) {
+    return readTamperStore(persistentData)
+        .records.slice()
+        .sort((left, right) => Number(left.createdAt) - Number(right.createdAt));
+}
+
+function readTamperStates(persistentData) {
+    return readTamperRecords(persistentData);
+}
+
+function readTamperTokens(persistentData) {
+    return readTamperStore(persistentData)
+        .tokens.slice()
+        .sort((left, right) => Number(left.createdAt) - Number(right.createdAt));
+}
+
+function createTamperPersistentData({ records = [], tokens = [], pending = [] } = {}) {
+    return createUnifiedPersistentData({ tamperAppAuthorization: { records, tokens, pending } });
+}
+
+function createTamperTokenRecord(accessToken, refreshToken, overrides = {}) {
+    return {
+        accessToken,
+        refreshToken,
+        clientId: "old-client",
+        expiresAt: Date.now() + 60 * 60 * 1000,
+        createdAt: Date.now(),
+        ...overrides,
+    };
+}
+
+function readLatestTamperState(persistentData) {
+    const states = readTamperStates(persistentData);
+    return states[states.length - 1];
+}
+
+function createTamperCallbackUrl(targetUrl, code = "auth-code", host = "auth.trakt.tv") {
+    const callbackUrl = new URL(`https://${host}/api/auth/oauth2/authorize`);
+    callbackUrl.searchParams.set("response_type", "code");
+    callbackUrl.searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);
+    callbackUrl.searchParams.set("state", targetUrl.searchParams.get("state") ?? "");
+    callbackUrl.searchParams.set("code_challenge", targetUrl.searchParams.get("code_challenge") ?? "");
+    callbackUrl.searchParams.set("code", code);
+    return callbackUrl.toString();
+}
+
+function createTamperStateRecord(index, overrides = {}) {
+    return {
+        id: `existing-id-${index}`,
+        redirectUri: `existing://callback/${index}`,
+        originalState: `existing-state-${index}`,
+        codeVerifier: `existing-verifier-${index}`,
+        codeChallenge: `existing-challenge-${index}`,
+        createdAt: Date.now(),
+        ...overrides,
+    };
+}
 
 function createMoviePersistentData() {
     return createUnifiedPersistentData({
@@ -29,7 +109,7 @@ function createMoviePersistentData() {
 function createShowPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "show:456": createMediaTranslationEntry({
+            "show:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
@@ -43,14 +123,14 @@ function createShowPersistentData() {
 function createMixedDirectMediaPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "movie:123": createMediaTranslationEntry({
+            "movie:123:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文电影",
                     overview: "中文电影简介",
                     tagline: "中文电影标语",
                 },
             }),
-            "show:456": createMediaTranslationEntry({
+            "show:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
@@ -64,21 +144,21 @@ function createMixedDirectMediaPersistentData() {
 function createEpisodePersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "episode:555:1:1": createMediaTranslationEntry({
+            "episode:555:1:1:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第一集中文",
                     overview: "第一集中文简介",
                     tagline: "第一集中文标语",
                 },
             }),
-            "episode:555:1:2": createMediaTranslationEntry({
+            "episode:555:1:2:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第二集中文",
                     overview: "第二集中文简介",
                     tagline: "第二集中文标语",
                 },
             }),
-            "episode:777:2:1": createMediaTranslationEntry({
+            "episode:777:2:1:cn": createMediaTranslationEntry({
                 translation: {
                     title: "其他剧中文",
                     overview: "其他剧中文简介",
@@ -117,9 +197,10 @@ function createBackendTranslationOverridesBody(fieldName, lookupKey, entry) {
     });
 }
 
+// 覆盖条目按地区存放：cn/tw/hk 各一份 translation（旧文档的根字段 translation 等价 cn）
 function createTranslationOverrideEntry(translation) {
     return {
-        translation,
+        cn: { translation },
         updatedAt: 1710000000000,
     };
 }
@@ -262,14 +343,14 @@ function createCalendarPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
             ...JSON.parse(createMovieTranslationCache()),
-            "show:456": createMediaTranslationEntry({
+            "show:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
                     tagline: "中文剧集标语",
                 },
             }),
-            "episode:456:1:2": createMediaTranslationEntry({
+            "episode:456:1:2:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第二集中文",
                     overview: "第二集中文简介",
@@ -556,7 +637,7 @@ test("handleList 按 direct list、wrapped list 与 prominent list 路由分组�
     const persistentData = createUnifiedPersistentData({
         googleList: JSON.parse(
             createListTranslationCache({
-                321: {
+                "321:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Favorites"),
                         translatedText: "收藏夹",
@@ -1056,14 +1137,14 @@ test("handleWrapperMediaObject 覆盖 watching 单对象响应", async (t) => {
             body: createWatchingEpisodeBody(),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "show:555": createMediaTranslationEntry({
+                    "show:555:cn": createMediaTranslationEntry({
                         translation: {
                             title: "中文剧名",
                             overview: "中文剧集简介",
                             tagline: "中文剧集标语",
                         },
                     }),
-                    "episode:555:1:2": createMediaTranslationEntry({
+                    "episode:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -1143,6 +1224,7 @@ test("handleRecentCommentsList 覆盖 recent comments 媒体包装路由", async
 test("handleComments 覆盖 media comments、episode comments 与 replies 路由", async (t) => {
     const cases = [
         "https://api.trakt.tv/movies/123/comments/newest",
+        "https://api.trakt.tv/shows/555/seasons/1/comments/newest",
         "https://api.trakt.tv/shows/555/seasons/1/episodes/2/comments/newest",
         "https://api.trakt.tv/comments/123/replies",
         "https://apiz.trakt.tv/comments/453514?extended=reactions",
@@ -1164,7 +1246,12 @@ test("handleComments 覆盖 media comments、episode comments 与 replies 路由
 });
 
 test("handleMediaPeopleList 覆盖 movie、show 与 episode people 路由", async (t) => {
-    const cases = ["https://api.trakt.tv/movies/123/people", "https://api.trakt.tv/shows/555/people", "https://api.trakt.tv/shows/555/seasons/1/episodes/2/people"];
+    const cases = [
+        "https://api.trakt.tv/movies/123/people",
+        "https://api.trakt.tv/shows/555/people",
+        "https://api.trakt.tv/shows/555/seasons/1/people",
+        "https://api.trakt.tv/shows/555/seasons/1/episodes/2/people",
+    ];
 
     for (const url of cases) {
         await t.test(url, async () => {
@@ -1317,7 +1404,7 @@ test("handleMir 会叠加 translationOverrides 到 first_watched 媒体", async 
     assert.equal(payload.first_watched.movie.overview, "中文简介");
 });
 
-test("handleMediaDetail 覆盖 movie、show 与 episode detail 路由", async (t) => {
+test("handleMediaDetail 覆盖 movie、show、season info 与 episode detail 路由", async (t) => {
     const cases = [
         {
             name: "movie detail",
@@ -1326,7 +1413,7 @@ test("handleMediaDetail 覆盖 movie、show 与 episode detail 路由", async (t
             persistentData: createUnifiedPersistentData({
                 traktTranslation: JSON.parse(
                     createMovieTranslationCache({
-                        "movie:123": createMediaTranslationEntry({
+                        "movie:123:cn": createMediaTranslationEntry({
                             translation: {
                                 title: "中文电影",
                                 overview: "中文简介",
@@ -1356,6 +1443,32 @@ test("handleMediaDetail 覆盖 movie、show 与 episode detail 路由", async (t
             persistentData: createShowPersistentData(),
             assertPayload(payload) {
                 assert.equal(payload.title, "中文剧名");
+            },
+        },
+        {
+            name: "season info",
+            url: "https://api.trakt.tv/shows/555/seasons/1/info",
+            body: JSON.stringify({
+                number: 1,
+                title: "Original Season Title",
+                overview: "Original Season Overview",
+                ids: {
+                    trakt: 1002,
+                },
+            }),
+            persistentData: createUnifiedPersistentData({
+                traktTranslation: {
+                    "season:555:1:cn": createMediaTranslationEntry({
+                        translation: {
+                            title: "第一季",
+                            overview: "第一季简介",
+                        },
+                    }),
+                },
+            }),
+            assertPayload(payload) {
+                assert.equal(payload.title, "第一季");
+                assert.equal(payload.overview, "第一季简介");
             },
         },
         {
@@ -1656,6 +1769,38 @@ test("handleMediaDetail translationOverrides 在刷新周期内直接读本地�
     );
 });
 
+test("handleMediaDetail 只含 tw/hk 的覆盖条目在刷新周期内仍生效", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMovieTranslationCache()),
+            translationOverrides: {
+                fetchedAt: Date.now(),
+                shows: {},
+                episodes: {},
+                movies: {
+                    123: {
+                        tw: { translation: { title: "台灣覆蓋標題" } },
+                    },
+                },
+            },
+        }),
+        argument: {
+            chineseLocale: "tw",
+            backendBaseUrl: "https://backend.example",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "台灣覆蓋標題");
+    assert.equal(
+        httpLogs.some((item) => item.method === "GET" && item.url === "https://backend.example/api/trakt/translation-overrides"),
+        false,
+        "刷新周期内应直接使用本地覆盖缓存",
+    );
+});
+
 test("debugMode=disableLocal 时禁用本地缓存，每次从远端获取 translationOverrides", async () => {
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
@@ -1811,7 +1956,7 @@ test("debugMode=disableAll 时既不请求远端缓存也不读写本地", async
 
 test("handleSentiments 覆盖原生 sentiments 与代理兼容路由", async (t) => {
     const googleSentiments = JSON.parse(createSentimentTranslationCache());
-    googleSentiments["movie:853702"] = JSON.parse(JSON.stringify(googleSentiments["movie:123"]));
+    googleSentiments["movie:853702:cn"] = JSON.parse(JSON.stringify(googleSentiments["movie:123:cn"]));
 
     const cases = [
         {
@@ -1851,14 +1996,14 @@ test("handleSeasonEpisodesList 覆盖 /shows/:id/seasons 路由", async () => {
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: {
-                "episode:555:1:1": createMediaTranslationEntry({
+                "episode:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                         overview: "第一集中文简介",
                         tagline: "第一集中文标语",
                     },
                 }),
-                "episode:555:1:2": createMediaTranslationEntry({
+                "episode:555:1:2:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第二集中文",
                         overview: "第二集中文简介",
@@ -1881,14 +2026,14 @@ test("handleSeasonEpisodesList 会叠加 episode translationOverrides", async ()
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: {
-                "episode:555:1:1": createMediaTranslationEntry({
+                "episode:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                         overview: "第一集中文简介",
                         tagline: "第一集中文标语",
                     },
                 }),
-                "episode:555:1:2": createMediaTranslationEntry({
+                "episode:555:1:2:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第二集中文",
                         overview: "第二集中文简介",
@@ -1949,9 +2094,11 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["watchnow.sources", "https://api.trakt.tv/watchnow/sources"],
         ["media.people", "https://api.trakt.tv/movies/123/people"],
         ["media.people", "https://api.trakt.tv/shows/123/people"],
+        ["shows.season.people", "https://api.trakt.tv/shows/123/seasons/1/people"],
         ["shows.episode.people", "https://api.trakt.tv/shows/123/seasons/1/episodes/2/people"],
         ["media.comments", "https://api.trakt.tv/movies/123/comments/newest"],
         ["media.comments", "https://api.trakt.tv/shows/123/comments/newest"],
+        ["shows.season.comments", "https://api.trakt.tv/shows/123/seasons/1/comments/newest"],
         ["shows.episode.comments", "https://api.trakt.tv/shows/123/seasons/1/episodes/2/comments/newest"],
         ["comments.replies", "https://api.trakt.tv/comments/123/replies"],
         ["comments.detail", "https://apiz.trakt.tv/comments/453514?extended=reactions"],
@@ -1970,6 +2117,7 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["media.sentiments", "https://api.trakt.tv/shows/123/sentiments"],
         ["movies.summary", "https://api.trakt.tv/movies/123"],
         ["shows.summary", "https://api.trakt.tv/shows/123"],
+        ["shows.season.info", "https://api.trakt.tv/shows/123/seasons/1/info"],
         ["shows.episode.summary", "https://api.trakt.tv/shows/123/seasons/1/episodes/2"],
         ["people.summary", "https://api.trakt.tv/people/42"],
     ];
@@ -2090,4 +2238,1884 @@ test("bundle 每次执行结束后都会清理 globalThis.$ctx", async () => {
         },
     });
     assert.equal(requestRun.hasRuntimeCtx, false);
+});
+
+test("篡改应用授权的 PKCE verifier 随机生成且 challenge 匹配", () => {
+    const first = generatePkcePair();
+    const second = generatePkcePair();
+
+    assert.match(first.verifier, /^[A-Za-z0-9\-._~]{43,128}$/);
+    assert.equal(first.method, "S256");
+    assert.equal(createHash("sha256").update(first.verifier).digest("base64url"), first.challenge);
+    assert.notEqual(first.verifier, second.verifier);
+});
+
+test("篡改应用授权在 getRandomValues 抛错时回退 Math.random", () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+    Object.defineProperty(globalThis, "crypto", {
+        configurable: true,
+        value: {
+            getRandomValues() {
+                throw new Error("crypto unavailable");
+            },
+        },
+    });
+
+    try {
+        const pair = generatePkcePair();
+        assert.match(pair.verifier, /^[A-Za-z0-9\-._~]{43,128}$/);
+        assert.equal(createHash("sha256").update(pair.verifier).digest("base64url"), pair.challenge);
+    } finally {
+        Object.defineProperty(globalThis, "crypto", descriptor);
+    }
+});
+
+test("篡改应用授权默认关闭时 OAuth 请求直接放行", async () => {
+    const deviceRun = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client" }),
+    });
+    assert.equal(Object.keys(deviceRun.result).length, 0);
+
+    const authorizeRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=senplayer%3A%2F%2Foauth-trakt",
+    });
+    assert.equal(Object.keys(authorizeRun.result).length, 0);
+});
+
+test("不计入授权数量限制的 Client（Infuse/Showly/Rippple）授权请求不会被篡改", async () => {
+    for (const clientId of TRAKT_TAMPER_EXEMPT_CLIENT_IDS) {
+        const authorizeRun = await runRequestCase({
+            url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&state=original-state`,
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(authorizeRun.result).length, 0);
+
+        const deviceRun = await runRequestCase({
+            url: "https://api.trakt.tv/oauth/device/code",
+            headers: {
+                "content-type": "application/json",
+                "trakt-api-key": clientId,
+            },
+            body: JSON.stringify({ client_id: clientId }),
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(deviceRun.result).length, 0);
+
+        const tokenRun = await runRequestCase({
+            url: "https://auth.trakt.tv/oauth/token",
+            headers: {
+                "content-type": "application/json",
+                "trakt-api-key": clientId,
+            },
+            body: JSON.stringify({
+                client_id: clientId,
+                redirect_uri: "thirdparty://oauth/callback",
+                grant_type: "authorization_code",
+                code: "auth-code",
+            }),
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(tokenRun.result).length, 0);
+    }
+});
+
+test("官方 Trakt Client 的授权请求不会被篡改", async () => {
+    const { result } = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=${TRAKT_TAMPER_CLIENT_ID}&redirect_uri=trakt%3A%2F%2Fauth`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("非 code 的授权请求不会被篡改", async () => {
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/authorize?response_type=token&client_id=old-client&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("rex://、forward:// 和 reflix:// redirect_uri 会禁用篡改应用授权", async () => {
+    for (const redirectUri of ["rex://callback", "forward://callback", "reflix://callback", "Reflix://oauth/callback"]) {
+        const authorizeRun = await runRequestCase({
+            url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(authorizeRun.result).length, 0);
+
+        const tokenRun = await runRequestCase({
+            url: "https://auth.trakt.tv/oauth/token",
+            headers: {
+                "content-type": "application/json",
+            },
+            body: JSON.stringify({
+                client_id: "old-client",
+                redirect_uri: redirectUri,
+                refresh_token: "refresh-token",
+                grant_type: "refresh_token",
+            }),
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+        assert.equal(Object.keys(tokenRun.result).length, 0);
+    }
+});
+
+test("官方 Trakt Client 的 device 请求不会被篡改", async () => {
+    const codeRun = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": TRAKT_TAMPER_CLIENT_ID,
+        },
+        body: JSON.stringify({ client_id: TRAKT_TAMPER_CLIENT_ID }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(Object.keys(codeRun.result).length, 0);
+
+    const tokenRun = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": TRAKT_TAMPER_CLIENT_ID,
+        },
+        body: JSON.stringify({ client_id: TRAKT_TAMPER_CLIENT_ID, code: "official-device-code" }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(Object.keys(tokenRun.result).length, 0);
+});
+
+test("篡改应用授权会替换 device/code 的 trakt-api-key 和 JSON client_id", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+            "content-length": "99",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client" }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(Object.hasOwn(result.headers, "content-length"), false);
+    assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID);
+});
+
+test("篡改应用授权会替换 device/token 的 client_id 并移除 client_secret", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            "trakt-api-key": "old-client",
+        },
+        body: "code=device-code&client_id=old-client&client_secret=old-secret",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.match(result.body, /(?:^|&)client_id=fa21865a71b1bbf9464522c876864aa6e863df53d1f3e3fc7398394ead549787(?:&|$)/);
+    assert.doesNotMatch(result.body, /(?:^|&)client_secret=/);
+});
+
+test("篡改应用授权会改写授权地址并保留 scope，同时记录第三方 redirect_uri", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const { result, persistentData } = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state&scope=public`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const targetUrl = new URL(result.url);
+    assert.equal(`${targetUrl.origin}${targetUrl.pathname}`, "https://auth.trakt.tv/oauth/authorize");
+    assert.equal(targetUrl.searchParams.get("response_type"), "code");
+    assert.equal(targetUrl.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(targetUrl.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(targetUrl.searchParams.get("lang"), "zh-hans-cn");
+    assert.equal(targetUrl.searchParams.get("code_challenge_method"), "S256");
+    assert.equal(targetUrl.searchParams.get("state"), targetUrl.searchParams.get("code_challenge"));
+    assert.equal(targetUrl.searchParams.get("scope"), "public offline_access");
+
+    const state = readLatestTamperState(persistentData);
+    assert.equal(state.redirectUri, redirectUri);
+    assert.equal(state.originalState, "original-state");
+    assert.match(state.codeVerifier, /^[A-Za-z0-9\-._~]{43,128}$/);
+    assert.equal(targetUrl.searchParams.get("code_challenge"), state.codeChallenge);
+    assert.equal(createHash("sha256").update(state.codeVerifier).digest("base64url"), state.codeChallenge);
+});
+
+test("篡改应用授权每次授权生成不同的 PKCE verifier，并保留多条流程状态", async () => {
+    const firstRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=first%3A%2F%2Fcallback&state=first",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const secondRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=second%3A%2F%2Fcallback&state=second",
+        persistentData: firstRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const firstTargetUrl = new URL(firstRun.result.url);
+    const secondTargetUrl = new URL(secondRun.result.url);
+    const states = readTamperStates(secondRun.persistentData);
+    assert.equal(states.length, 2);
+    assert.notEqual(states[0].codeVerifier, states[1].codeVerifier);
+    assert.notEqual(states[0].codeChallenge, states[1].codeChallenge);
+
+    const firstCallbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(firstTargetUrl, "first-code"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=first-code",
+        },
+        persistentData: secondRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(firstCallbackRun.result.headers.Location, "first://callback?code=first-code&state=first");
+
+    const secondCallbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(secondTargetUrl, "second-code"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=second-code",
+        },
+        persistentData: secondRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(secondCallbackRun.result.headers.Location, "second://callback?code=second-code&state=second");
+});
+
+test("篡改应用授权会把 Trakt 回调还原为第三方 App 的 redirect_uri", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "callback-code"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=callback-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(callbackRun.result.status, 302);
+    assert.equal(callbackRun.result.headers.Location, "thirdparty://oauth/callback?code=callback-code&state=original-state");
+    assert.equal(readLatestTamperState(callbackRun.persistentData).code, "callback-code");
+});
+
+test("trakt.tv 回调响应也会还原为第三方 App 的 redirect_uri", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "callback-code", "trakt.tv"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: `trakt://auth?code=callback-code&state=${targetUrl.searchParams.get("state")}`,
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(callbackRun.result.status, 302);
+    assert.equal(callbackRun.result.headers.Location, "thirdparty://oauth/callback?code=callback-code&state=original-state");
+});
+
+test("篡改应用授权会用回调 code 对应的 verifier 改写 token 请求", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "auth-code"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=auth-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const state = readLatestTamperState(callbackRun.persistentData);
+
+    const { result } = await runRequestCase({
+        url: "https://auth.trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "content-length": "200",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({
+            client_id: "old-client",
+            client_secret: "old-secret",
+            redirect_uri: redirectUri,
+            code: "auth-code",
+            grant_type: "authorization_code",
+            code_verifier: "old-verifier",
+        }),
+        persistentData: callbackRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(Object.hasOwn(result.headers, "content-length"), false);
+    assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(payload.redirect_uri, TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(payload.code_verifier, state.codeVerifier);
+    assert.equal(payload.code, "auth-code");
+    assert.equal(Object.hasOwn(payload, "client_secret"), false);
+});
+
+test("篡改应用授权会改写发往 trakt.tv 的 token 请求", async () => {
+    const redirectUri = "senplayer://oauth-trakt";
+    const originalClientId = "7b898599ce5b183b48819a49e2ef6280e235bdfe7603e8e3a242c2ff1c6b1440";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=${originalClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "senplayer-code", "trakt.tv"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=senplayer-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const state = readLatestTamperState(callbackRun.persistentData);
+
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "content-length": "220",
+            "trakt-api-key": originalClientId,
+        },
+        body: JSON.stringify({
+            code: "senplayer-code",
+            client_secret: "old-secret",
+            client_id: originalClientId,
+            grant_type: "authorization_code",
+            redirect_uri: redirectUri,
+        }),
+        persistentData: callbackRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(Object.hasOwn(result.headers, "content-length"), false);
+    assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(payload.redirect_uri, TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(payload.code_verifier, state.codeVerifier);
+    assert.equal(payload.code, "senplayer-code");
+    assert.equal(Object.hasOwn(payload, "client_secret"), false);
+});
+
+test("authorization_code token 仅在 code 匹配时改写", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://auth.trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            client_id: "old-client",
+            redirect_uri: redirectUri,
+            code: "unknown-code",
+            grant_type: "authorization_code",
+        }),
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("篡改应用授权 refresh_token 命中 token 记录时移除 client_secret 且不注入 code_verifier", async () => {
+    const clientId = "old-client";
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("old-access-token", "refresh-token", { clientId })],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://auth.trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: JSON.stringify({
+            client_id: clientId,
+            client_secret: "old-secret",
+            redirect_uri: "thirdparty://oauth/callback",
+            refresh_token: "refresh-token",
+            grant_type: "refresh_token",
+        }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(payload.redirect_uri, TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(payload.refresh_token, "refresh-token");
+    assert.equal(Object.hasOwn(payload, "client_secret"), false);
+    assert.equal(Object.hasOwn(payload, "code_verifier"), false);
+});
+
+test("篡改应用授权 token 响应写入记录后状态过期仍能改写 refresh", async () => {
+    const redirectUri = "senplayer://oauth-trakt";
+    const clientId = "7b898599ce5b183b48819a49e2ef6280e235bdfe7603e8e3a242c2ff1c6b1440";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "senplayer-code", "trakt.tv"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=senplayer-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.hasOwn(callbackRun.persistentData, TAMPER_AUTHORIZATION_KEY), true, "篡改授权状态写入独立持久化 key");
+    assert.equal(Object.hasOwn(parseUnifiedCache(callbackRun.persistentData).persistent, "tamperAppAuthorization"), false, "篡改授权状态不再占用 unified cache");
+
+    const tokenRequestBody = JSON.stringify({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        code: "senplayer-code",
+        grant_type: "authorization_code",
+    });
+    const tokenRequestRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: tokenRequestBody,
+        persistentData: callbackRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const tokenResponseRun = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        requestBody: tokenRequestBody,
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "senplayer-access", refresh_token: "senplayer-refresh", expires_in: 604800 }),
+        persistentData: tokenRequestRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokens = readTamperTokens(tokenResponseRun.persistentData);
+    assert.equal(tokens.length, 1, "token 响应应把签发结果写进 unified cache");
+    assert.equal(readTamperStore(tokenResponseRun.persistentData).pending.length, 0);
+
+    // 把授权流程状态人为置为过期，只保留 token 记录
+    const tokenOnly = createTamperPersistentData({ tokens });
+
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: JSON.stringify({
+            client_id: clientId,
+            client_secret: "old-secret",
+            redirect_uri: redirectUri,
+            refresh_token: "senplayer-refresh",
+            grant_type: "refresh_token",
+        }),
+        persistentData: tokenOnly,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(payload.redirect_uri, TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(Object.hasOwn(payload, "client_secret"), false);
+    assert.equal(Object.hasOwn(payload, "code_verifier"), false);
+});
+
+test("篡改应用授权 refresh 只认 refresh_token 命中，不按 client_id 或 redirect_uri 命中", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("bound-access", "bound-refresh", { clientId: "bound-client" })],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            client_id: "bound-client",
+            redirect_uri: "thirdparty://oauth/callback",
+            refresh_token: "other-refresh",
+            grant_type: "refresh_token",
+        }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("篡改应用授权 refresh 无 redirect_uri 时可按 refresh_token 命中记录", async () => {
+    const clientId = "old-client";
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("old-access", "refresh-token", { clientId })],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: JSON.stringify({
+            client_id: clientId,
+            refresh_token: "refresh-token",
+            grant_type: "refresh_token",
+        }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.client_id, TRAKT_TAMPER_CLIENT_ID);
+});
+
+test("篡改应用授权 refresh 响应会用新 token 替换旧记录并更新过期时间", async () => {
+    const clientId = "old-client";
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("old-access", "old-refresh", { clientId, expiresAt: Date.now() + 60 * 1000 })],
+    });
+
+    const requestBody = JSON.stringify({
+        client_id: clientId,
+        refresh_token: "old-refresh",
+        grant_type: "refresh_token",
+    });
+    const tokenRequestRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: requestBody,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(readTamperStore(tokenRequestRun.persistentData).pending.length, 1);
+
+    const tokenResponseRun = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        requestBody,
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 604800 }),
+        persistentData: tokenRequestRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokens = readTamperTokens(tokenResponseRun.persistentData);
+    assert.equal(tokens.length, 1, "刷新后应替换旧记录而不是追加");
+    assert.equal(tokens[0].accessToken, "new-access");
+    assert.equal(tokens[0].refreshToken, "new-refresh");
+    const remaining = Number(tokens[0].expiresAt) - Date.now();
+    assert.ok(remaining > TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS - 60 * 1000, "应按 expires_in 更新过期时间");
+});
+
+test("篡改应用授权在响应阶段拿不到请求体时按唯一 pending 兜底写入 token 记录", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "no-body-code", "trakt.tv"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=no-body-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokenRequestBody = JSON.stringify({
+        client_id: "old-client",
+        redirect_uri: redirectUri,
+        code: "no-body-code",
+        grant_type: "authorization_code",
+    });
+    const tokenRequestRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: tokenRequestBody,
+        persistentData: callbackRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(readTamperStore(tokenRequestRun.persistentData).pending.length, 1);
+
+    // 模拟响应阶段拿不到 $request.body：只能按唯一 pending 兜底
+    const tokenResponseRun = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "no-body-access", refresh_token: "no-body-refresh", expires_in: 604800 }),
+        persistentData: tokenRequestRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const store = readTamperStore(tokenResponseRun.persistentData);
+    assert.equal(store.pending.length, 0);
+    assert.equal(store.tokens.length, 1);
+    assert.equal(store.tokens[0].accessToken, "no-body-access");
+    assert.equal(store.tokens[0].refreshToken, "no-body-refresh");
+});
+
+// 平台给响应脚本的请求头可能已被请求阶段改写为官方 client id：此时原始 client 不可知，应退回唯一 pending 匹配
+test("篡改应用授权响应阶段请求头已是官方 client 时仍按唯一 pending 写入 token 记录", async () => {
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "authorization_code",
+                id: "official-header-code",
+                clientId: "old-client",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: nextPersistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": TRAKT_TAMPER_CLIENT_ID,
+        },
+        body: JSON.stringify({ access_token: "official-header-access", refresh_token: "official-header-refresh", expires_in: 604800 }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const store = readTamperStore(nextPersistentData);
+    assert.equal(store.pending.length, 0);
+    assert.equal(store.tokens.length, 1);
+    assert.equal(store.tokens[0].accessToken, "official-header-access");
+    assert.equal(store.tokens[0].clientId, "old-client");
+});
+
+test("篡改应用授权 refresh 响应阶段拿不到请求体时也能替换旧记录", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("old-access", "old-refresh", { clientId: "old-client", expiresAt: Date.now() + 60 * 1000 })],
+    });
+
+    const requestBody = JSON.stringify({
+        client_id: "old-client",
+        refresh_token: "old-refresh",
+        grant_type: "refresh_token",
+    });
+    const tokenRequestRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: requestBody,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokenResponseRun = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 604800 }),
+        persistentData: tokenRequestRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokens = readTamperTokens(tokenResponseRun.persistentData);
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].accessToken, "new-access");
+    assert.equal(tokens[0].refreshToken, "new-refresh");
+});
+
+test("篡改应用授权 token 交换失败时保留 pending", async () => {
+    const clientId = "old-client";
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "authorization_code",
+                id: "failed-code",
+                clientId,
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: updatedData } = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ error: "invalid_grant" }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(readTamperStore(updatedData).pending.length, 1);
+    assert.equal(readTamperTokens(updatedData).length, 0);
+});
+
+test("篡改应用授权 refresh_token 不在 token 记录时放行", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("some-access", "some-refresh")],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            client_id: "old-client",
+            redirect_uri: "thirdparty://oauth/callback",
+            refresh_token: "old-refresh",
+            grant_type: "refresh_token",
+        }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("篡改应用授权 device/code 响应写入 device_code pending，device/token 成功后可改写非认证请求", async () => {
+    const clientId = "old-client";
+    const deviceCodeRequestBody = JSON.stringify({ client_id: clientId });
+    const deviceCodeRun = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: deviceCodeRequestBody,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(readTamperStore(deviceCodeRun.persistentData).pending.length, 1, "device/code 请求写 device_flow 标记");
+
+    const deviceCodeResponseRun = await runResponseCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        requestBody: deviceCodeRequestBody,
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            device_code: "device-code",
+            user_code: "USER",
+            verification_url: "https://trakt.tv/activate",
+            expires_in: 600,
+            interval: 5,
+        }),
+        persistentData: deviceCodeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const deviceCodeStore = readTamperStore(deviceCodeResponseRun.persistentData);
+    assert.equal(deviceCodeStore.pending.length, 1);
+    assert.equal(deviceCodeStore.pending[0].kind, "device_code");
+    assert.equal(deviceCodeStore.pending[0].id, "device-code");
+    assert.ok(Number(deviceCodeStore.pending[0].expiresAt) - Date.now() > 9 * 60 * 1000, "device_code pending 应覆盖 Trakt 的 expires_in");
+
+    const deviceRequestBody = JSON.stringify({ client_id: clientId, code: "device-code" });
+    const deviceTokenRun = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": clientId,
+        },
+        body: deviceRequestBody,
+        persistentData: deviceCodeResponseRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const deviceResponseRun = await runResponseCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        requestBody: deviceRequestBody,
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "device-access", refresh_token: "device-refresh", expires_in: 604800 }),
+        persistentData: deviceTokenRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokens = readTamperTokens(deviceResponseRun.persistentData);
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].accessToken, "device-access");
+    assert.equal(readTamperStore(deviceResponseRun.persistentData).pending.length, 0);
+
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            authorization: "Bearer device-access",
+            "trakt-api-key": clientId,
+        },
+        persistentData: deviceResponseRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+});
+
+test("篡改应用授权会把带 access token 的非认证请求 trakt-api-key 换成篡改应用 client id", async () => {
+    const accessToken = "PTUrnuoZdFhppVGGLiWVodKJfRcDrQxv";
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord(accessToken, "refresh-token")],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            "content-length": "101",
+            authorization: `Bearer ${accessToken}`,
+            "trakt-api-key": "7b898599ce5b183b48819a49e2ef6280e235bdfe7603e8e3a242c2ff1c6b1440",
+        },
+        body: JSON.stringify({ shows: [] }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.url, "https://api.trakt.tv/sync/history");
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(result.headers.authorization, `Bearer ${accessToken}`);
+    // 只改 trakt-api-key、不动请求体：必须原样保留 content-length，QX 的 header-only 重写不会自动补长度头
+    assert.equal(result.headers["content-length"], "101");
+    assert.equal(Object.hasOwn(result, "body"), false);
+});
+
+// QX 的 script-request-header 只回 headers：丢了 content-length 会让带 body 的 POST 变成没有请求体
+test("篡改应用授权在 QX 请求头脚本里改写 trakt-api-key 时保留 content-length", async () => {
+    const accessToken = "qx-watchlist-access";
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord(accessToken, "refresh-token")],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/watchlist",
+        headers: {
+            "content-type": "application/json",
+            "content-length": "42",
+            authorization: `Bearer ${accessToken}`,
+            "trakt-api-key": "third-party-client",
+        },
+        requestBody: JSON.stringify({ movies: [{ ids: { trakt: 1 } }] }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(result.headers["content-length"], "42");
+    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
+});
+
+test("篡改应用授权非认证请求未带 access token 时不改写 trakt-api-key", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-token", "refresh-token")],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("篡改应用授权非认证请求 access token 未命中 token 记录时不改写", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            authorization: "Bearer unbound-access-token",
+            "trakt-api-key": "old-client",
+        },
+        persistentData: createTamperPersistentData({
+            tokens: [createTamperTokenRecord("bound-access-token", "bound-refresh-token")],
+        }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+// 授权响应漏记 token 时，用「该 client 仍有新鲜的篡改授权流程记录」补记一次，让存量授权也能自愈
+test("篡改应用授权 token 记录缺失但授权流程仍新鲜时补记并改写非认证请求", async () => {
+    const persistentData = createTamperPersistentData({
+        records: [
+            createTamperStateRecord(0, {
+                clientId: "old-client",
+                code: "fresh-code",
+                redirectUri: "thirdparty://oauth/callback",
+            }),
+        ],
+    });
+
+    const { result, persistentData: nextPersistentData } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            authorization: "Bearer fresh-access-token",
+            "trakt-api-key": "old-client",
+        },
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    const tokens = readTamperTokens(nextPersistentData);
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].accessToken, "fresh-access-token");
+    assert.equal(tokens[0].clientId, "old-client");
+});
+
+test("篡改应用授权授权流程已过期时不会凭 Bearer token 补记", async () => {
+    const persistentData = createTamperPersistentData({
+        records: [
+            createTamperStateRecord(0, {
+                clientId: "old-client",
+                createdAt: Date.now() - 5 * 60 * 1000 - 1000,
+            }),
+        ],
+    });
+
+    const { result, persistentData: nextPersistentData } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            authorization: "Bearer stale-access-token",
+            "trakt-api-key": "old-client",
+        },
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+    assert.equal(readTamperTokens(nextPersistentData).length, 0);
+});
+
+test("篡改应用授权非认证请求命中 token 记录时没有 trakt-api-key 也会补上官方 client id", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history",
+        headers: {
+            "content-type": "application/json",
+            authorization: "Bearer access-token",
+        },
+        persistentData: createTamperPersistentData({
+            tokens: [createTamperTokenRecord("access-token", "refresh-token")],
+        }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+});
+
+test("篡改应用授权已由其他路由改写请求时仍会补上 trakt-api-key", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-token", "refresh-token")],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/sync/history/episodes",
+        headers: {
+            "content-type": "application/json",
+            "user-agent": "Trakt/1.0",
+            authorization: "Bearer access-token",
+        },
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+            historyEpisodesMergedByShow: true,
+        },
+    });
+
+    assert.match(result.url, /[?&]limit=/);
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+});
+
+test("篡改应用授权 refresh_token 在没有匹配 token 记录时放行", async () => {
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({
+            client_id: "old-client",
+            client_secret: "old-secret",
+            redirect_uri: "senplayer://oauth-trakt",
+            refresh_token: "refresh-token",
+            grant_type: "refresh_token",
+        }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("篡改应用授权状态超过 5 分钟后不再参与 authorization_code 匹配", async () => {
+    const persistentData = createTamperPersistentData({
+        records: [
+            createTamperStateRecord(0, {
+                redirectUri: "thirdparty://oauth/callback",
+                code: "stale-code",
+                createdAt: Date.now() - 5 * 60 * 1000 - 1000,
+            }),
+        ],
+    });
+
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            client_id: "old-client",
+            redirect_uri: "thirdparty://oauth/callback",
+            code: "stale-code",
+            grant_type: "authorization_code",
+        }),
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("官方 Trakt Client 的 token 请求不会被篡改", async () => {
+    const { result } = await runRequestCase({
+        url: "https://auth.trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({
+            client_id: TRAKT_TAMPER_CLIENT_ID,
+            redirect_uri: TRAKT_TAMPER_REDIRECT_URI,
+            code: "official-code",
+            grant_type: "authorization_code",
+        }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0);
+});
+
+test("已改写的授权地址不会覆盖第三方流程状态", async () => {
+    const redirectUri = "thirdparty://oauth/callback";
+    const firstRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const secondRun = await runRequestCase({
+        url: firstRun.result.url,
+        persistentData: firstRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(Object.keys(secondRun.result).length, 0);
+
+    const targetUrl = new URL(firstRun.result.url);
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "callback-code"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=callback-code",
+        },
+        persistentData: secondRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    assert.equal(callbackRun.result.headers.Location, "thirdparty://oauth/callback?code=callback-code&state=original-state");
+});
+
+test("篡改应用授权不会按第三方原始 state 匹配回调", async () => {
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("thirdparty://oauth/callback")}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const callbackRun = await runResponseCase({
+        url: "https://auth.trakt.tv/api/auth/oauth2/authorize?state=original-state&code=other-code",
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=other-code&state=original-state",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(callbackRun.result).length, 0);
+});
+
+test("篡改应用授权在 QX 字符串状态码下仍返回 302", async () => {
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("thirdparty://oauth/callback")}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "callback-code"),
+        responseStatus: "HTTP/1.1 302 Found",
+        responseHeaders: {
+            location: "trakt://auth?code=callback-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(callbackRun.result.status, 302);
+    assert.equal(callbackRun.result.headers.Location, "thirdparty://oauth/callback?code=callback-code&state=original-state");
+});
+
+test("篡改应用授权在已有流程记录时不会覆盖其它流程状态", async () => {
+    const existingCount = TRAKT_TAMPER_STATE_RECORD_LIMIT - 1;
+    const persistentData = createTamperPersistentData({
+        records: Array.from({ length: existingCount }, (_, index) => createTamperStateRecord(index)),
+    });
+
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("thirdparty://oauth/callback")}&state=original-state`,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const states = readTamperStates(authorizeRun.persistentData);
+    assert.equal(states.length, TRAKT_TAMPER_STATE_RECORD_LIMIT);
+    for (let index = 0; index < existingCount; index += 1) {
+        assert.ok(states.some((state) => state.id === `existing-id-${index}`));
+    }
+});
+
+test("篡改应用授权在记录数超限时淘汰最没有保留价值的流程", async () => {
+    const now = Date.now();
+    const limit = TRAKT_TAMPER_STATE_RECORD_LIMIT;
+    const persistentData = createTamperPersistentData({
+        records: Array.from({ length: limit }, (_, index) => createTamperStateRecord(index, { createdAt: now - (limit - index) * 1000 })),
+    });
+
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("thirdparty://oauth/callback")}&state=original-state`,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const states = readTamperStates(authorizeRun.persistentData);
+    assert.equal(states.length, limit);
+    assert.equal(
+        states.some((state) => state.id === "existing-id-0"),
+        false,
+    );
+});
+
+test("篡改应用授权在流程记录占满时保留最新流程", async () => {
+    const now = Date.now();
+    const limit = TRAKT_TAMPER_STATE_RECORD_LIMIT;
+    const persistentData = createTamperPersistentData({
+        records: Array.from({ length: limit }, (_, index) => createTamperStateRecord(index, { createdAt: now - (limit - index) * 1000 })),
+    });
+
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("thirdparty://oauth/callback")}&state=original-state`,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const challenge = new URL(authorizeRun.result.url).searchParams.get("code_challenge");
+    const states = readTamperStates(authorizeRun.persistentData);
+    assert.equal(states.length, limit);
+    assert.ok(
+        states.some((state) => state.id === challenge),
+        "进行中的新流程必须保留",
+    );
+    assert.equal(
+        states.some((state) => state.id === "existing-id-0"),
+        false,
+        "应淘汰最旧的流程",
+    );
+});
+
+test("篡改应用授权 device/token 轮询不再写 unified cache", async () => {
+    const { persistentData } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client", code: "device-code" }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.hasOwn(persistentData, UNIFIED_CACHE_KEY), false, "轮询不应写 unified cache");
+    assert.equal(Object.hasOwn(persistentData, TAMPER_AUTHORIZATION_KEY), false, "轮询也不写独立的篡改授权 key");
+});
+
+test("篡改应用授权 token 记录超过上限时保留最新记录", async () => {
+    const limit = TRAKT_TAMPER_TOKEN_RECORD_LIMIT;
+    const tokens = Array.from({ length: limit }, (_, index) => createTamperTokenRecord(`access-${index}`, `refresh-${index}`, { createdAt: Date.now() - (limit - index) * 1000 }));
+    const persistentData = createTamperPersistentData({ tokens });
+
+    const requestBody = JSON.stringify({
+        client_id: "old-client",
+        refresh_token: `refresh-${limit - 1}`,
+        grant_type: "refresh_token",
+    });
+    const tokenRequestRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: requestBody,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const tokenResponseRun = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        requestBody,
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "newest-access", refresh_token: "newest-refresh", expires_in: 604800 }),
+        persistentData: tokenRequestRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const resultTokens = readTamperTokens(tokenResponseRun.persistentData);
+    assert.equal(resultTokens.length, limit);
+    assert.ok(resultTokens.some((token) => token.accessToken === "newest-access"));
+});
+
+test("篡改应用授权 token 记录超限时优先淘汰无 refresh_token 的过期记录", async () => {
+    const limit = TRAKT_TAMPER_TOKEN_RECORD_LIMIT;
+    const now = Date.now();
+    const redirectUri = "thirdparty://oauth/callback";
+    const authorizeRun = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const targetUrl = new URL(authorizeRun.result.url);
+    const callbackRun = await runResponseCase({
+        url: createTamperCallbackUrl(targetUrl, "cap-code", "trakt.tv"),
+        responseStatus: 302,
+        responseHeaders: {
+            location: "trakt://auth?code=cap-code",
+        },
+        persistentData: authorizeRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const liveTokens = Array.from({ length: limit - 1 }, (_, index) =>
+        createTamperTokenRecord(`live-access-${index}`, `live-refresh-${index}`, { createdAt: now - (limit - index) * 1000 }),
+    );
+    const deadToken = createTamperTokenRecord("dead-access", "", { createdAt: now, expiresAt: now - 1000 });
+    const persistentData = createTamperPersistentData({
+        records: readTamperRecords(callbackRun.persistentData),
+        tokens: [...liveTokens, deadToken],
+    });
+
+    const requestBody = JSON.stringify({
+        client_id: "old-client",
+        redirect_uri: redirectUri,
+        code: "cap-code",
+        grant_type: "authorization_code",
+    });
+    const tokenRequestRun = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: requestBody,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+    const tokenResponseRun = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        requestBody,
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "new-access", refresh_token: "new-refresh", expires_in: 604800 }),
+        persistentData: tokenRequestRun.persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokens = readTamperTokens(tokenResponseRun.persistentData);
+    assert.equal(tokens.length, limit);
+    assert.equal(
+        tokens.some((token) => token.accessToken === "dead-access"),
+        false,
+        "无 refresh_token 的过期记录应优先淘汰",
+    );
+    assert.ok(tokens.some((token) => token.accessToken === "new-access"));
+});
+
+// QX 的 script-request-body 只能返回 body，trakt-api-key 由并行的 script-request-header 规则补写：
+// 这些用例固定住「只回 headers、绝不回 body」的行为，避免请求体被覆盖成残缺内容
+test("篡改应用授权在 QX 请求头脚本里只补写 trakt-api-key", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        environment: "qx",
+        omitRequestBody: true,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(result.url, "https://api.trakt.tv/oauth/device/code");
+    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
+});
+
+test("篡改应用授权在 QX 请求头脚本里改写 query 形式的 client_id", async () => {
+    const persistentData = createTamperPersistentData({
+        records: [createTamperStateRecord(0, { id: "flow-id", clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token?client_id=old-client&client_secret=secret&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback",
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const target = new URL(result.url);
+    assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(target.searchParams.get("client_secret"), null);
+    assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+});
+
+test("篡改应用授权在 QX 请求头脚本里遇到 query 形式的禁用 redirect_uri 会放行", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: `https://trakt.tv/oauth/token?client_id=old-client&redirect_uri=${encodeURIComponent("rex://oauth/callback")}`,
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0, "禁用篡改的 redirect_uri 应直接放行");
+});
+
+test("篡改应用授权在 QX 请求头脚本里识别不出第三方 client 时放行", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+        },
+        environment: "qx",
+        omitRequestBody: true,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    // 结果对象来自 vm 上下文，不能用 deepStrictEqual 跨 realm 比较
+    assert.equal(Object.keys(result).length, 0, "无法识别 client 时不应改写请求头");
+});
+
+test("篡改应用授权在 QX 请求头脚本里遇到没有篡改痕迹的 token 请求会放行", async () => {
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "trakt-api-key": "old-client",
+        },
+        environment: "qx",
+        omitRequestBody: true,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0, "没有授权流程状态或 token 记录时不应改写 trakt-api-key");
+});
+
+test("篡改应用授权在 QX 请求头脚本里按授权流程状态补写 token 请求的 trakt-api-key", async () => {
+    const persistentData = createTamperPersistentData({
+        records: [createTamperStateRecord(0, { id: "flow-id", clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "trakt-api-key": "old-client",
+        },
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
+});
+
+test("篡改应用授权在 QX 请求头脚本里按已签发 token 的 client 补写 refresh 请求", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "trakt-api-key": "old-client",
+        },
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+});
+
+test("篡改应用授权在 QX 请求头脚本里遇到禁用篡改的 redirect_uri 时不写流程状态", async () => {
+    const { persistentData, result } = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=rex-client&redirect_uri=${encodeURIComponent("rex://oauth/callback")}&state=original-state`,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0, "禁用篡改的 redirect_uri 应直接放行");
+    assert.equal(readTamperStore(persistentData).records.length, 0, "放行的授权请求不应写流程状态");
+});
+
+test("篡改应用授权在 QX 请求体脚本里仍然改写 body 与 trakt-api-key", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client" }),
+        environment: "qx",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID);
+});
+
+// QX 的 script-response-body 拿不到 $request.body：靠 sessionIndex 精确关联，避免并发授权时串号
+test("篡改应用授权在 QX 响应阶段按 sessionIndex 精确命中 pending", async () => {
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "authorization_code",
+                id: "code-a",
+                clientId: "client-a",
+                sessionIndex: "session-a",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60 * 1000,
+            },
+            {
+                kind: "authorization_code",
+                id: "code-b",
+                clientId: "client-b",
+                sessionIndex: "session-b",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: nextPersistentData } = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "access-b", refresh_token: "refresh-b", expires_in: 604800 }),
+        environment: "qx",
+        omitRequestBody: true,
+        requestSessionIndex: "session-b",
+        responseSessionIndex: "session-b",
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const store = readTamperStore(nextPersistentData);
+    assert.equal(store.tokens.length, 1);
+    assert.equal(store.tokens[0].accessToken, "access-b");
+    assert.equal(store.tokens[0].clientId, "client-b", "应关联到 sessionIndex 对应的流程");
+    const pendingIds = store.pending.map((entry) => String(entry.id));
+    assert.ok(pendingIds.includes("code-a"), "未命中的流程状态应保留");
+    assert.equal(pendingIds.includes("code-b"), false, "命中的 pending 应被消费");
+});
+
+test("篡改应用授权在 QX 响应阶段拿不到请求体时按唯一 pending 兜底", async () => {
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "device_code",
+                id: "device-code",
+                clientId: "old-client",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: nextPersistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: JSON.stringify({ access_token: "device-access", refresh_token: "device-refresh", expires_in: 604800 }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const tokens = readTamperTokens(nextPersistentData);
+    assert.equal(tokens.length, 1);
+    assert.equal(tokens[0].accessToken, "device-access");
+    assert.equal(tokens[0].clientId, "old-client");
+});
+
+// 兜底匹配必须同时看「请求路径对应的 pending 类型」和「client」，否则会把别的 App 的 token 响应算进篡改流程
+test("篡改应用授权拿不到请求体时不会用 device_code pending 消费 token 响应", async () => {
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "device_code",
+                id: "device-code",
+                clientId: "old-client",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 10 * 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: nextPersistentData } = await runResponseCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ access_token: "other-app-access", refresh_token: "other-app-refresh", expires_in: 604800 }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const store = readTamperStore(nextPersistentData);
+    assert.equal(store.tokens.length, 0, "oauth/token 的响应不应消费 device_code pending");
+    assert.equal(store.pending.length, 1, "未命中的 device_code pending 应保留");
+});
+
+test("篡改应用授权拿不到请求体时 client 不一致的 device/token 响应不会消费 pending", async () => {
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "device_code",
+                id: "device-code",
+                clientId: "app-a",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 10 * 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: nextPersistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "app-b",
+        },
+        body: JSON.stringify({ access_token: "app-b-access", refresh_token: "app-b-refresh", expires_in: 604800 }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const store = readTamperStore(nextPersistentData);
+    assert.equal(store.tokens.length, 0, "client 不一致时不应把 token 记成篡改流程签发");
+    assert.equal(store.pending.length, 1, "未命中的 device_code pending 应保留");
+});
+
+test("篡改应用授权拿不到请求体时仍能按 client 命中 device/token 的 pending", async () => {
+    const persistentData = createTamperPersistentData({
+        pending: [
+            {
+                kind: "device_code",
+                id: "device-code-a",
+                clientId: "app-a",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 10 * 60 * 1000,
+            },
+            {
+                kind: "authorization_code",
+                id: "code-b",
+                clientId: "app-b",
+                createdAt: Date.now(),
+                expiresAt: Date.now() + 60 * 1000,
+            },
+        ],
+    });
+
+    const { persistentData: nextPersistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/oauth/device/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "app-a",
+        },
+        body: JSON.stringify({ access_token: "device-access-a", refresh_token: "device-refresh-a", expires_in: 604800 }),
+        environment: "qx",
+        omitRequestBody: true,
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    const store = readTamperStore(nextPersistentData);
+    assert.equal(store.tokens.length, 1);
+    assert.equal(store.tokens[0].accessToken, "device-access-a");
+    assert.equal(store.tokens[0].clientId, "app-a");
+    assert.deepEqual(
+        store.pending.map((entry) => String(entry.id)),
+        ["code-b"],
+        "只消费命中 client 的 device_code pending",
+    );
 });

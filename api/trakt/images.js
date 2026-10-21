@@ -1,6 +1,7 @@
 const {
     getKvConfig,
     getResponseCacheStatus,
+    normalizeLocale,
     parseIds,
     parseSeasonKeys,
     readJsonBody,
@@ -26,19 +27,21 @@ async function handleGet(req, res, kvConfig) {
         return;
     }
 
-    const { shows, movies, seasons } = await readManyImageGroupsFromKv(kvConfig, {
+    const locale = normalizeLocale(req.query.locale);
+    const { shows, movies, seasons, cn } = await readManyImageGroupsFromKv(kvConfig, {
         mode,
+        locale,
         shows: showIds,
         movies: movieIds,
         seasons: seasonKeys,
     });
 
     setResponseCacheHeaders(res, getResponseCacheStatus(shows, movies, seasons));
-    res.status(200).json({
-        shows,
-        movies,
-        seasons,
-    });
+    const response = { shows, movies, seasons };
+    if (cn && Object.keys(cn.shows).length + Object.keys(cn.movies).length + Object.keys(cn.seasons).length > 0) {
+        response.cn = cn;
+    }
+    res.status(200).json(response);
 }
 
 async function handlePost(req, res, kvConfig) {
@@ -50,7 +53,7 @@ async function handlePost(req, res, kvConfig) {
     const payload = await readJsonBody(req);
     const modes = payload?.modes && typeof payload.modes === "object" ? payload.modes : {};
 
-    await writeManyImageGroupsToKv(kvConfig, { modes });
+    await writeManyImageGroupsToKv(kvConfig, { locale: normalizeLocale(payload?.locale), modes, cn: payload?.cn });
 
     res.status(200).json({
         counts: {

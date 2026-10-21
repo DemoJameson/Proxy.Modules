@@ -21,7 +21,7 @@
 - `npm run sync:env.js`：同步代理运行时 Env 适配文件。
 - `npm run check:trakt`：格式检查、构建 Trakt 产物，并对源码、vendor 和构建后的脚本做 `node --check`。
 - `npm test`：构建 Trakt 后运行默认离线测试，不依赖真实凭据或外部服务。
-- `npm run test:trakt:live`：运行真实 Trakt/Vercel 后端联调，可能需要 `TRAKT_API_KEY`、`TRAKT_CLIENT_SECRET`、`TRAKT_OAUTH_TOKEN`、`TRAKT_BACKEND_BASE_URL` 等本地配置。
+- `npm run test:trakt:live`：运行真实 Trakt/Vercel 后端联调，可能需要 `TRAKT_API_KEY`、`TRAKT_OAUTH_TOKEN`、`TRAKT_BACKEND_BASE_URL` 等本地配置。
 - `npm run test:trakt:all`：串行运行完整 Trakt 测试集合。
 - `node --test tests/xxx.test.mjs`：定向跑单个测试文件；必须前先执行 `npm run format` 和 `npm run build:trakt` 等待编译完成，确保脚本产物是最新的，之后才运行测试。
 
@@ -39,7 +39,7 @@
 
 `trakt_simplified_chinese/*.js`、`*.plugin`、`*.sgmodule`、`*.snippet` 以及根目录 `boxjs.json` 是发布/订阅相关产物或配置。修改 Trakt 源码、模块参数、资源链接或 Env 适配时，运行 `npm run build:trakt` 并检查这些文件是否随之变化。
 
-`trakt_simplified_chinese/trakt_simplified_chinese.js` 开头带 5 行中文元信息（名称/描述/主页/作者/生成时间，固定按 +08:00 精确到分钟），因此每次构建都会改动该产物的头部，属于预期行为；`.plugin`、`.sgmodule`、`.snippet` 与 `boxjs.json` 不含时间戳，保持逐字节可比对。同一次构建时间还会作为脚本版本号（`YYMMDDHHmm`）注入产物，用于自建后端请求的 UA 标识（`TraktSimplifiedChinese/<版本号>`）。
+`trakt_simplified_chinese/trakt_simplified_chinese.js` 开头带 5 行中文元信息（名称/描述/主页/作者/生成时间，固定按 +08:00 精确到分钟），因此每次构建都会改动该产物的头部，属于预期行为；`.plugin`、`.sgmodule`、`.snippet` 的元信息里带同一次构建的 `#!updatedTime`（+08:00 精确到秒），每次构建同样会更新，`boxjs.json` 不含时间戳。同一次构建时间还会作为脚本版本号（`YYMMDDHHmm`）注入产物，用于自建后端请求的 UA 标识（`TraktSimplifiedChinese/<版本号>`）。
 
 发布链接在 `README.md` 中指向 GitHub raw 的 `main` 分支；调整目录名、产物名或新增模块时，同步更新 README 链接和对应平台配置。
 

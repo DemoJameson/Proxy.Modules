@@ -1,4 +1,5 @@
 import * as commonUtils from "../utils/common.mjs";
+import * as chineseLocale from "./chinese-script-converter.mjs";
 import * as translationEngine from "./translation-engine.mjs";
 
 function normalizeTranslation(value) {
@@ -32,7 +33,7 @@ async function translateTextFieldTargets(targets, options = {}) {
             cacheHitCount += 1;
             if (typeof target.applyTranslation === "function") {
                 changed =
-                    target.applyTranslation(cachedTranslation, {
+                    target.applyTranslation(chineseLocale.normalizeChineseForLocale(cachedTranslation), {
                         source: "cache",
                         sourceText,
                         target,
@@ -78,7 +79,7 @@ async function translateTextFieldTargets(targets, options = {}) {
 
         const translatedTexts = result.value;
         languageTargets.forEach((target, index) => {
-            const translatedText = normalizeTranslation(translatedTexts[index]);
+            const translatedText = normalizeTranslation(chineseLocale.normalizeChineseForLocale(translatedTexts[index]));
             if (!translatedText) {
                 return;
             }

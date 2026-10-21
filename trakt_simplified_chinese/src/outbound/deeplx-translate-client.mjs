@@ -1,3 +1,4 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import { ensureArray } from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
@@ -18,6 +19,12 @@ const {
 
 const DEEPLX_TRANSLATE_API_URL = "https://deeplx.demojameson.de5.net/deepl";
 const DEEPLX_TARGET_LANGUAGE = "ZH";
+// DeepL 只有简体/繁体两种目标：港台共用 ZH-HANT，返回的繁体文本按目标地区直接透传（不做二次简繁转换）
+const DEEPLX_TARGET_LANGUAGE_BY_LOCALE = {
+    cn: "ZH",
+    tw: "ZH-HANT",
+    hk: "ZH-HANT",
+};
 const DEEPLX_BATCH_SEPARATOR_PATTERN = "\\n¶\\d+¶\\n";
 const DEEPLX_MAX_TEXT_CHARACTERS = 1500;
 const DEEPLX_MAX_REQUEST_BYTES = 96 * 1024;
@@ -37,11 +44,15 @@ function extractDeepLxTranslatedText(payload) {
     return String(payload?.data ?? payload?.translation ?? payload?.translated_text ?? payload?.translatedText ?? "");
 }
 
+function resolveDeepLxTargetLanguage() {
+    return DEEPLX_TARGET_LANGUAGE_BY_LOCALE[chineseLocale.resolveChineseLocale()] ?? DEEPLX_TARGET_LANGUAGE;
+}
+
 function buildDeepLxPayload(text, sourceLanguage) {
     return {
         text: String(text ?? ""),
         source_lang: normalizeSourceLanguage(sourceLanguage),
-        target_lang: DEEPLX_TARGET_LANGUAGE,
+        target_lang: resolveDeepLxTargetLanguage(),
     };
 }
 

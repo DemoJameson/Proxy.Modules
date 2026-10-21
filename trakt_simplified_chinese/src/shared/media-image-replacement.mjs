@@ -2,6 +2,7 @@ import * as tmdbClientModule from "../outbound/tmdb-client.mjs";
 import * as vercelBackendClientModule from "../outbound/vercel-backend-client.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
+import * as chineseLocale from "./chinese-script-converter.mjs";
 
 import { BACKEND_WRITE_BATCH_SIZE, processInBatches } from "./media-translation-backend.mjs";
 import * as mediaTypes from "./media-types.mjs";
@@ -12,16 +13,43 @@ const IMAGE_NOT_FOUND_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 const IMAGE_PREFERENCE_DETAIL_MEMO_TTL_MS = 30 * 1000;
 const IMAGE_PREFERENCE_DETAIL_MEMO_LIMIT = 200;
 
-const IMAGE_REGION_PRIORITY = ["cn", "sg", "tw", "hk"];
+// 地区优先级随海报语言档位：cn 简体、tw 台湾、hk 香港
+const IMAGE_REGION_PRIORITY_BY_MODE = {
+    cn: ["cn", "sg", "tw", "hk"],
+    tw: ["tw", "hk", "cn", "sg"],
+    hk: ["hk", "tw", "cn", "sg"],
+};
+const IMAGE_REGION_PRIORITY = IMAGE_REGION_PRIORITY_BY_MODE.cn;
 const IMAGE_FIELD = {
     POSTER: "poster",
     LOGO: "logo",
 };
 const POSTER_IMAGE_MODE = {
     DEFAULT: "default",
-    CHINESE: "chinese",
+    CN: "cn",
+    TW: "tw",
+    HK: "hk",
     ORIGINAL: "original",
 };
+const CHINESE_POSTER_MODES = [POSTER_IMAGE_MODE.CN, POSTER_IMAGE_MODE.TW, POSTER_IMAGE_MODE.HK];
+
+function isChinesePosterMode(mode) {
+    return CHINESE_POSTER_MODES.includes(mode);
+}
+
+function getImageRegionPriority(mode) {
+    return IMAGE_REGION_PRIORITY_BY_MODE[mode] ?? IMAGE_REGION_PRIORITY;
+}
+
+// 后端图片缓存只有 chinese/original 两个 key；地区通过 locale 参数区分
+function getImageBackendMode(mode) {
+    return mode === POSTER_IMAGE_MODE.ORIGINAL ? "original" : "chinese";
+}
+
+function getImageBackendLocale(mode) {
+    return isChinesePosterMode(mode) ? mode : POSTER_IMAGE_MODE.CN;
+}
+
 const IMAGE_BACKEND_CONFIG = {
     [mediaTypes.MEDIA_TYPE.MOVIE]: "movies",
     [mediaTypes.MEDIA_TYPE.SHOW]: "shows",
@@ -42,6 +70,13 @@ const IMAGE_FIELD_SIZE = {
     [IMAGE_FIELD.LOGO]: "w500",
 };
 
+// 后端在 tw/hk 命中旧结构文档时回带的 cn 数据：写回时一并折叠根字段
+const imageCnHints = {};
+
+function buildImageCnHintKey(backendMode, group, lookupKey) {
+    return `${backendMode}:${group}:${lookupKey}`;
+}
+
 function buildImageCacheLookupKey(mediaType, ref) {
     if (mediaType === "season") {
         return commonUtils.isNonNullish(ref?.showId) && commonUtils.isNonNullish(ref?.seasonNumber) ? `${ref.showId}:${ref.seasonNumber}` : "";
@@ -56,7 +91,7 @@ function getPosterImageMode() {
     const mode = String(globalThis.$ctx?.argument?.posterImageMode ?? "")
         .trim()
         .toLowerCase();
-    return mode === POSTER_IMAGE_MODE.CHINESE || mode === POSTER_IMAGE_MODE.ORIGINAL ? mode : POSTER_IMAGE_MODE.DEFAULT;
+    return isChinesePosterMode(mode) || mode === POSTER_IMAGE_MODE.ORIGINAL ? mode : POSTER_IMAGE_MODE.DEFAULT;
 }
 
 function isPosterImageReplacementUserAgent(userAgent = globalThis.$ctx?.userAgent) {
@@ -68,7 +103,13 @@ function shouldReplaceImages() {
 }
 
 function getImageFetchModes() {
-    return shouldReplaceImages() ? [POSTER_IMAGE_MODE.CHINESE, POSTER_IMAGE_MODE.ORIGINAL] : [];
+    if (!shouldReplaceImages()) {
+        return [];
+    }
+    const mode = getPosterImageMode();
+    // 与历史行为一致：同时取中文与原始语言两档，顺带暖后端缓存
+    const chineseMode = isChinesePosterMode(mode) ? mode : chineseLocale.resolveChineseLocale();
+    return [chineseMode, POSTER_IMAGE_MODE.ORIGINAL];
 }
 
 function normalizeImageLanguage(language) {
@@ -91,9 +132,10 @@ function getTmdbDetailCountry(detail) {
     return normalizeImageCountry(commonUtils.ensureArray(detail?.origin_country)[0]) || normalizeImageCountry(commonUtils.ensureArray(detail?.production_countries)[0]?.iso_3166_1);
 }
 
+// 本地图片缓存键统一为 `<档位>:<group>:<lookupKey>`：中文三档直接用 cn/tw/hk，原图档与地区无关
 function buildImageCacheKey(mediaType, ref) {
     const mode = ref?.imageMode ?? getPosterImageMode();
-    if (mode !== POSTER_IMAGE_MODE.CHINESE && mode !== POSTER_IMAGE_MODE.ORIGINAL) {
+    if (!isChinesePosterMode(mode) && mode !== POSTER_IMAGE_MODE.ORIGINAL) {
         return "";
     }
     const group = getImageCacheGroup(mediaType);
@@ -192,13 +234,14 @@ function getImageRegionScore(image, preference) {
     const region = String(image?.iso_3166_1 ?? "")
         .trim()
         .toLowerCase();
+    const regionPriority = preference.regionPriority ?? IMAGE_REGION_PRIORITY;
     if (preference.mode === POSTER_IMAGE_MODE.ORIGINAL && preference.country) {
         if (region === preference.country) {
-            return IMAGE_REGION_PRIORITY.length + 1;
+            return regionPriority.length + 1;
         }
     }
-    const index = IMAGE_REGION_PRIORITY.indexOf(region);
-    return index >= 0 ? IMAGE_REGION_PRIORITY.length - index : 0;
+    const index = regionPriority.indexOf(region);
+    return index >= 0 ? regionPriority.length - index : 0;
 }
 
 function pickPreferredImage(images, preference) {
@@ -235,7 +278,9 @@ function getPickedImageStatus(image, preference) {
         const region = normalizeImageCountry(image?.iso_3166_1);
         return !preference.country || region === preference.country ? translationCache.CACHE_STATUS.FOUND : translationCache.CACHE_STATUS.PARTIAL_FOUND;
     }
-    return getImageRegionScore(image, preference) === IMAGE_REGION_PRIORITY.length ? translationCache.CACHE_STATUS.FOUND : translationCache.CACHE_STATUS.PARTIAL_FOUND;
+    return getImageRegionScore(image, preference) === (preference.regionPriority ?? IMAGE_REGION_PRIORITY).length
+        ? translationCache.CACHE_STATUS.FOUND
+        : translationCache.CACHE_STATUS.PARTIAL_FOUND;
 }
 
 function buildImageFieldEntry(image, preference) {
@@ -311,8 +356,8 @@ async function fetchImagePreferenceDetail(detailMediaType, tmdbId) {
 
 async function resolveImagePreference(mediaType, ref) {
     const mode = ref?.imageMode ?? getPosterImageMode();
-    if (mode === POSTER_IMAGE_MODE.CHINESE) {
-        return { mode, language: "zh", country: "" };
+    if (isChinesePosterMode(mode)) {
+        return { mode, language: "zh", country: "", regionPriority: getImageRegionPriority(mode) };
     }
     if (mode !== POSTER_IMAGE_MODE.ORIGINAL) {
         return null;
@@ -333,6 +378,7 @@ async function resolveImagePreference(mediaType, ref) {
               mode,
               language,
               country,
+              regionPriority: getImageRegionPriority(chineseLocale.resolveChineseLocale()),
           }
         : null;
 }
@@ -469,11 +515,19 @@ function createImageBackendState() {
         shows: {},
         seasons: {},
     });
+    const mode = getPosterImageMode();
+    // 与 getImageFetchModes 保持一致：默认档位（原片语言）也会抓中文档，需要中文桶继续暖后端缓存
+    const chineseMode = isChinesePosterMode(mode) ? mode : chineseLocale.resolveChineseLocale();
+    const pendingBackendWritesByMode = {
+        [chineseMode]: createPendingBackendWrites(),
+        [POSTER_IMAGE_MODE.ORIGINAL]: createPendingBackendWrites(),
+    };
+    const pendingCnWritesByMode = {
+        [getImageBackendMode(chineseMode)]: createPendingBackendWrites(),
+    };
     return {
-        pendingBackendWritesByMode: {
-            [POSTER_IMAGE_MODE.CHINESE]: createPendingBackendWrites(),
-            [POSTER_IMAGE_MODE.ORIGINAL]: createPendingBackendWrites(),
-        },
+        pendingBackendWritesByMode,
+        pendingCnWritesByMode,
         backendWriteBatchSize: BACKEND_WRITE_BATCH_SIZE,
     };
 }
@@ -519,6 +573,14 @@ function queueImageBackendWrite(backendState, mediaType, ref, entry) {
         ...commonUtils.ensureObject(pendingBackendWrites[group][lookupKey]),
         ...entry,
     };
+    const backendMode = getImageBackendMode(mode);
+    const hintKey = buildImageCnHintKey(backendMode, group, lookupKey);
+    const cnData = imageCnHints[hintKey];
+    const pendingCnGroups = backendState.pendingCnWritesByMode?.[backendMode];
+    if (cnData && pendingCnGroups) {
+        pendingCnGroups[group][lookupKey] = cnData;
+        delete imageCnHints[hintKey];
+    }
     if (getImagePendingBackendWriteCount(backendState) >= backendState.backendWriteBatchSize) {
         flushImageBackendWriteBatch(backendState, backendState.backendWriteBatchSize);
     }
@@ -563,12 +625,36 @@ function extractMultiModeImageBackendWritePayload(backendState, maxBatchSize) {
         const modePayload = extractImageBackendWritePayload(backendState, mode, batchSize - count);
         const modeCount = Object.keys(modePayload.movies).length + Object.keys(modePayload.shows).length + Object.keys(modePayload.seasons).length;
         if (modeCount > 0) {
-            payload.modes[mode] = modePayload;
+            payload.modes[getImageBackendMode(mode)] = modePayload;
             count += modeCount;
         }
         if (count >= batchSize) {
             break;
         }
+    }
+    // 折叠数据只跟随本批真正写出的条目
+    const cnModes = {};
+    Object.entries(payload.modes).forEach(([backendMode, groups]) => {
+        const pendingCnGroups = commonUtils.ensureObject(backendState.pendingCnWritesByMode?.[backendMode]);
+        const modeCn = {};
+        Object.entries(groups).forEach(([group, entries]) => {
+            const pendingCn = commonUtils.ensureObject(pendingCnGroups[group]);
+            const ids = Object.keys(commonUtils.ensureObject(entries)).filter((lookupKey) => pendingCn[lookupKey]);
+            if (ids.length === 0) {
+                return;
+            }
+            modeCn[group] = {};
+            ids.forEach((lookupKey) => {
+                modeCn[group][lookupKey] = pendingCn[lookupKey];
+                delete pendingCn[lookupKey];
+            });
+        });
+        if (Object.keys(modeCn).length > 0) {
+            cnModes[backendMode] = modeCn;
+        }
+    });
+    if (Object.keys(cnModes).length > 0) {
+        payload.cn = cnModes;
     }
     return payload;
 }
@@ -615,9 +701,16 @@ async function hydrateImagesFromBackend(cache, targets, mode = getPosterImageMod
     if (query.length === 0) {
         return false;
     }
-    query.unshift(`mode=${encodeURIComponent(mode)}`);
+    query.unshift(`mode=${encodeURIComponent(getImageBackendMode(mode))}`);
 
-    const payload = await vercelBackendClientModule.fetchImages(query.join("&"));
+    const payload = await vercelBackendClientModule.fetchImages(query.join("&"), getImageBackendLocale(mode));
+    const cnHints = commonUtils.ensureObject(payload?.cn);
+    Object.keys(IMAGE_BACKEND_GROUP_TO_MEDIA_TYPE).forEach((group) => {
+        const cnEntries = commonUtils.ensureObject(cnHints[group]);
+        Object.keys(cnEntries).forEach((lookupKey) => {
+            imageCnHints[buildImageCnHintKey(getImageBackendMode(mode), group, lookupKey)] = cnEntries[lookupKey];
+        });
+    });
     let cacheChanged = false;
     Object.entries(IMAGE_BACKEND_GROUP_TO_MEDIA_TYPE).forEach(([group, mediaType]) => {
         const entries = commonUtils.ensureObject(payload?.[group]);
@@ -778,11 +871,14 @@ export {
     getCurrentModeMissingImageFields,
     getFetchImageFields,
     getImageBackendGroup,
+    getImageBackendLocale,
+    getImageBackendMode,
     getImageCacheEntry,
     getImageCacheGroup,
     getImageFetchModes,
     getImageLanguageScore,
     getImagePendingBackendWriteCount,
+    getImageRegionPriority,
     getImageRegionScore,
     getMissingImageFields,
     getPickedImageStatus,
@@ -799,6 +895,8 @@ export {
     IMAGE_NOT_FOUND_TTL_MS,
     IMAGE_PARTIAL_FOUND_TTL_MS,
     IMAGE_REGION_PRIORITY,
+    IMAGE_REGION_PRIORITY_BY_MODE,
+    isChinesePosterMode,
     isPosterImageReplacementUserAgent,
     normalizeImageCountry,
     normalizeImageFieldEntry,

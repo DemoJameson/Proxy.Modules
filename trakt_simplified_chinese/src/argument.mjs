@@ -1,4 +1,5 @@
 import { argumentFields, BOXJS_CONFIG_KEY, DEFAULT_BACKEND_BASE_URL } from "./module-manifest.mjs";
+import { normalizeChineseLocale } from "./shared/chinese-script-converter.mjs";
 import * as playerDefinitions from "./shared/player-definitions.mjs";
 import { normalizeTranslationEngine } from "./shared/translation-engine.mjs";
 import * as commonUtils from "./utils/common.mjs";
@@ -52,9 +53,13 @@ function applyArgumentObjectConfig(config, argument) {
     return config;
 }
 
+// 位置参数只按当前顺序解析：字段顺序与 ARGUMENT_FIELDS 一致（fakeVipEnabled 在 chineseLocale 前），不兼容历史顺序
 function applyArgumentStringConfig(config, argument) {
+    // 平台外层包裹可能是 Loon 的 [a,b,c] 或 Surge 的双引号；参数表逐项也可能带引号，统一剥离后再按位置解析
     const raw = String(argument ?? "")
+        .trim()
         .replace(/^\[|\]$/g, "")
+        .replace(/^["']|["']$/g, "")
         .trim();
     if (!raw) {
         return config;
@@ -62,7 +67,12 @@ function applyArgumentStringConfig(config, argument) {
 
     const parts = raw
         .split(",")
-        .map((item) => item.trim())
+        .map((item) =>
+            item
+                .trim()
+                .replace(/^["']|["']$/g, "")
+                .trim(),
+        )
         .filter(Boolean);
     ARGUMENT_FIELDS.forEach(({ key, group, groupKey }, index) => {
         if (parts.length <= index) {
@@ -98,20 +108,28 @@ function normalizeBackendBaseUrl(argument) {
     return value.replace(/\/+$/, "");
 }
 
+// 海报语言：原片语言 / 简体中文 / 繁體中文（台灣）/ 繁體中文（香港）/ 原图
+// 兼容旧标签与旧内部值（中文/chinese 等价简体中文，默认 等价原图），避免升级后静默回落到原片语言
 function normalizePosterImageMode(value) {
     const normalized = String(value ?? "")
         .trim()
         .toLowerCase();
     const labelMap = {
-        默认: "default",
-        原图: "default",
-        中文: "chinese",
         原片语言: "original",
+        简体中文: "cn",
+        "繁體中文（台灣）": "tw",
+        "繁體中文(台灣)": "tw",
+        "繁體中文（香港）": "hk",
+        "繁體中文(香港)": "hk",
+        原图: "default",
+        中文: "cn",
+        chinese: "cn",
+        默认: "default",
     };
     if (labelMap[normalized]) {
         return labelMap[normalized];
     }
-    return ["default", "chinese", "original"].includes(normalized) ? normalized : "original";
+    return ["original", "cn", "tw", "hk", "default"].includes(normalized) ? normalized : "original";
 }
 
 function normalizeDebugMode(value) {
@@ -151,6 +169,7 @@ function normalizeArgument(argument) {
 
     return {
         ...argument,
+        chineseLocale: normalizeChineseLocale(argument.chineseLocale),
         posterImageMode: normalizePosterImageMode(argument.posterImageMode),
         translationEngine: normalizeTranslationEngine(argument.translationEngine),
         debugMode: normalizeDebugMode(argument.debugMode),
@@ -176,4 +195,14 @@ function parseArgument(env) {
     return normalizeArgument(argument);
 }
 
-export { ARGUMENT_FIELDS, applyArgumentObjectConfig, applyArgumentStringConfig, BOXJS_CONFIG_KEY, commonUtils, createDefaultArgumentConfig, normalizeArgument, parseArgument };
+export {
+    ARGUMENT_FIELDS,
+    applyArgumentObjectConfig,
+    applyArgumentStringConfig,
+    BOXJS_CONFIG_KEY,
+    commonUtils,
+    createDefaultArgumentConfig,
+    normalizeArgument,
+    normalizePosterImageMode,
+    parseArgument,
+};

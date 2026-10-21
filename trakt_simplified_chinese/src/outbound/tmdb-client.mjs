@@ -1,16 +1,27 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as mediaTypes from "../shared/media-types.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 import * as httpUtils from "../utils/http.mjs";
 import * as vercelBackendClientModule from "./vercel-backend-client.mjs";
 
+// TMDb 中文语言按地区：cn / tw / hk
+const TMDB_LANGUAGE_BY_LOCALE = {
+    cn: "zh-CN",
+    tw: "zh-TW",
+    hk: "zh-HK",
+};
+
+function resolveTmdbLanguage() {
+    return TMDB_LANGUAGE_BY_LOCALE[chineseLocale.resolveChineseLocale()] ?? "zh-CN";
+}
+
 const TMDB_API_BASE_URL = "https://api.tmdb.org/3";
 const TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p";
 
 // TMDb API key 不写死在脚本里：脚本产物发布在公开仓库，硬编码等于公开。
 // key 收敛到后端环境变量，由 /api/trakt/apikeys 下发，轮换时不必等用户重新拉取脚本。
-// 取值顺序：单次运行内单例 → $persistentStore 缓存（代理运行时每次请求都是新的脚本上下文）→ 后端下发。
-const TMDB_API_KEY_CACHE_KEY = "dj_trakt_tmdb_api_key";
+// 取值顺序：单次运行内单例 → unified cache 的 persistent.tmdbApiKey（代理运行时每次请求都是新的脚本上下文）→ 后端下发。
 const TMDB_API_KEY_TTL_MS = 24 * 60 * 60 * 1000;
 // 同一次运行内重复查询后端的抑制窗口（跨请求不生效：后端一换 key 就要能立刻拿到）。
 const TMDB_API_KEY_RETRY_BACKOFF_MS = 60 * 1000;
@@ -24,21 +35,35 @@ const TMDB_HTTP_ERROR_STATUS_PATTERN = /^HTTP (\d{3})\b/;
 const TMDB_AUTH_FAILURE_STATUS_CODES = new Set([401, 403]);
 
 function readApiKeyCacheEntry() {
-    if (cacheUtils.isLocalCacheDisabled()) {
+    const env = globalThis.$ctx?.env;
+    if (!env) {
         return null;
     }
-    const cached = globalThis.$ctx?.env?.getjson?.(TMDB_API_KEY_CACHE_KEY, null);
-    return commonUtils.isPlainObject(cached) ? cached : null;
+    try {
+        const cached = cacheUtils.loadUnifiedCache(env).persistent.tmdbApiKey;
+        return commonUtils.isPlainObject(cached) ? cached : null;
+    } catch (error) {
+        env.log?.(`Trakt TMDb api key cache load failed: ${error}`);
+        return null;
+    }
 }
 
 function writeApiKeyCacheEntry(entry) {
-    if (cacheUtils.isLocalCacheDisabled()) {
+    const env = globalThis.$ctx?.env;
+    if (!env) {
         return;
     }
     try {
-        globalThis.$ctx?.env?.setjson?.(entry, TMDB_API_KEY_CACHE_KEY);
+        const unifiedCache = cacheUtils.loadUnifiedCache(env);
+        unifiedCache.persistent.tmdbApiKey = entry;
+        cacheUtils.saveUnifiedCache(env, unifiedCache, undefined, undefined, undefined, {
+            owner: {
+                path: ["persistent", "tmdbApiKey"],
+                value: entry,
+            },
+        });
     } catch (error) {
-        globalThis.$ctx?.env?.log?.(`Trakt TMDb api key cache save failed: ${error}`);
+        env.log?.(`Trakt TMDb api key cache save failed: ${error}`);
     }
 }
 
@@ -77,7 +102,7 @@ function writeCachedApiKey(apiKey) {
 }
 
 // key 被判失效（TMDb 401/403）：清掉缓存里的 key 并限时拉黑这个坏 key。
-// 关键点是必须落到 $persistentStore —— 代理运行时每次请求都是新的脚本上下文，只清运行期状态的话，
+// 关键点是必须落到 unified cache —— 代理运行时每次请求都是新的脚本上下文，只清运行期状态的话，
 // 下一个请求会从缓存里读回同一个坏 key，再白撞一次 401，要等 24h TTL 才恢复。
 function blacklistApiKey(apiKey) {
     writeApiKeyCacheEntry({
@@ -210,7 +235,7 @@ async function fetchCredits(mediaType, tmdbId) {
 
     const normalizedMediaType = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "movie" : "tv";
     const appendField = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "credits" : "aggregate_credits";
-    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/${normalizedMediaType}/${tmdbId}?language=zh-CN&append_to_response=${appendField}&api_key=${apiKey}`);
+    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/${normalizedMediaType}/${tmdbId}?language=${resolveTmdbLanguage()}&append_to_response=${appendField}&api_key=${apiKey}`);
 }
 
 async function fetchPerson(tmdbPersonId) {
@@ -218,7 +243,7 @@ async function fetchPerson(tmdbPersonId) {
         return null;
     }
 
-    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/person/${tmdbPersonId}?language=zh-CN&api_key=${apiKey}`);
+    return fetchTmdbJson((apiKey) => `${TMDB_API_BASE_URL}/person/${tmdbPersonId}?language=${resolveTmdbLanguage()}&api_key=${apiKey}`);
 }
 
 function normalizeImageLanguage(language) {
@@ -333,5 +358,5 @@ export {
     fetchSeasonImages,
     hasApiKey,
     resizeImageUrl,
-    TMDB_API_KEY_CACHE_KEY,
+    resolveTmdbLanguage,
 };

@@ -42,6 +42,7 @@ function buildGoogleResponse(body, mapText) {
 function mockGoogleHttp(handlers) {
     const originalContext = globalThis.$ctx;
     globalThis.$ctx = {
+        argument: handlers.argument,
         env: {
             http: {
                 get(options) {
@@ -92,6 +93,33 @@ test("谷歌客户端从前端 JS 提取 API key 并通过 translate-pa 翻译",
         assert.equal(posts[0].url, GOOGLE_PA_TRANSLATE_URL);
     } finally {
         mock.restore();
+    }
+});
+
+test("谷歌目标语言按中文地区：tw → zh-TW，hk → zh-HK", async () => {
+    for (const [locale, expectedTarget] of [
+        ["tw", "zh-TW"],
+        ["hk", "zh-HK"],
+    ]) {
+        resetGoogleAuth();
+        const posts = [];
+        const mock = mockGoogleHttp({
+            argument: { chineseLocale: locale },
+            get() {
+                return { status: 200, body: createGoogleJsBodyWithKey() };
+            },
+            post(options) {
+                posts.push(options);
+                return { status: 200, body: buildGoogleResponse(options.body, (text) => `译:${text}`) };
+            },
+        });
+
+        try {
+            await translateTextsWithGoogle(["hello world"], "en");
+            assert.deepEqual(JSON.parse(posts[0].body), [[["hello world"], "EN", expectedTarget], "te"]);
+        } finally {
+            mock.restore();
+        }
     }
 });
 

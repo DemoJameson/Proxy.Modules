@@ -1,12 +1,19 @@
+import * as chineseLocale from "../shared/chinese-script-converter.mjs";
 import * as translationCache from "../shared/translation-cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
 const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
-const UNIFIED_CACHE_SCHEMA_VERSION = 14;
+// 篡改应用授权是鉴权关键数据，单独一个持久化 key：unified cache 版本升级清空缓存时不受影响
+const TAMPER_AUTHORIZATION_KEY = "dj_trakt_tamper_authorization";
+const UNIFIED_CACHE_SCHEMA_VERSION = 16;
 const DOUBAN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
+// 篡改应用授权记录的条数上限：归一化与功能侧写入共用，避免损坏数据把缓存撑爆
+const TAMPER_AUTHORIZATION_RECORD_LIMIT = 50;
+// 篡改应用授权 token 记录的条数上限：明文保存 access/refresh token，只按数量截断
+const TAMPER_AUTHORIZATION_TOKEN_LIMIT = 50;
 const LINK_ID_FIELDS = ["trakt", "tmdb", "imdb"];
 const UNIFIED_CACHE_SNAPSHOT_RETRY_LIMIT = 3;
 const PRUNE_SAFETY_REMEASURE_INTERVAL = 16;
@@ -30,8 +37,14 @@ function isLocalCacheDisabled() {
     return mode === "disableLocal" || mode === "disableAll";
 }
 
+// 本地缓存键统一为 `<base>:<locale>`（cn/tw/hk）：cn 也显式带后缀，不再沿用无后缀的历史键
+function buildLocaleCacheKey(base) {
+    const normalizedBase = String(base ?? "").trim();
+    return normalizedBase ? `${normalizedBase}:${chineseLocale.resolveChineseLocale()}` : "";
+}
+
 function buildFieldTranslationCacheKey(id) {
-    return commonUtils.isNullish(id) ? "" : String(id);
+    return commonUtils.isNullish(id) ? "" : buildLocaleCacheKey(String(id));
 }
 
 function estimatePrunableEntryBytes(env, key, entry) {
@@ -85,8 +98,16 @@ function normalizePersonTranslationEntry(entry) {
     return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
-function normalizeMediaTranslationValue(translation) {
-    const normalized = translationCache.normalizeTranslationPayload(translation);
+const LOCALE_CACHE_KEY_PATTERN = new RegExp(`:(${chineseLocale.CHINESE_LOCALES.join("|")})$`);
+
+// 本地缓存键统一为 `<base>:<locale>`：按条目自己的地区归一化，避免 cn 设备把 tw/hk 条目转成简体后落盘
+function resolveLocaleFromCacheKey(cacheKey) {
+    const matched = LOCALE_CACHE_KEY_PATTERN.exec(String(cacheKey ?? "").trim());
+    return matched ? matched[1] : undefined;
+}
+
+function normalizeMediaTranslationValue(translation, locale) {
+    const normalized = translationCache.normalizeTranslationPayload(translation, locale);
     if (!normalized) {
         return null;
     }
@@ -94,8 +115,8 @@ function normalizeMediaTranslationValue(translation) {
     return Object.fromEntries(Object.entries(normalized).filter(([, value]) => !translationCache.isEmptyTranslationValue(value)));
 }
 
-function normalizeMediaTranslationEntry(entry) {
-    const translation = normalizeMediaTranslationValue(entry?.translation);
+function normalizeMediaTranslationEntry(entry, cacheKey) {
+    const translation = normalizeMediaTranslationValue(entry?.translation, resolveLocaleFromCacheKey(cacheKey));
     const status = translationCache.normalizeTranslationStatus(entry?.status);
     if (status === translationCache.CACHE_STATUS.NOT_FOUND) {
         // 负缓存条目依赖未过期的 expiresAt，过期或缺失（旧版本数据）时直接丢弃
@@ -295,7 +316,7 @@ function normalizeEntryMap(cache, normalizeEntry) {
     return Object.fromEntries(
         Object.entries(commonUtils.ensureObject(cache))
             .map(([key, entry]) => {
-                const normalizedEntry = normalizeEntry(entry);
+                const normalizedEntry = normalizeEntry(entry, key);
                 return normalizedEntry ? [key, normalizedEntry] : null;
             })
             .filter(Boolean),
@@ -365,8 +386,14 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
                 episodes: {},
             },
             authTokens: {},
+            tmdbApiKey: null,
         },
     };
+}
+
+// 覆盖条目按地区存放：cn/tw/hk 各有一份 translation；旧文档的根字段 translation 等价 cn，一并保留
+function hasTranslationOverrideContent(entry) {
+    return ["cn", "tw", "hk"].some((locale) => commonUtils.isPlainObject(entry?.[locale]?.translation)) || commonUtils.isPlainObject(entry?.translation);
 }
 
 function normalizeTranslationOverrides(cache) {
@@ -376,7 +403,7 @@ function normalizeTranslationOverrides(cache) {
         return Object.fromEntries(
             Object.entries(entries)
                 .map(([key, entry]) => [key, commonUtils.ensureObject(entry, null)])
-                .filter(([, entry]) => entry && commonUtils.isPlainObject(entry.translation)),
+                .filter(([, entry]) => entry && hasTranslationOverrideContent(entry)),
         );
     };
 
@@ -403,6 +430,78 @@ function normalizeRevlessEntryMap(cache) {
     return normalizeEntryMap(cache, (entry) => {
         return commonUtils.isPlainObject(entry) ? Object.fromEntries(Object.entries(entry).filter(([key]) => key !== "rev")) : null;
     });
+}
+
+// TMDb key 缓存条目：既可能是下发成功后的 key，也可能是限时拉黑的失效 key（此时 apiKey 为空）。
+function normalizeTmdbApiKeyEntry(entry) {
+    const source = commonUtils.ensureObject(entry);
+    const apiKey = String(source.apiKey ?? "").trim();
+    const invalidApiKey = String(source.invalidApiKey ?? "").trim();
+    if (!apiKey && !invalidApiKey) {
+        return null;
+    }
+    const expiresAt = Number(source.expiresAt);
+    const invalidUntil = Number(source.invalidUntil);
+    return {
+        apiKey,
+        expiresAt: Number.isFinite(expiresAt) ? expiresAt : 0,
+        invalidApiKey,
+        invalidUntil: Number.isFinite(invalidUntil) ? invalidUntil : 0,
+    };
+}
+
+// 篡改应用授权的流程状态、token 记录与待回写标记都由该功能自己归一化，这里只保证形状是对象数组。
+function normalizeTamperAppAuthorization(value) {
+    const source = commonUtils.ensureObject(value);
+    const normalizeBucket = (bucket, limit) =>
+        commonUtils
+            .ensureArray(bucket)
+            .filter((record) => commonUtils.isPlainObject(record))
+            .slice(0, limit);
+    return {
+        records: normalizeBucket(source.records, TAMPER_AUTHORIZATION_RECORD_LIMIT),
+        tokens: normalizeBucket(source.tokens, TAMPER_AUTHORIZATION_TOKEN_LIMIT),
+        pending: normalizeBucket(source.pending, TAMPER_AUTHORIZATION_RECORD_LIMIT),
+    };
+}
+
+function isTamperAuthorizationEmpty(store) {
+    return store.records.length === 0 && store.tokens.length === 0 && store.pending.length === 0;
+}
+
+// 篡改应用授权（流程状态、签发的 token、待回写标记）与 authTokens 一样属于鉴权关键数据：
+// 放在独立持久化 key 里，既不受 unified cache 版本升级清空影响，也不受 debugMode 本地缓存开关影响
+function loadTamperAuthorization(env) {
+    return normalizeTamperAppAuthorization(env.getjson(TAMPER_AUTHORIZATION_KEY, null));
+}
+
+function saveTamperAuthorization(env, store) {
+    env.setjson(normalizeTamperAppAuthorization(store), TAMPER_AUTHORIZATION_KEY);
+}
+
+// 旧版本把篡改授权数据放在 unified cache 的 persistent.tamperAppAuthorization 里：
+// 版本升级清空 unified cache 之前先搬到独立 key，并按各自的去重键与已有数据合并（新数据优先）
+function adoptLegacyTamperAuthorization(env, rawCache) {
+    const legacy = normalizeTamperAppAuthorization(rawCache?.persistent?.tamperAppAuthorization);
+    if (isTamperAuthorizationEmpty(legacy)) {
+        return false;
+    }
+
+    const current = normalizeTamperAppAuthorization(env.getjson(TAMPER_AUTHORIZATION_KEY, null));
+    const mergeEntries = (currentEntries, legacyEntries, buildKey) => {
+        const seen = new Set(currentEntries.map(buildKey));
+        return currentEntries.concat(legacyEntries.filter((entry) => !seen.has(buildKey(entry))));
+    };
+    const next = normalizeTamperAppAuthorization({
+        records: mergeEntries(current.records, legacy.records, (record) => String(record?.id ?? "").trim()),
+        tokens: mergeEntries(current.tokens, legacy.tokens, (record) => String(record?.accessToken ?? "").trim()),
+        pending: mergeEntries(current.pending, legacy.pending, (record) => `${String(record?.kind ?? "").trim()}:${String(record?.id ?? "").trim()}`),
+    });
+    if (JSON.stringify(next) === JSON.stringify(current)) {
+        return false;
+    }
+    env.setjson(next, TAMPER_AUTHORIZATION_KEY);
+    return true;
 }
 
 function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
@@ -448,6 +547,7 @@ function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VE
     nextCache.persistent.historyShows = normalizeEntryMap(persistentCache.historyShows, normalizeHistoryShowsEntry);
     nextCache.persistent.translationOverrides = normalizeTranslationOverrides(persistentCache.translationOverrides);
     nextCache.persistent.authTokens = normalizeAuthTokens(persistentCache.authTokens);
+    nextCache.persistent.tmdbApiKey = normalizeTmdbApiKeyEntry(persistentCache.tmdbApiKey);
 
     return nextCache;
 }
@@ -553,6 +653,9 @@ function loadUnifiedCacheSnapshot(
             snapshotConsistent: false,
         };
     }
+
+    // 旧字段可能在版本号已升级后才留下（例如中间构建先升了版本）；只要还存在就补迁移一次
+    adoptLegacyTamperAuthorization(env, rawCache);
 
     if (Number(rawCache.version) !== unifiedCacheSchemaVersion) {
         const resetCache = createEmptyUnifiedCache(unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
@@ -1207,6 +1310,21 @@ function getAuthToken(env, apiKey) {
     }
 }
 
+// 篡改流程签发的 token 记录：明文匹配 access_token，供请求改写与 bulk 出站请求共用
+function getTamperTokenByAccessToken(env, accessToken) {
+    const normalized = String(accessToken ?? "").trim();
+    if (!normalized) {
+        return null;
+    }
+    try {
+        const tokens = loadTamperAuthorization(env).tokens;
+        return tokens.find((record) => commonUtils.isPlainObject(record) && String(record.accessToken ?? "").trim() === normalized) ?? null;
+    } catch (error) {
+        env.log(`Trakt tamper token cache load failed: ${error}`);
+        return null;
+    }
+}
+
 function saveAuthToken(env, apiKey, authorization) {
     if (!apiKey || !authorization) {
         return;
@@ -1230,6 +1348,7 @@ function saveAuthToken(env, apiKey, authorization) {
 
 export {
     buildFieldTranslationCacheKey,
+    buildLocaleCacheKey,
     clearCurrentSeason,
     createEmptyUnifiedCache,
     DOUBAN_CACHE_TTL_MS,
@@ -1237,6 +1356,7 @@ export {
     getAuthToken,
     getCurrentSeason,
     getHashedFieldTranslation,
+    getTamperTokenByAccessToken,
     isLocalCacheDisabled,
     loadCache,
     loadCommentTranslationCache,
@@ -1248,6 +1368,7 @@ export {
     loadPeopleTranslationCache,
     loadPosterCache,
     loadSentimentTranslationCache,
+    loadTamperAuthorization,
     loadTranslationOverridesCache,
     loadUnifiedCache,
     normalizeRevlessEntryMap,
@@ -1265,10 +1386,14 @@ export {
     savePeopleTranslationCache,
     savePosterCache,
     saveSentimentTranslationCache,
+    saveTamperAuthorization,
     saveTranslationOverridesCache,
     saveUnifiedCache,
     setCurrentSeason,
     setHashedFieldTranslation,
+    TAMPER_AUTHORIZATION_KEY,
+    TAMPER_AUTHORIZATION_RECORD_LIMIT,
+    TAMPER_AUTHORIZATION_TOKEN_LIMIT,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_MAX_BYTES,
     UNIFIED_CACHE_REV_KEY,

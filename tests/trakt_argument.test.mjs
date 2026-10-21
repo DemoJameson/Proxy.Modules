@@ -1,14 +1,20 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { applyArgumentObjectConfig, applyArgumentStringConfig, createDefaultArgumentConfig, normalizeArgument } from "../trakt_simplified_chinese/src/argument.mjs";
+import {
+    ARGUMENT_FIELDS,
+    applyArgumentObjectConfig,
+    applyArgumentStringConfig,
+    createDefaultArgumentConfig,
+    normalizeArgument,
+} from "../trakt_simplified_chinese/src/argument.mjs";
 import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
 import { DEEPLX_TRANSLATE_API_URL as DEEPLX_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 
 import { createUnifiedPersistentData, parseUnifiedCache, readFixture, runRequestCase, runResponseCase } from "./helpers/trakt-test-helpers.mjs";
 
-test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 posterImageMode，第 5-7 位解析为 *Order 数字", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,2,1,3]"));
+test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位 chineseLocale，第 2 位 posterImageMode，第 6-8 位为 *Order 数字", () => {
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,false,true,2,1,3]"));
 
     assert.equal(parsed.fakeVipEnabled, true);
     assert.equal(parsed.posterImageMode, "original");
@@ -22,13 +28,18 @@ test("字符串参数第 0 位解析为 fakeVipEnabled，第 1 位解析为 post
     assert.deepEqual(parsed.enabledPlayerTypes, ["infuse", "forward", "rex"]);
 });
 
-test("translationEngine 默认 google，且位于 characterTranslationEnabled 前一位", () => {
+test("translationEngine 位于 characterTranslationEnabled 前，历史合并位于其后面", () => {
+    assert.equal(ARGUMENT_FIELDS[3].key, "translationEngine");
+    assert.equal(ARGUMENT_FIELDS[4].key, "characterTranslationEnabled");
+    assert.equal(ARGUMENT_FIELDS[5].key, "historyEpisodesMergedByShow");
+
     const defaults = normalizeArgument(createDefaultArgumentConfig());
     assert.equal(defaults.characterTranslationEnabled, true);
 
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,false,true]"));
     assert.equal(parsed.translationEngine, "google");
     assert.equal(parsed.characterTranslationEnabled, false);
+    assert.equal(parsed.historyEpisodesMergedByShow, true);
     assert.equal(parsed.playerButtonOrder.forward, 1);
     assert.deepEqual(parsed.orderedPlayerTypes, ["forward", "infuse", "rex"]);
     assert.deepEqual(parsed.enabledPlayerTypes, ["forward", "infuse", "rex"]);
@@ -40,14 +51,14 @@ test("*Order 默认值为 1/2/3，非法值回落到默认序号", () => {
     assert.equal(defaults.playerButtonOrder.infuse, 2);
     assert.equal(defaults.playerButtonOrder.rex, 3);
 
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,abc,NaN,2.5]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,false,true,abc,NaN,2.5]"));
     assert.equal(parsed.playerButtonOrder.forward, 1);
     assert.equal(parsed.playerButtonOrder.infuse, 2);
     assert.equal(parsed.playerButtonOrder.rex, 2);
 });
 
 test("序号 0 在 enabledPlayerTypes 中隐藏，但仍保留在 orderedPlayerTypes 末尾", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,true,false,0,2,1]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,false,true,0,2,1]"));
     assert.equal(parsed.playerButtonOrder.forward, 0);
     assert.equal(parsed.playerButtonOrder.infuse, 2);
     assert.equal(parsed.playerButtonOrder.rex, 1);
@@ -67,36 +78,139 @@ test("全部序号相同（含 0）时按 PLAYER_TYPE 声明顺序稳定排序",
     assert.deepEqual(parsed.enabledPlayerTypes, ["forward", "rex"]);
 });
 
+test("fakeVipEnabled 是配置第一项，chineseLocale 是第二项，只解析新显示标签", () => {
+    assert.equal(ARGUMENT_FIELDS[0].key, "fakeVipEnabled");
+    assert.equal(ARGUMENT_FIELDS[1].key, "chineseLocale");
+
+    const defaults = normalizeArgument(createDefaultArgumentConfig());
+    assert.equal(defaults.chineseLocale, "cn");
+
+    const cnLabel = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "简体中文" }));
+    assert.equal(cnLabel.chineseLocale, "cn");
+    const twLabel = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "繁體中文（台灣）" }));
+    assert.equal(twLabel.chineseLocale, "tw");
+    const hkLabel = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "繁體中文（香港）" }));
+    assert.equal(hkLabel.chineseLocale, "hk");
+    const legacyCn = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "中文（简体）" }));
+    assert.equal(legacyCn.chineseLocale, "cn");
+    const legacyTw = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "中文（繁体·台湾）" }));
+    assert.equal(legacyTw.chineseLocale, "cn");
+    const legacyHk = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "繁體（香港）" }));
+    assert.equal(legacyHk.chineseLocale, "cn");
+    const bogus = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { chineseLocale: "bogus" }));
+    assert.equal(bogus.chineseLocale, "cn");
+});
+
+test("位置参数只按当前顺序解析（首项为 fakeVipEnabled，第二项为目标语言），不再兼容历史顺序", () => {
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,tw,original,google,true,true,1,2,3,https://backend.example,false,关闭]"));
+    assert.equal(parsed.fakeVipEnabled, true);
+    assert.equal(parsed.chineseLocale, "tw");
+    assert.equal(parsed.posterImageMode, "original");
+    assert.equal(parsed.translationEngine, "google");
+    assert.equal(parsed.characterTranslationEnabled, true);
+    assert.equal(parsed.historyEpisodesMergedByShow, true);
+    assert.equal(parsed.debugMode, "off");
+    assert.equal(parsed.backendBaseUrl, "https://backend.example");
+
+    // 旧顺序（首项为 chineseLocale）不再识别：首项被当作 fakeVipEnabled，第二项被当作 chineseLocale 并回落 cn
+    const legacyOrder = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[tw,true,original,true,google,true,1,2,3,https://backend.example,false,关闭]"));
+    assert.equal(legacyOrder.fakeVipEnabled, true);
+    assert.equal(legacyOrder.chineseLocale, "cn");
+    assert.equal(legacyOrder.debugMode, "off");
+    assert.equal(legacyOrder.tamperAppAuthorizationEnabled, false);
+});
+
+test("字符串参数兼容平台包裹：Loon 方括号、Surge 双引号与逐项引号", () => {
+    const base = "true,繁體中文（台灣）,原片语言,谷歌翻译,true,true,1,2,3,https://backend.example,false,关闭";
+    const wrappedArguments = [
+        `[${base}]`,
+        `"${base}"`,
+        `'${base}'`,
+        '"true","繁體中文（台灣）","原片语言","谷歌翻译","true","true","1","2","3","https://backend.example","false","关闭"',
+    ];
+
+    for (const wrapped of wrappedArguments) {
+        const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), wrapped));
+        assert.equal(parsed.fakeVipEnabled, true, `fakeVipEnabled 解析失败：${wrapped}`);
+        assert.equal(parsed.chineseLocale, "tw", `chineseLocale 解析失败：${wrapped}`);
+        assert.equal(parsed.posterImageMode, "original", `posterImageMode 解析失败：${wrapped}`);
+        assert.equal(parsed.translationEngine, "google", `translationEngine 解析失败：${wrapped}`);
+        assert.equal(parsed.debugMode, "off", `debugMode 解析失败：${wrapped}`);
+        assert.equal(parsed.backendBaseUrl, "https://backend.example", `backendBaseUrl 解析失败：${wrapped}`);
+    }
+});
+
+test("posterImageMode 解析当前显示标签", () => {
+    const cn = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "简体中文" }));
+    assert.equal(cn.posterImageMode, "cn");
+    const tw = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "繁體中文（台灣）" }));
+    assert.equal(tw.posterImageMode, "tw");
+    const hk = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "繁體中文（香港）" }));
+    assert.equal(hk.posterImageMode, "hk");
+});
+
+test("posterImageMode 兼容旧标签与旧值：中文/chinese → cn，默认 → default", () => {
+    const legacyChinese = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "chinese" }));
+    assert.equal(legacyChinese.posterImageMode, "cn");
+    const legacyLabel = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "中文" }));
+    assert.equal(legacyLabel.posterImageMode, "cn");
+    const legacyDefault = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "默认" }));
+    assert.equal(legacyDefault.posterImageMode, "default");
+    const legacyOriginal = normalizeArgument(applyArgumentObjectConfig(createDefaultArgumentConfig(), { posterImageMode: "original" }));
+    assert.equal(legacyOriginal.posterImageMode, "original");
+});
+
 test("posterImageMode 非法值回退 original", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,bogus]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,bogus]"));
 
     assert.equal(parsed.posterImageMode, "original");
 });
 
 test("posterImageMode 支持中文选项标签", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,原片语言]"));
-    const defaultParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,原图]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,原片语言]"));
+    const defaultParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,原图]"));
 
     assert.equal(parsed.posterImageMode, "original");
     assert.equal(defaultParsed.posterImageMode, "default");
 });
 
 test("debugMode 非法值回退 off", () => {
-    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,bogus]"));
+    const parsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,true,true,1,2,3,https://backend.example,false,bogus]"));
 
     assert.equal(parsed.debugMode, "off");
 });
 
 test("debugMode 支持中文选项标签", () => {
-    const offParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,关闭]"));
-    const localParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用本地缓存]"));
-    const remoteParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用远端缓存]"));
-    const allParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,original,true,google,true,1,2,3,https://backend.example,禁用所有缓存]"));
+    const offParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,true,true,1,2,3,https://backend.example,false,关闭]"));
+    const localParsed = normalizeArgument(
+        applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,true,true,1,2,3,https://backend.example,false,禁用本地缓存]"),
+    );
+    const remoteParsed = normalizeArgument(
+        applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,true,true,1,2,3,https://backend.example,false,禁用远端缓存]"),
+    );
+    const allParsed = normalizeArgument(
+        applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,true,true,1,2,3,https://backend.example,false,禁用所有缓存]"),
+    );
 
     assert.equal(offParsed.debugMode, "off");
     assert.equal(localParsed.debugMode, "disableLocal");
     assert.equal(remoteParsed.debugMode, "disableRemote");
     assert.equal(allParsed.debugMode, "disableAll");
+});
+
+test("tamperAppAuthorizationEnabled 默认关闭，对象和字符串参数均可开启", () => {
+    const defaults = normalizeArgument(createDefaultArgumentConfig());
+    assert.equal(defaults.tamperAppAuthorizationEnabled, false);
+
+    const objectParsed = normalizeArgument(
+        applyArgumentObjectConfig(createDefaultArgumentConfig(), {
+            tamperAppAuthorizationEnabled: true,
+        }),
+    );
+    assert.equal(objectParsed.tamperAppAuthorizationEnabled, true);
+
+    const stringParsed = normalizeArgument(applyArgumentStringConfig(createDefaultArgumentConfig(), "[true,cn,original,google,true,true,1,2,3,https://backend.example,true,关闭]"));
+    assert.equal(stringParsed.tamperAppAuthorizationEnabled, true);
 });
 
 test("historyEpisodesMergedByShow=false 时历史剧集请求不改写 limit", async () => {
@@ -165,7 +279,7 @@ test("translationEngine=deeplx 时 comments 会请求 DeepLX 翻译并写回缓�
 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].comment, "很棒的电影");
-    assert.equal(parseUnifiedCache(persistentData).google.comments["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(parseUnifiedCache(persistentData).google.comments["9001:cn"].comment.translatedText, "很棒的电影");
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === DEEPLX_TRANSLATE_URL),
         true,

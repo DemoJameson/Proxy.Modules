@@ -7,6 +7,8 @@ const LIST_TRANSLATION_BACKEND_WRITE_BATCH_SIZE = 50;
 const LIST_TRANSLATION_FIELDS = ["name", "description"];
 
 const listTranslationBackendWriteQueue = {};
+// 后端读取时回带的 cn 数据：写回时一并折叠根字段
+const listTranslationCnHints = {};
 
 function queueListTranslationBackendWrite(listId, field, fieldEntry) {
     const normalizedListId = String(listId ?? "").trim();
@@ -32,10 +34,18 @@ function flushListTranslationBackendWrites() {
     for (let start = 0; start < keys.length; start += LIST_TRANSLATION_BACKEND_WRITE_BATCH_SIZE) {
         const batchKeys = keys.slice(start, start + LIST_TRANSLATION_BACKEND_WRITE_BATCH_SIZE);
         const payload = { lists: {} };
+        const cnPayload = { lists: {} };
         batchKeys.forEach((key) => {
             payload.lists[key] = listTranslationBackendWriteQueue[key];
             delete listTranslationBackendWriteQueue[key];
+            if (commonUtils.isPlainObject(listTranslationCnHints[key])) {
+                cnPayload.lists[key] = listTranslationCnHints[key];
+                delete listTranslationCnHints[key];
+            }
         });
+        if (Object.keys(cnPayload.lists).length > 0) {
+            payload.cn = cnPayload;
+        }
         vercelBackendClientModule.postListTranslations(payload).catch(() => {});
     }
 }
@@ -50,6 +60,10 @@ function normalizeBackendListIds(listIds) {
 }
 
 function mergeBackendListTranslationEntry(cache, listId, entry) {
+    const cacheKey = cacheUtils.buildFieldTranslationCacheKey(listId);
+    if (!cacheKey) {
+        return false;
+    }
     let changed = false;
     LIST_TRANSLATION_FIELDS.forEach((field) => {
         const fieldEntry = commonUtils.isPlainObject(entry?.[field]) ? entry[field] : null;
@@ -59,13 +73,13 @@ function mergeBackendListTranslationEntry(cache, listId, entry) {
             return;
         }
 
-        const currentEntry = commonUtils.isPlainObject(cache?.[listId]) ? cache[listId] : {};
+        const currentEntry = commonUtils.isPlainObject(cache?.[cacheKey]) ? cache[cacheKey] : {};
         const currentFieldEntry = commonUtils.isPlainObject(currentEntry[field]) ? currentEntry[field] : null;
         if (currentFieldEntry?.sourceTextHash === sourceTextHash && currentFieldEntry.translatedText === translatedText) {
             return;
         }
 
-        cache[listId] = {
+        cache[cacheKey] = {
             ...currentEntry,
             [field]: {
                 sourceTextHash,
@@ -85,6 +99,12 @@ async function hydrateListTranslationsFromBackend(cache, listIds) {
 
     try {
         const payload = await vercelBackendClientModule.fetchListTranslations(`lists=${ids.join(",")}`);
+        const cnEntries = commonUtils.ensureObject(payload?.cn?.lists);
+        Object.entries(cnEntries).forEach(([listId, entry]) => {
+            if (commonUtils.isPlainObject(entry)) {
+                listTranslationCnHints[listId] = entry;
+            }
+        });
         const entries = commonUtils.ensureObject(payload?.lists);
         let changed = false;
         Object.entries(entries).forEach(([listId, entry]) => {

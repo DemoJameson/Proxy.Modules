@@ -8,6 +8,8 @@ const imagesHandler = require("../api/trakt/images.js");
 const adminHandler = require("../api/trakt/translations/admin.js");
 const translationOverridesHandler = require("../api/trakt/translation-overrides.js");
 
+import { createPipelineResponse, getJsonValue, jsonValue } from "./helpers/kv-rest-mock.mjs";
+
 const AUTO_MOVIE_123 = "trakt:translation:movies:123";
 const TRANSLATION_OVERRIDES_KEY = "trakt:translation:overrides";
 const AUTO_MOVIE_456 = "trakt:translation:movies:456";
@@ -73,78 +75,7 @@ function createKvFetch(store) {
         }
 
         if (path === "/pipeline") {
-            const commands = JSON.parse(init.body || "[]");
-            store.pipelineRequests = [...(store.pipelineRequests || []), commands];
-            const results = [];
-            for (const command of commands) {
-                const [name, key, , arg4] = command;
-                if (name === "SEARCH.QUERY") {
-                    store.searchCommands = [...(store.searchCommands || []), command];
-                    results.push(null);
-                } else if (name === "JSON.SET") {
-                    store.setCommands = [...(store.setCommands || []), command];
-                    store.set(key, jsonValue(JSON.parse(arg4)));
-                    results.push("OK");
-                } else if (name === "JSON.MSET") {
-                    store.msetCommands = [...(store.msetCommands || []), command];
-                    for (let index = 1; index < command.length; index += 3) {
-                        const itemKey = command[index];
-                        const value = command[index + 2];
-                        store.set(itemKey, jsonValue(JSON.parse(value)));
-                    }
-                    results.push("OK");
-                } else if (name === "JSON.MGET") {
-                    store.mgetCommands = [...(store.mgetCommands || []), command];
-                    const keys = command.slice(1, -1);
-                    results.push(
-                        keys.map((itemKey) => {
-                            const stored = store.get(itemKey);
-                            return stored && stored.__redisJson === true ? [stored.value] : null;
-                        }),
-                    );
-                } else if (name === "JSON.GET") {
-                    store.getCommands = [...(store.getCommands || []), command];
-                    const stored = store.get(key);
-                    results.push(stored && stored.__redisJson === true ? [stored.value] : null);
-                } else if (name === "EXPIRE") {
-                    store.expireCommands = [...(store.expireCommands || []), command];
-                    store.ttlByKey = store.ttlByKey || new Map();
-                    store.ttlByKey.set(key, Number(command[2]) * 1000);
-                    results.push(store.has(key) ? 1 : 0);
-                } else if (name === "PERSIST") {
-                    store.persistCommands = [...(store.persistCommands || []), command];
-                    if (store.ttlByKey) {
-                        store.ttlByKey.delete(key);
-                    }
-                    results.push(store.has(key) ? 1 : 0);
-                } else if (name === "PTTL") {
-                    store.pttlCommands = [...(store.pttlCommands || []), command];
-                    const ttl = store.ttlByKey ? store.ttlByKey.get(key) : undefined;
-                    results.push(store.has(key) ? (Number.isFinite(ttl) ? ttl : -1) : -2);
-                } else if (name === "DEL") {
-                    if (store.ttlByKey) {
-                        store.ttlByKey.delete(key);
-                    }
-                    results.push(store.delete(key) ? 1 : 0);
-                } else if (name === "SCAN") {
-                    store.scanCommands = [...(store.scanCommands || []), command];
-                    const cursor = Number.parseInt(command[1] || "0", 10) || 0;
-                    const matchIndex = command.indexOf("MATCH");
-                    const countIndex = command.indexOf("COUNT");
-                    const match = matchIndex >= 0 ? command[matchIndex + 1] || "" : "";
-                    const count = countIndex >= 0 ? Number.parseInt(command[countIndex + 1] || "10", 10) || 10 : 10;
-                    const prefix = match.endsWith("*") ? match.slice(0, -1) : match;
-                    const keys = Array.from(store.keys()).filter((itemKey) => itemKey.startsWith(prefix));
-                    const nextCursor = cursor + count >= keys.length ? "0" : String(cursor + count);
-                    results.push([nextCursor, keys.slice(cursor, cursor + count)]);
-                } else {
-                    results.push(null);
-                }
-            }
-            return {
-                ok: true,
-                json: async () => results.map((result) => ({ result })),
-            };
+            return createPipelineResponse(store, init);
         }
 
         if (path.startsWith("/scan/")) {
@@ -169,18 +100,6 @@ function createKvFetch(store) {
             json: async () => ({ error: "not found" }),
         };
     };
-}
-
-function jsonValue(value) {
-    return {
-        __redisJson: true,
-        value,
-    };
-}
-
-function getJsonValue(store, key) {
-    const stored = store.get(key);
-    return stored && stored.__redisJson === true ? stored.value : null;
 }
 
 function getOverrideEntry(store, mediaType, id) {
@@ -242,6 +161,10 @@ function seedAuto(store, key, translation, status = 1, options = {}) {
     store.set(key, jsonValue(value));
 }
 
+function seedAutoEntry(store, key, entry) {
+    store.set(key, jsonValue(entry));
+}
+
 function seedOverride(store, mediaType, id, translation) {
     const current = getJsonValue(store, TRANSLATION_OVERRIDES_KEY) || {
         shows: {},
@@ -258,6 +181,24 @@ function seedOverride(store, mediaType, id, translation) {
                     translation,
                     updatedAt: 1710000000000,
                 },
+            },
+        }),
+    );
+}
+
+function seedOverrideEntry(store, mediaType, id, entry) {
+    const current = getJsonValue(store, TRANSLATION_OVERRIDES_KEY) || {
+        shows: {},
+        movies: {},
+        episodes: {},
+    };
+    store.set(
+        TRANSLATION_OVERRIDES_KEY,
+        jsonValue({
+            ...current,
+            [mediaType]: {
+                ...current[mediaType],
+                [id]: entry,
             },
         }),
     );
@@ -325,10 +266,15 @@ test("backend translations GET returns auto entries while translation-overrides 
             method: "GET",
         });
         assert.equal(overrideRes.statusCode, 200);
+        assert.equal(overrideRes.headers["Cache-Control"], "public, max-age=60");
+        assert.equal(overrideRes.headers["CDN-Cache-Control"], "public, s-maxage=300");
+        assert.equal(overrideRes.headers["Vercel-CDN-Cache-Control"], "public, s-maxage=300");
         assert.deepEqual(overrideRes.jsonBody.movies["123"], {
-            translation: {
-                title: "人工标题",
-                tagline: "人工标语",
+            cn: {
+                translation: {
+                    title: "人工标题",
+                    tagline: "人工标语",
+                },
             },
             updatedAt: 1710000000000,
         });
@@ -433,7 +379,33 @@ test("backend images GET 硬切后不读取旧图片缓存 key", async () => {
     });
 });
 
-test("backend images POST 写入 FOUND/NOT_FOUND 并为任一 NOT_FOUND 设置 5 天 TTL", async () => {
+test("backend images GET 过滤已过期的 poster/logo 字段", async () => {
+    const store = new Map();
+    store.set(
+        CHINESE_IMAGE_MOVIE_123,
+        jsonValue({
+            cn: {
+                poster: { status: 3, expiresAt: Date.now() - 1000 },
+                logo: { status: 1, url: "https://image.tmdb.org/t/p/original/movie-logo.png", expiresAt: null },
+            },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const res = await invoke(imagesHandler, {
+            query: {
+                movies: "123",
+                mode: "chinese",
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(res.jsonBody.movies["123"].poster, undefined);
+        assert.equal(res.jsonBody.movies["123"].logo.url, "https://image.tmdb.org/t/p/original/movie-logo.png");
+    });
+});
+
+test("backend images POST 写入 FOUND/NOT_FOUND 并在数据里记录 3 天过期时间", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -481,18 +453,22 @@ test("backend images POST 写入 FOUND/NOT_FOUND 并为任一 NOT_FOUND 设置 5
             movies: 2,
             seasons: 1,
         });
-        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).poster.url, "https://image.tmdb.org/t/p/original/movie.jpg");
-        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.status, 3);
-        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.expiresAt));
-        assert.equal(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).poster.status, 3);
-        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).poster.expiresAt));
-        assert.equal(getJsonValue(store, ORIGINAL_IMAGE_MOVIE_123).poster.url, "https://image.tmdb.org/t/p/original/original-movie.jpg");
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 3 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 3 * 24 * 60 * 60));
+        assert.equal(store.pipelineRequests.length, 2);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
+        assert.equal(store.setCommands, undefined);
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.poster.url, "https://image.tmdb.org/t/p/original/movie.jpg");
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.logo.status, 3);
+        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.logo.expiresAt));
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).cn.poster.status, 3);
+        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_SEASON_555_1).cn.poster.expiresAt));
+        assert.equal(getJsonValue(store, ORIGINAL_IMAGE_MOVIE_123).cn.poster.url, "https://image.tmdb.org/t/p/original/original-movie.jpg");
+        // 不再发送 EXPIRE，过期时间写在 poster/logo 字段内
+        assert.equal(store.expireCommands, undefined);
     });
 });
 
-test("backend images POST 为 PARTIAL_FOUND 设置 30 天 TTL，NOT_FOUND 优先", async () => {
+test("backend images POST 为 PARTIAL_FOUND 记录 30 天过期时间，NOT_FOUND 优先", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -538,15 +514,13 @@ test("backend images POST 为 PARTIAL_FOUND 设置 30 天 TTL，NOT_FOUND 优先
         });
 
         assert.equal(res.statusCode, 200);
-        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.status, 2);
-        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).logo.expiresAt));
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_MOVIE_123 && command[2] === 30 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SEASON_555_1 && command[2] === 30 * 24 * 60 * 60));
-        assert.ok(store.expireCommands.some((command) => command[1] === CHINESE_IMAGE_SHOW_555 && command[2] === 3 * 24 * 60 * 60));
+        assert.equal(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.logo.status, 2);
+        assert.ok(Number.isFinite(getJsonValue(store, CHINESE_IMAGE_MOVIE_123).cn.logo.expiresAt));
+        assert.equal(store.expireCommands, undefined);
     });
 });
 
-test("backend images POST 在全部字段 FOUND 时不设置 TTL", async () => {
+test("backend images POST 在全部字段 FOUND 时 expiresAt 为 null", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -679,7 +653,7 @@ test("backend translations 往返保留 complete 标记", async () => {
         });
 
         assert.equal(postRes.statusCode, 200);
-        assert.equal(getJsonValue(store, AUTO_MOVIE_123).complete, true);
+        assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.complete, true);
 
         const getRes = await invoke(translationsHandler, {
             method: "GET",
@@ -725,13 +699,16 @@ test("backend POST keeps writing auto cache while override stays separate", asyn
             movies: 1,
             episodes: 0,
         });
-        assert.equal(getJsonValue(store, AUTO_MOVIE_123).translation.title, "新自动标题");
-        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "新自动标题");
+        assert.equal(store.pipelineRequests.length, 2);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
+        // 真实 KV 要求 JSON 值序列化成字符串、清空根字段用字符串 "null"
         assert.deepEqual(store.msetCommands, [
             [
                 "JSON.MSET",
                 AUTO_MOVIE_123,
-                "$",
+                "$.cn",
                 JSON.stringify({
                     status: 1,
                     translation: {
@@ -741,10 +718,22 @@ test("backend POST keeps writing auto cache while override stays separate", asyn
                     },
                     expiresAt: null,
                 }),
+                AUTO_MOVIE_123,
+                "$.status",
+                "null",
+                AUTO_MOVIE_123,
+                "$.translation",
+                "null",
+                AUTO_MOVIE_123,
+                "$.complete",
+                "null",
+                AUTO_MOVIE_123,
+                "$.expiresAt",
+                "null",
             ],
         ]);
-        assert.equal(store.persistCommands, undefined);
         assert.equal(store.setCommands, undefined);
+        assert.equal(store.persistCommands, undefined);
 
         const getRes = await invoke(translationsHandler, {
             method: "GET",
@@ -758,11 +747,11 @@ test("backend POST keeps writing auto cache while override stays separate", asyn
         const overrideRes = await invoke(translationOverridesHandler, {
             method: "GET",
         });
-        assert.equal(overrideRes.jsonBody.movies["123"].translation.title, "锁定标题");
+        assert.equal(overrideRes.jsonBody.movies["123"].cn.translation.title, "锁定标题");
     });
 });
 
-test("backend POST writes grouped auto entries with JSON.MSET and keeps TTL rules", async () => {
+test("backend POST writes grouped auto entries with JSON.MSET and stores expiresAt in data", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -812,34 +801,133 @@ test("backend POST writes grouped auto entries with JSON.MSET and keeps TTL rule
             movies: 2,
             episodes: 1,
         });
-        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
         assert.deepEqual(
             store.msetCommands.map((command) => command[0]),
-            ["JSON.MSET", "JSON.MSET", "JSON.MSET"],
+            ["JSON.MSET"],
         );
         assert.equal(store.persistCommands, undefined);
-        assert.deepEqual(store.expireCommands, [
-            ["EXPIRE", "trakt:translation:movies:201", 2592000],
-            ["EXPIRE", "trakt:translation:episodes:301:1:1", 86400],
-        ]);
+        // 不再发送 EXPIRE：过期时间只写在数据字段里
+        assert.equal(store.expireCommands, undefined);
+        assert.equal(store.pttlCommands, undefined);
+        // 新 key 直接写 $ 根文档，不再逐 key 发送 JSON.SET NX
         assert.equal(store.setCommands, undefined);
-        assert.equal(getJsonValue(store, "trakt:translation:shows:101").expiresAt, null);
-        assert.equal(getJsonValue(store, "trakt:translation:movies:202").translation.title, "完整电影标题");
-        assert.equal(getJsonValue(store, "trakt:translation:movies:202").expiresAt, null);
-        assert.equal(getJsonValue(store, "trakt:translation:episodes:301:1:1").status, 3);
-        assert.ok(Number.isFinite(getJsonValue(store, "trakt:translation:movies:201").expiresAt));
-        assert.ok(Number.isFinite(getJsonValue(store, "trakt:translation:episodes:301:1:1").expiresAt));
+        const rootPaths = [];
+        for (let index = 1; index < store.msetCommands[0].length; index += 3) {
+            rootPaths.push(store.msetCommands[0][index + 1]);
+        }
+        assert.deepEqual(rootPaths, ["$", "$", "$", "$"]);
+        assert.equal(getJsonValue(store, "trakt:translation:shows:101").cn.expiresAt, null);
+        assert.equal(getJsonValue(store, "trakt:translation:movies:202").cn.translation.title, "完整电影标题");
+        assert.equal(getJsonValue(store, "trakt:translation:movies:202").cn.expiresAt, null);
+        assert.equal(getJsonValue(store, "trakt:translation:episodes:301:1:1").cn.status, 3);
+        assert.ok(Number.isFinite(getJsonValue(store, "trakt:translation:movies:201").cn.expiresAt));
+        assert.ok(Number.isFinite(getJsonValue(store, "trakt:translation:episodes:301:1:1").cn.expiresAt));
+    });
+});
+
+test("backend POST batches existing and new keys into one JSON.MSET", async () => {
+    const store = new Map();
+    seedAuto(store, AUTO_MOVIE_123, {
+        title: "旧标题",
+        overview: null,
+        tagline: null,
+    });
+
+    await withBackend(store, async () => {
+        const res = await invoke(translationsHandler, {
+            method: "POST",
+            body: {
+                movies: {
+                    123: {
+                        status: 1,
+                        translation: {
+                            title: "更新标题",
+                            overview: null,
+                            tagline: null,
+                        },
+                    },
+                    456: {
+                        status: 1,
+                        translation: {
+                            title: "新增标题",
+                            overview: null,
+                            tagline: null,
+                        },
+                    },
+                },
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        assert.equal(store.pipelineRequests.length, 2);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.msetCommands.length, 1);
+        assert.equal(store.setCommands, undefined);
+
+        const writes = [];
+        const command = store.msetCommands[0];
+        for (let index = 1; index < command.length; index += 3) {
+            writes.push({ key: command[index], path: command[index + 1] });
+        }
+        assert.ok(writes.some((write) => write.key === AUTO_MOVIE_123 && write.path === "$.cn"));
+        assert.ok(writes.some((write) => write.key === AUTO_MOVIE_456 && write.path === "$"));
+        assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "更新标题");
+        assert.equal(getJsonValue(store, AUTO_MOVIE_456).cn.translation.title, "新增标题");
+    });
+});
+
+test("backend POST pipeline 只发送字符串/数字参数且新 key 写根文档", async () => {
+    const store = new Map();
+
+    await withBackend(store, async () => {
+        const res = await invoke(translationsHandler, {
+            method: "POST",
+            body: {
+                movies: {
+                    123: {
+                        status: 1,
+                        translation: {
+                            title: "参数形态标题",
+                        },
+                    },
+                },
+            },
+        });
+
+        assert.equal(res.statusCode, 200);
+        // 真实 Upstash/Vercel KV 不接受对象或原始 null 参数：任一参数非法整条请求 400
+        store.pipelineRequests.flat().forEach((command) => {
+            command.slice(1).forEach((arg) => {
+                assert.ok(typeof arg === "string" || typeof arg === "number", `命令参数必须是字符串或数字：${JSON.stringify(arg)}`);
+            });
+        });
+        assert.equal(store.pipelineRequests.length, 2);
+        assert.equal(store.mgetCommands.length, 1);
+        assert.equal(store.setCommands, undefined);
+        assert.equal(store.msetCommands.length, 1);
+        assert.equal(store.msetCommands[0][1], AUTO_MOVIE_123);
+        assert.equal(store.msetCommands[0][2], "$");
+        assert.equal(JSON.parse(store.msetCommands[0][3]).cn.translation.title, "参数形态标题");
+        assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "参数形态标题");
     });
 });
 
 test("admin item, PUT, and clear fallback use the same effective merge rules", async () => {
     const store = new Map();
-    seedAuto(store, AUTO_MOVIE_123, {
-        title: "自动标题",
-        overview: "自动简介",
-        tagline: "自动标语",
-    });
-    store.ttlByKey = new Map([[AUTO_MOVIE_123, 12345]]);
+    seedAuto(
+        store,
+        AUTO_MOVIE_123,
+        {
+            title: "自动标题",
+            overview: "自动简介",
+            tagline: "自动标语",
+        },
+        1,
+        { expiresAt: Date.now() + 86400000 },
+    );
 
     await withBackend(store, async () => {
         const putRes = await invoke(adminHandler, {
@@ -862,18 +950,21 @@ test("admin item, PUT, and clear fallback use the same effective merge rules", a
         assert.equal(putRes.jsonBody.effectiveEntry.translation.overview, "人工简介");
         assert.equal(putRes.jsonBody.effectiveEntry.translation.tagline, "自动标语");
         assert.equal("source" in putRes.jsonBody.override, false);
+        // 接口返回的是当前地区的投影 {translation}，存储形态（cn/tw/hk）由 getOverrideEntry 断言
         assert.deepEqual(putRes.jsonBody.override.translation, {
             title: "人工标题",
             overview: "人工简介",
         });
-        assert.deepEqual(store.pttlCommands, [["PTTL", AUTO_MOVIE_123]]);
+        assert.equal(store.pttlCommands, undefined);
         assert.equal(getJsonValue(store, AUTO_MOVIE_123).expiresAt, putRes.jsonBody.autoEntry.expiresAt);
-        assert.ok(store.setCommands.some(([command, key]) => command === "JSON.SET" && key === AUTO_MOVIE_123));
+        assert.ok(store.setCommands.some(([command, key]) => command === "JSON.SET" && key === TRANSLATION_OVERRIDES_KEY));
         assert.equal("source" in getOverrideEntry(store, "movies", "123"), false);
-        assert.deepEqual(getOverrideEntry(store, "movies", "123").translation, {
+        assert.deepEqual(getOverrideEntry(store, "movies", "123").cn.translation, {
             title: "人工标题",
             overview: "人工简介",
         });
+        // 写入后只保留 cn/tw/hk 字段，不再有旧的根字段 translation
+        assert.equal("translation" in getOverrideEntry(store, "movies", "123"), false);
 
         const itemRes = await invoke(adminHandler, {
             method: "GET",
@@ -891,7 +982,7 @@ test("admin item, PUT, and clear fallback use the same effective merge rules", a
         assert.equal(itemRes.jsonBody.override.translation.title, "人工标题");
         assert.equal(itemRes.jsonBody.override.translation.overview, "人工简介");
         assert.equal(itemRes.jsonBody.effectiveEntry.translation.title, "人工标题");
-        assert.deepEqual(store.pttlCommands, [["PTTL", AUTO_MOVIE_123]]);
+        assert.equal(store.pttlCommands, undefined);
 
         const clearPutRes = await invoke(adminHandler, {
             method: "PUT",
@@ -914,6 +1005,89 @@ test("admin item, PUT, and clear fallback use the same effective merge rules", a
         });
 
         assert.equal(unlockedRes.jsonBody.movies["123"].translation.title, "自动标题");
+    });
+});
+
+test("admin PUT/DELETE 按地区写入不会互相覆盖或留下根字段", async () => {
+    const store = new Map();
+    seedAuto(store, AUTO_MOVIE_123, {
+        title: "自动标题",
+    });
+
+    await withBackend(store, async () => {
+        const putCn = await invoke(adminHandler, {
+            method: "PUT",
+            headers: adminHeaders(),
+            body: {
+                type: "movies",
+                id: "123",
+                locale: "cn",
+                translation: { title: "简体标题" },
+            },
+        });
+        assert.equal(putCn.statusCode, 200);
+        assert.deepEqual(getOverrideEntry(store, "movies", "123").cn.translation, { title: "简体标题" });
+        assert.equal("translation" in getOverrideEntry(store, "movies", "123"), false, "cn 写入不应留下根字段");
+
+        // 已有 cn 覆盖时写 tw：cn 必须保留，且不产生根字段
+        const putTw = await invoke(adminHandler, {
+            method: "PUT",
+            headers: adminHeaders(),
+            body: {
+                type: "movies",
+                id: "123",
+                locale: "tw",
+                translation: { title: "台灣標題" },
+            },
+        });
+        assert.equal(putTw.statusCode, 200);
+        const afterPutTw = getOverrideEntry(store, "movies", "123");
+        assert.deepEqual(afterPutTw.cn.translation, { title: "简体标题" }, "写 tw 不应改动 cn");
+        assert.deepEqual(afterPutTw.tw.translation, { title: "台灣標題" });
+        assert.equal("translation" in afterPutTw, false, "写 tw 不应留下根字段");
+
+        // 删除 tw：cn 必须保留
+        const deleteTw = await invoke(adminHandler, {
+            method: "DELETE",
+            headers: adminHeaders(),
+            query: {
+                type: "movies",
+                id: "123",
+                target: "override",
+                locale: "tw",
+            },
+        });
+        assert.equal(deleteTw.statusCode, 200);
+        const afterDeleteTw = getOverrideEntry(store, "movies", "123");
+        assert.deepEqual(afterDeleteTw.cn.translation, { title: "简体标题" }, "删除 tw 不应影响 cn");
+        assert.equal(afterDeleteTw.tw, undefined);
+
+        // 再写 hk，然后删除 cn：hk 必须保留，cn 与根字段都不得残留
+        await invoke(adminHandler, {
+            method: "PUT",
+            headers: adminHeaders(),
+            body: {
+                type: "movies",
+                id: "123",
+                locale: "hk",
+                translation: { title: "香港標題" },
+            },
+        });
+        const deleteCn = await invoke(adminHandler, {
+            method: "DELETE",
+            headers: adminHeaders(),
+            query: {
+                type: "movies",
+                id: "123",
+                target: "override",
+                locale: "cn",
+            },
+        });
+        assert.equal(deleteCn.statusCode, 200);
+        const afterDeleteCn = getOverrideEntry(store, "movies", "123");
+        assert.equal(afterDeleteCn.cn, undefined, "删除 cn 后不应保留 cn");
+        assert.equal("translation" in afterDeleteCn, false, "删除 cn 后不应留下根字段");
+        assert.deepEqual(afterDeleteCn.hk.translation, { title: "香港標題" }, "删除 cn 不应影响 hk");
     });
 });
 
@@ -1613,7 +1787,15 @@ test("admin delete override falls back to auto and delete all clears both namesp
         });
 
         assert.equal(deleteAllRes.statusCode, 200);
-        assert.equal(store.has(AUTO_MOVIE_123), false);
+        // auto 清理用 JSON.DEL：对不存在的 key/字段返回 0，不会像 JSON.MSET 一样报错
+        assert.deepEqual(store.delCommands, [
+            ["JSON.DEL", AUTO_MOVIE_123, "$.cn"],
+            ["JSON.DEL", AUTO_MOVIE_123, "$.status"],
+            ["JSON.DEL", AUTO_MOVIE_123, "$.translation"],
+            ["JSON.DEL", AUTO_MOVIE_123, "$.complete"],
+            ["JSON.DEL", AUTO_MOVIE_123, "$.expiresAt"],
+        ]);
+        assert.deepEqual(getJsonValue(store, AUTO_MOVIE_123), {});
         assert.equal(getOverrideEntry(store, "movies", "123"), null);
         assert.equal(deleteAllRes.jsonBody.effectiveEntry, null);
 
@@ -1673,4 +1855,316 @@ test("admin auth rejects missing token, wrong token, and missing ADMIN_TOKEN", a
             adminToken: null,
         },
     );
+});
+
+test("admin 覆盖按地区读写：tw 覆盖只影响 tw 地区", async () => {
+    const store = new Map();
+    seedAuto(store, AUTO_MOVIE_123, {
+        title: "自动标题",
+        overview: "自动简介",
+        tagline: null,
+    });
+
+    await withBackend(store, async () => {
+        const putRes = await invoke(adminHandler, {
+            method: "PUT",
+            headers: adminHeaders(),
+            body: {
+                type: "movies",
+                id: "123",
+                locale: "tw",
+                translation: {
+                    title: "台灣覆蓋",
+                },
+            },
+        });
+
+        assert.equal(putRes.statusCode, 200);
+        assert.equal(getOverrideEntry(store, "movies", "123").tw.translation.title, "台灣覆蓋");
+
+        const twItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "tw",
+            },
+        });
+        assert.equal(twItem.jsonBody.override.translation.title, "台灣覆蓋");
+        assert.equal(twItem.jsonBody.effectiveEntry.translation.title, "台灣覆蓋");
+
+        const cnItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+            },
+        });
+        assert.equal(cnItem.jsonBody.override, null);
+        assert.equal(cnItem.jsonBody.effectiveEntry.translation.title, "自动标题");
+    });
+});
+
+test("admin 列表浏览（搜索框留空）按所选地区投影", async () => {
+    const store = new Map();
+    store.set(
+        AUTO_MOVIE_123,
+        jsonValue({
+            cn: { status: 1, translation: { title: "简体标题" } },
+            tw: { status: 1, translation: { title: "台灣標題" } },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const cnList = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: { action: "list", type: "movies" },
+        });
+        assert.equal(cnList.jsonBody.items[0].effectiveEntry.translation.title, "简体标题");
+
+        const twList = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: { action: "list", type: "movies", locale: "tw" },
+        });
+        assert.equal(twList.jsonBody.items[0].effectiveEntry.translation.title, "台灣標題");
+    });
+});
+
+test("cn 读取在混合文档（根字段 + tw）下回退根字段", async () => {
+    const store = new Map();
+    store.set(
+        AUTO_MOVIE_123,
+        jsonValue({
+            status: 1,
+            translation: { title: "简体标题" },
+            tw: { status: 1, translation: { title: "台灣標題" } },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const cnRes = await invoke(translationsHandler, {
+            method: "GET",
+            query: { movies: "123" },
+        });
+        assert.equal(cnRes.statusCode, 200);
+        assert.equal(cnRes.jsonBody.movies["123"].translation.title, "简体标题");
+
+        const twRes = await invoke(translationsHandler, {
+            method: "GET",
+            query: { movies: "123", locale: "tw" },
+        });
+        assert.equal(twRes.jsonBody.movies["123"].translation.title, "台灣標題");
+    });
+});
+
+test("图片 cn 读取在混合文档（根 poster + tw）下回退根字段", async () => {
+    const store = new Map();
+    store.set(
+        CHINESE_IMAGE_MOVIE_123,
+        jsonValue({
+            poster: { status: 1, url: "https://image.tmdb.org/t/p/original/cn-poster.jpg" },
+            tw: { poster: { status: 1, url: "https://image.tmdb.org/t/p/original/tw-poster.jpg" } },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const cnRes = await invoke(imagesHandler, {
+            query: { movies: "123", mode: "chinese" },
+        });
+        assert.equal(cnRes.statusCode, 200);
+        assert.equal(cnRes.jsonBody.movies["123"].poster.url, "https://image.tmdb.org/t/p/original/cn-poster.jpg");
+
+        const twRes = await invoke(imagesHandler, {
+            query: { movies: "123", mode: "chinese", locale: "tw" },
+        });
+        assert.equal(twRes.jsonBody.movies["123"].poster.url, "https://image.tmdb.org/t/p/original/tw-poster.jpg");
+    });
+});
+
+test("图片读取未传 locale 时按 cn 兜底", async () => {
+    const store = new Map();
+    store.set(
+        CHINESE_IMAGE_MOVIE_123,
+        jsonValue({
+            cn: { poster: { status: 1, url: "https://image.tmdb.org/t/p/original/cn-poster.jpg" } },
+            tw: { poster: { status: 1, url: "https://image.tmdb.org/t/p/original/tw-poster.jpg" } },
+        }),
+    );
+
+    await withBackend(store, async () => {
+        const imageStore = require("../lib/trakt-cache/image-store.js");
+        const entries = await imageStore.readManyImageGroupsFromKv({ url: "https://kv.example", token: "test-kv-token" }, { mode: "chinese", movies: ["123"] });
+        assert.equal(entries.movies["123"].poster.url, "https://image.tmdb.org/t/p/original/cn-poster.jpg");
+    });
+});
+
+test("admin 覆盖投影不把 cn 覆盖回退到 tw", async () => {
+    const store = new Map();
+    seedAutoEntry(store, AUTO_MOVIE_123, {
+        cn: { status: 1, translation: { title: "大陆自动标题", overview: "大陆自动简介" } },
+        tw: { status: 1, translation: { title: "泰德拉索：錯棚教練趣事多", overview: "台灣原生簡介" } },
+    });
+    seedOverrideEntry(store, "movies", "123", {
+        cn: { translation: { title: "足球教练", overview: "管理员修订简介" } },
+        updatedAt: 1710000000000,
+    });
+
+    await withBackend(store, async () => {
+        const twItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "tw",
+            },
+        });
+        assert.equal(twItem.statusCode, 200);
+        assert.equal(twItem.jsonBody.override, null);
+        assert.equal(twItem.jsonBody.effectiveEntry.translation.title, "泰德拉索：錯棚教練趣事多");
+        assert.equal(twItem.jsonBody.effectiveEntry.translation.overview, "台灣原生簡介");
+        assert.equal(twItem.jsonBody.overrideEntry.cn.translation.title, "足球教练");
+
+        const twList = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "list",
+                type: "movies",
+                locale: "tw",
+                override: "overridden",
+            },
+        });
+        assert.deepEqual(
+            twList.jsonBody.items.map((item) => item.id),
+            [],
+        );
+
+        const cnItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "cn",
+            },
+        });
+        assert.equal(cnItem.jsonBody.override.translation.title, "足球教练");
+        assert.equal(cnItem.jsonBody.effectiveEntry.translation.title, "足球教练");
+    });
+});
+
+test("admin 覆盖投影按地区生效并返回原始 overrideEntry", async () => {
+    const store = new Map();
+    seedAutoEntry(store, AUTO_MOVIE_123, {
+        cn: { status: 1, translation: { title: "大陆自动标题", overview: "大陆自动简介" } },
+        tw: { status: 1, translation: { title: "台灣自動標題", overview: "台灣自動簡介" } },
+    });
+    seedOverrideEntry(store, "movies", "123", {
+        cn: { translation: { overview: "大陆覆盖简介" } },
+        tw: { translation: { title: "泰德拉索：錯棚教練趣事多" } },
+        updatedAt: 1710000000000,
+    });
+
+    await withBackend(store, async () => {
+        const twItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "tw",
+            },
+        });
+        assert.deepEqual(twItem.jsonBody.override.translation, { title: "泰德拉索：錯棚教練趣事多" });
+        assert.equal(twItem.jsonBody.effectiveEntry.translation.title, "泰德拉索：錯棚教練趣事多");
+        assert.equal(twItem.jsonBody.effectiveEntry.translation.overview, "台灣自動簡介");
+        assert.deepEqual(twItem.jsonBody.overrideEntry, {
+            cn: { translation: { overview: "大陆覆盖简介" } },
+            tw: { translation: { title: "泰德拉索：錯棚教練趣事多" } },
+            updatedAt: 1710000000000,
+        });
+
+        const cnItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "cn",
+            },
+        });
+        assert.deepEqual(cnItem.jsonBody.override.translation, { overview: "大陆覆盖简介" });
+        assert.equal(cnItem.jsonBody.effectiveEntry.translation.title, "大陆自动标题");
+        assert.equal(cnItem.jsonBody.effectiveEntry.translation.overview, "大陆覆盖简介");
+    });
+});
+
+test("admin 覆盖投影把与 cn 相同的 tw 值视为伪覆盖并忽略", async () => {
+    const store = new Map();
+    seedAutoEntry(store, AUTO_MOVIE_123, {
+        cn: { status: 1, translation: { title: "足球教练", overview: "大陆自动简介" } },
+        tw: { status: 1, translation: { title: "泰德拉索：錯棚教練趣事多", overview: "台灣原生簡介" } },
+    });
+    seedOverrideEntry(store, "movies", "123", {
+        cn: { translation: { title: "足球教练" } },
+        tw: { translation: { title: "足球教练" } },
+        updatedAt: 1710000000000,
+    });
+
+    await withBackend(store, async () => {
+        const twItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "tw",
+            },
+        });
+
+        assert.equal(twItem.statusCode, 200);
+        assert.equal(twItem.jsonBody.override, null);
+        assert.equal(twItem.jsonBody.effectiveEntry.translation.title, "泰德拉索：錯棚教練趣事多");
+        assert.equal(twItem.jsonBody.overrideEntry.tw.translation.title, "足球教练");
+
+        const twList = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "list",
+                type: "movies",
+                locale: "tw",
+                override: "overridden",
+            },
+        });
+        assert.deepEqual(
+            twList.jsonBody.items.map((item) => item.id),
+            [],
+        );
+
+        const cnItem = await invoke(adminHandler, {
+            method: "GET",
+            headers: adminHeaders(),
+            query: {
+                action: "item",
+                type: "movies",
+                id: "123",
+                locale: "cn",
+            },
+        });
+        assert.equal(cnItem.jsonBody.override.translation.title, "足球教练");
+        assert.equal(cnItem.jsonBody.effectiveEntry.translation.title, "足球教练");
+    });
 });

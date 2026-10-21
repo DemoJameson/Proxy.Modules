@@ -1,6 +1,7 @@
 import * as traktApiClientModule from "../outbound/trakt-api-client.mjs";
 import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
+import * as chineseLocale from "./chinese-script-converter.mjs";
 
 import {
     applyImages,
@@ -42,6 +43,7 @@ import {
     MEDIA_CONFIG,
     PREFERRED_TRANSLATION_LANGUAGE,
     queueBackendWrite,
+    resolvePreferredTranslationLanguage,
     SEASON_EPISODE_TRANSLATION_LIMIT,
     storeTranslationEntry,
     TRAKT_DIRECT_TRANSLATION_MAX_REFS,
@@ -96,19 +98,40 @@ function applyTranslation(userAgent, target, entry, mediaType = null) {
     }
 }
 
-function applyOverrideToTranslationObject(target, translationOverrides) {
-    if (!target || !translationOverrides) {
-        return target;
+function getOverrideCnTranslation(entry) {
+    const source = commonUtils.ensureObject(entry);
+    return commonUtils.isPlainObject(source.cn?.translation) ? source.cn.translation : source.translation;
+}
+
+// 覆盖按地区生效：cn 只用 cn/旧根字段，tw/hk 只用各自槽位，不回退 cn；
+// 与 cn 相同的 tw/hk 值视为管理端复制出来的伪本地区覆盖，忽略后保留原生译名
+function resolveOverrideField(override, field, locale) {
+    const entry = commonUtils.ensureObject(override);
+    const cnTranslation = getOverrideCnTranslation(entry);
+    if (locale === chineseLocale.CHINESE_LOCALE.CN) {
+        const cnValue = cnTranslation?.[field];
+        return {
+            value: translationCache.isEmptyTranslationValue(cnValue) ? undefined : cnValue,
+            fromSimplified: false,
+        };
     }
 
-    translationCache.TRANSLATION_FIELDS.forEach((field) => {
-        const normalizedValue = translationCache.normalizeTranslationText(translationOverrides[field]);
-        if (!translationCache.isEmptyTranslationValue(normalizedValue)) {
-            target[field] = normalizedValue;
-        }
-    });
+    const localizedTranslation = commonUtils.isPlainObject(entry[locale]?.translation) ? entry[locale].translation : null;
+    const localizedValue = localizedTranslation?.[field];
+    if (translationCache.isEmptyTranslationValue(localizedValue)) {
+        return { value: undefined, fromSimplified: false };
+    }
 
-    return target;
+    const cnValue = cnTranslation?.[field];
+    if (!translationCache.isEmptyTranslationValue(cnValue) && localizedValue === cnValue) {
+        return { value: undefined, fromSimplified: false };
+    }
+
+    return { value: localizedValue, fromSimplified: false };
+}
+
+function hasOverrideField(override, field, locale = chineseLocale.resolveChineseLocale()) {
+    return !translationCache.isEmptyTranslationValue(resolveOverrideField(override, field, locale).value);
 }
 
 function getOverrideFromTable(table, target) {
@@ -132,7 +155,20 @@ async function getOverrideForTarget(env, target) {
 }
 
 function applyOverrideToTarget(target, override) {
-    return applyOverrideToTranslationObject(target, commonUtils.ensureObject(override?.translation));
+    if (!target || !override) {
+        return target;
+    }
+
+    const locale = chineseLocale.resolveChineseLocale();
+    translationCache.TRANSLATION_FIELDS.forEach((field) => {
+        const { value, fromSimplified } = resolveOverrideField(override, field, locale);
+        const normalizedValue = translationCache.normalizeTranslationText(chineseLocale.normalizeChineseForLocale(value, locale, { fromSimplified }));
+        if (!translationCache.isEmptyTranslationValue(normalizedValue)) {
+            target[field] = normalizedValue;
+        }
+    });
+
+    return target;
 }
 
 function applyOverrideToTranslations(items, override) {
@@ -140,13 +176,15 @@ function applyOverrideToTranslations(items, override) {
         return items;
     }
 
-    const cnTranslation = translationCache.pickCnTranslation(items);
-    if (!cnTranslation) {
+    // 覆盖要落在当前地区的主条目（tw/hk 走 /translations/zh 时主条目是 zh-TW/zh-HK）
+    const locale = chineseLocale.resolveChineseLocale();
+    const primaryTranslation = translationCache.pickLocaleTranslation(items, locale);
+    if (!primaryTranslation) {
         return items;
     }
 
-    applyOverrideToTarget(cnTranslation, override);
-    return translationCache.normalizeTranslations(items);
+    applyOverrideToTarget(primaryTranslation, override);
+    return translationCache.normalizeTranslations(items, locale);
 }
 
 function fetchMediaDetail(mediaType, traktId) {
@@ -480,6 +518,7 @@ export {
     getMissingRefs,
     getOverrideForTarget,
     getOverrideFromTable,
+    hasOverrideField,
     hydrateFromBackend,
     isDetailTranslationIncomplete,
     isPosterImageReplacementUserAgent,
@@ -491,6 +530,7 @@ export {
     replaceImagesInPlace,
     replaceSeasonImagesInPlace,
     resolveMediaDetailTarget,
+    resolvePreferredTranslationLanguage,
     resolveSeasonListTarget,
     resolveTranslationRequestTarget,
     SEASON_EPISODE_TRANSLATION_LIMIT,

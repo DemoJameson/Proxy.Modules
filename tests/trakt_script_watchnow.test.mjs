@@ -508,14 +508,14 @@ test("/shows/:id/seasons 会应用缓存剧集翻译并更新 link id 缓存", a
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "episode:555:1:1": createMediaTranslationEntry({
+                    "episode:555:1:1:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第一集",
                             overview: "第一集简介",
                             tagline: "第一集标语",
                         },
                     }),
-                    "episode:555:1:2": createMediaTranslationEntry({
+                    "episode:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集",
                             overview: "第二集简介",

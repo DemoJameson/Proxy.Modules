@@ -23,6 +23,8 @@
   放 Sofa Time、TMDb provider、request/response route matrix、以及不适合归到其他主题的 route smoke tests。
 - `trakt_script_user_agent.test.mjs`
   放脚本出站请求的 UA 标识测试：仅自建后端追加 `TraktSimplifiedChinese/<版本号>`，Trakt API 与 TMDb 保持原样。
+- `trakt_live_runner.test.mjs`
+  测 live runner 的 OAuth 刷新：用 refresh token 换新 access token、缺省 refresh token 时保留旧值、永久失败回退设备授权、429/5xx/网络错误只跳过本次登录态用例。
 - `trakt_backend_*.test.mjs`
   直接测 Vercel 后端 `api/trakt/` 接口的行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）、`trakt_backend_api_keys.test.mjs`（API key 下发接口的环境变量与 UA 门槛）。
 
@@ -74,18 +76,17 @@ node --test tests/xxx.test.mjs
 npm run test:trakt:live
 ```
 
-首次运行如果缺少 `TRAKT_API_KEY` 或 `TRAKT_BACKEND_BASE_URL`，脚本会提示输入并保存到仓库根目录的 `.trakt-live-test.local.json`，下次自动复用。
+首次运行如果缺少 `TRAKT_API_KEY` 或 `TRAKT_BACKEND_BASE_URL`，脚本会提示输入并保存到仓库根目录的 `.trakt-live-test.local.json`，下次自动复用。设备授权成功后 `access token` 与 `refresh token` 都会保存；access token 失效时会先用 refresh token 刷新，只有 refresh token 确实失效才重新走设备授权。
 
 如果缺少 `TRAKT_OAUTH_TOKEN`，脚本会优先引导你走 Trakt Device Flow 登录：
 
 - 先要求填写 `TRAKT_API_KEY`（也就是 Trakt app 的 `client_id`）
-- 一开始同时要求填写 `TRAKT_CLIENT_SECRET`
 - 打印 Trakt 官方登录链接和用户码
 - 你在浏览器完成授权后，回到终端按回车
-- 脚本再开始轮询获取 access token
+- 脚本再开始轮询获取 access token（Trakt 已废弃 `client_secret`，只用 `client_id` + device code）
 - 成功后自动保存到 `.trakt-live-test.local.json`
 
-如果不提供 `TRAKT_CLIENT_SECRET`，则只跑非登录态接口，登录态用例自动跳过。
+不想授权时可以直接 Ctrl+C 结束；只跑非登录态后端用例可用 `node --test tests/trakt_live_backend.test.mjs`。
 
 `TRAKT_BACKEND_BASE_URL` 输入留空时会使用 `trakt_simplified_chinese/src/module-manifest.mjs` 中的 `DEFAULT_BACKEND_BASE_URL`。
 
@@ -106,15 +107,15 @@ live 脚本测试依赖后端已配置 `TMDB_API_KEY`：中文海报、演职员
 
 最小流程：
 
-1. 在 Trakt 开发者后台创建一个 app，拿到 `client_id` 和 `client_secret`
+1. 在 Trakt 开发者后台创建一个 app，拿到 `client_id`（Trakt 已废弃 `client_secret`，设备授权不需要）
 2. 运行 `npm run test:trakt:live`
-3. 启动脚本提示输入 `TRAKT_API_KEY` 和 `TRAKT_CLIENT_SECRET`
+3. 启动脚本提示输入 `TRAKT_API_KEY`
 4. 脚本会打印 Trakt 登录链接和用户码
 5. 在浏览器完成授权
 6. 回到终端按回车
 7. 脚本自动拿到 `TRAKT_OAUTH_TOKEN` 并保存到本地配置
 
-如果暂时不想启用登录态测试，`TRAKT_CLIENT_SECRET` 直接回车即可，只会跳过登录态相关 live case。
+如果暂时不想启用登录态测试，在设备授权提示处 Ctrl+C 结束，或只运行非登录态的 `tests/trakt_live_backend.test.mjs`。
 
 只做语法和构建检查：
 

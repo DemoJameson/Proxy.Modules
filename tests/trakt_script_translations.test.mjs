@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { TRAKT_TAMPER_CLIENT_ID } from "../trakt_simplified_chinese/src/features/tamper-app-authorization.mjs";
 import { DEFAULT_BACKEND_BASE_URL } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { DEEPLX_TRANSLATE_API_URL as GOOGLE_TRANSLATE_URL } from "../trakt_simplified_chinese/src/outbound/deeplx-translate-client.mjs";
 import { convertTraditionalChineseToSimplified } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
@@ -241,7 +242,7 @@ test("/translations/zh 仅有 hk 条目时会按字段转成简体中文", async
     assert.equal(payload[0].overview, "繁体简介与观众评价");
     assert.equal(payload[0].tagline, "繁体标语");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.deepEqual(cacheEntry.translation, {
         title: "港版标题",
         overview: "繁体简介与观众评价",
@@ -300,7 +301,7 @@ test("/translations/zh 混合来源时所有进入结果的字段都会统一转
     assert.equal(payload[0].overview, "新加坡繁体简介");
     assert.equal(payload[0].tagline, "港版标语");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.deepEqual(cacheEntry.translation, {
         title: "台湾标题",
         overview: "新加坡繁体简介",
@@ -327,7 +328,7 @@ test("/translations/zh 应用中文翻译前会 trim 首尾空白和全角空格
     assert.equal(payload[0].overview, "中文简介");
     assert.equal(payload[0].tagline, "中文标语");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.deepEqual(cacheEntry.translation, {
         title: "港版标题",
         overview: "中文简介",
@@ -352,7 +353,7 @@ test("/translations/zh 会把简介中间连续两个或多个全角空格转成
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].overview, "第一段\n第二段\n第三段");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.deepEqual(cacheEntry.translation, {
         title: "中文标题",
         overview: "第一段\n第二段\n第三段",
@@ -389,7 +390,7 @@ test("/translations/zh 会把简介中间连续两个或多个全角空格转成
         const payload = JSON.parse(result.body);
         assert.equal(payload[0].movie.title, "Original Title");
 
-        const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+        const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
         assert.equal(cacheEntry.translation, undefined);
         assert.equal(cacheEntry.status, 3);
         assert.equal(backendPostQueue.length, 0);
@@ -409,7 +410,7 @@ test("episode 数字占位标题无中文简介时会生成标题但保持 NOT_F
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].episode.title, "第12集");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12:cn"];
     assert.equal(cacheEntry.status, 3);
     assert.equal(cacheEntry.translation, undefined);
     assert.equal(backendPostQueue.length, 0);
@@ -431,7 +432,7 @@ test("episode 数字占位标题有中文简介时会生成标题并标记 PARTI
     assert.equal(payload[0].episode.title, "第2集");
     assert.equal(payload[0].episode.overview, "中文简介");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12:cn"];
     assert.equal(cacheEntry.status, 2);
     assert.equal(cacheEntry.translation.title, undefined);
     assert.equal(cacheEntry.translation.overview, "中文简介");
@@ -468,7 +469,7 @@ test("episode 已有真实中文标题时不会用数字占位标题覆盖", asy
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].episode.title, "真正中文标题");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12:cn"];
     assert.equal(cacheEntry.status, 1);
     assert.equal(cacheEntry.translation.title, "真正中文标题");
 });
@@ -487,7 +488,7 @@ test("episode 非数字占位标题不会生成中文集数标题", async () => 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].episode.title, "Episode xx");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12:cn"];
     assert.equal(cacheEntry.status, 3);
     assert.equal(cacheEntry.translation, undefined);
 });
@@ -506,7 +507,7 @@ test("movie 的 Episode 数字标题不会生成中文集数标题", async () =>
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].movie.title, "Episode 1");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.equal(cacheEntry.status, 1);
     assert.equal(cacheEntry.translation.title, "Episode 1");
 });
@@ -545,7 +546,7 @@ test("/movies/:id 会把缓存中的中文翻译应用到详情响应", async ()
         persistentData: createUnifiedPersistentData({
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "movie:123": createMediaTranslationEntry({
+                    "movie:123:cn": createMediaTranslationEntry({
                         translation: {
                             title: "中文标题",
                             overview: "中文简介",
@@ -572,7 +573,7 @@ function hasRequestedUrl(httpLogs, url) {
     return httpLogs.some((entry) => entry.method === "GET" && entry.url === url);
 }
 
-test("/movies/:id 无缓存时会主动直查 Trakt 中文翻译并写回本地与后端缓存", async () => {
+test("/movies/:id 无缓存时不再主动请求翻译，保持原文且不写缓存", async () => {
     const httpPostMocks = createPendingBackendPostMocks();
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
@@ -587,25 +588,99 @@ test("/movies/:id 无缓存时会主动直查 Trakt 中文翻译并写回本地�
         httpPostMocks,
     });
 
+    // Trakt App 进入详情页后会自行请求 /translations/zh，脚本不再代劳，只应用已有缓存
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "Original Title");
+    assert.equal(payload.overview, "Original Overview");
+    assert.equal(payload.tagline, "Original Tagline");
+    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
+    assert.ok(!hasRequestedUrl(httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`));
+    assert.equal(parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"], undefined);
+    assert.equal(
+        httpLogs.some((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_TRANSLATIONS_URL),
+        false,
+    );
+});
+
+test("第三方 Trakt App（非官方 UA）无缓存时主动补翻译并写回本地与后端缓存", async () => {
+    const httpPostMocks = createPendingBackendPostMocks();
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        headers: {
+            "user-agent": "Rippple/1.0 (iOS)",
+        },
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
+        },
+        httpPostMocks,
+    });
+
     const payload = JSON.parse(result.body);
     assert.equal(payload.title, "港版标题");
     assert.equal(payload.overview, "港版简介");
     assert.equal(payload.tagline, "港版标语");
+    assert.ok(hasRequestedUrl(httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`), "应先读后端缓存");
+    assert.ok(hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL), "后端未命中时应直查 Trakt");
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.ok(cacheEntry);
     assert.equal(cacheEntry.complete, true);
     assert.equal(cacheEntry.translation.title, "港版标题");
 
     const backendPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_TRANSLATIONS_URL);
-    assert.ok(backendPost);
+    assert.ok(backendPost, "应回写后端缓存");
     assert.equal(JSON.parse(backendPost.body).movies["123"].complete, true);
 });
 
-test("/movies/:id 缓存只有 bulk 标题时会直查补全 overview/tagline 并标 complete", async () => {
-    const { result, persistentData } = await runResponseCase({
+test("第三方 Trakt App 命中后端缓存完整条目时不再直查 Trakt", async () => {
+    const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
         body: readFixture("movie-detail.json"),
+        headers: {
+            "user-agent": "Rippple/1.0 (iOS)",
+        },
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(
+                200,
+                JSON.stringify({
+                    movies: {
+                        123: {
+                            status: 1,
+                            complete: true,
+                            translation: {
+                                title: "后端缓存标题",
+                                overview: "后端缓存简介",
+                                tagline: "后端缓存标语",
+                            },
+                        },
+                    },
+                }),
+            ),
+            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "后端缓存标题");
+    assert.equal(payload.overview, "后端缓存简介");
+    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
+});
+
+test("第三方 Trakt App 的 NOT_FOUND 负缓存会回源自愈", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        headers: {
+            "user-agent": "Rippple/1.0 (iOS)",
+        },
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
         },
@@ -616,100 +691,44 @@ test("/movies/:id 缓存只有 bulk 标题时会直查补全 overview/tagline �
         persistentData: createUnifiedPersistentData({
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "movie:123": createMediaTranslationEntry({
-                        translation: {
-                            title: "bulk 标题",
-                        },
-                    }),
+                    "movie:123:cn": { status: 3, expiresAt: Date.now() + 24 * 60 * 60 * 1000 },
                 }),
             ),
         }),
     });
 
+    assert.ok(hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL), "负缓存应触发回源");
     const payload = JSON.parse(result.body);
     assert.equal(payload.title, "港版标题");
-    assert.equal(payload.overview, "港版简介");
-    assert.equal(payload.tagline, "港版标语");
-
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
-    assert.equal(cacheEntry.complete, true);
-    assert.equal(cacheEntry.translation.overview, "港版简介");
+    const entry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
+    assert.equal(entry.translation.title, "港版标题");
 });
 
-test("/movies/:id 直查无中文时保留已有标题并标 complete，二次访问不再直查", async () => {
-    const runDetailCase = (persistentData) =>
-        runResponseCase({
-            url: "https://api.trakt.tv/movies/123",
-            body: readFixture("movie-detail.json"),
-            argument: {
-                backendBaseUrl: TEST_BACKEND_BASE_URL,
-            },
-            httpGetMocks: {
-                [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
-                [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
-            },
-            persistentData,
-        });
-
-    const firstRun = await runDetailCase(
-        createUnifiedPersistentData({
-            traktTranslation: JSON.parse(
-                createMediaTranslationCache({
-                    "movie:123": createMediaTranslationEntry({
-                        translation: {
-                            title: "bulk 标题",
-                        },
-                    }),
-                }),
-            ),
+test("/movies/:id 有本地缓存时直接应用缓存译文，且不发起翻译请求", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
+        },
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMediaTranslationCache()),
         }),
-    );
-    const firstPayload = JSON.parse(firstRun.result.body);
-    assert.equal(firstPayload.title, "bulk 标题");
-    assert.equal(firstPayload.overview, "Original Overview");
+    });
 
-    const firstEntry = parseUnifiedCache(firstRun.persistentData).trakt.translation["movie:123"];
-    assert.equal(firstEntry.complete, true);
-    assert.equal(firstEntry.translation.title, "bulk 标题");
-
-    const secondRun = await runDetailCase(firstRun.persistentData);
-    const secondPayload = JSON.parse(secondRun.result.body);
-    assert.equal(secondPayload.title, "bulk 标题");
-    assert.ok(!hasRequestedUrl(secondRun.httpLogs, TEST_DIRECT_TRANSLATION_URL));
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "中文电影");
+    assert.equal(payload.overview, "中文简介");
+    assert.equal(payload.tagline, "中文标语");
+    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
+    assert.ok(!hasRequestedUrl(httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`));
 });
 
-test("/movies/:id 完全无缓存且直查无中文时写入 NOT_FOUND 终态条目，二次访问不再直查", async () => {
-    const runDetailCase = (persistentData) =>
-        runResponseCase({
-            url: "https://api.trakt.tv/movies/123",
-            body: readFixture("movie-detail.json"),
-            argument: {
-                backendBaseUrl: TEST_BACKEND_BASE_URL,
-            },
-            httpGetMocks: {
-                [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
-                [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
-            },
-            persistentData,
-        });
-
-    const firstRun = await runDetailCase(undefined);
-    const firstPayload = JSON.parse(firstRun.result.body);
-    assert.equal(firstPayload.title, "Original Title");
-    assert.equal(firstPayload.overview, "Original Overview");
-
-    const firstEntry = parseUnifiedCache(firstRun.persistentData).trakt.translation["movie:123"];
-    assert.ok(firstEntry);
-    assert.equal(firstEntry.status, 3);
-    assert.equal(firstEntry.complete, true);
-    assert.equal(firstEntry.translation, undefined);
-
-    const secondRun = await runDetailCase(firstRun.persistentData);
-    assert.ok(!hasRequestedUrl(secondRun.httpLogs, TEST_DIRECT_TRANSLATION_URL));
-    assert.ok(!hasRequestedUrl(secondRun.httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`));
-});
-
-test("/movies/:id 缓存字段齐全时不会发起直查", async () => {
+test("/movies/:id 缓存只有标题时只应用标题，其余字段保持原文", async () => {
     const { result, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
         body: readFixture("movie-detail.json"),
@@ -720,17 +739,25 @@ test("/movies/:id 缓存字段齐全时不会发起直查", async () => {
             [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
         },
         persistentData: createUnifiedPersistentData({
-            traktTranslation: JSON.parse(createMediaTranslationCache()),
+            traktTranslation: JSON.parse(
+                createMediaTranslationCache({
+                    "movie:123:cn": createMediaTranslationEntry({
+                        translation: {
+                            title: "bulk 标题",
+                        },
+                    }),
+                }),
+            ),
         }),
     });
 
     const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "中文电影");
+    assert.equal(payload.title, "bulk 标题");
+    assert.equal(payload.overview, "Original Overview");
     assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
 });
 
-test("/movies/:id NOT_FOUND 负缓存时详情页强制直查中文翻译并自愈", async () => {
-    // 持久化里写成 status:0，加载时会被归一化为 NOT_FOUND(3)，等价于一条未过期的负缓存记录
+test("/movies/:id NOT_FOUND 负缓存时不再回源自愈，也不发起请求", async () => {
     const { result, httpLogs, persistentData } = await runResponseCase({
         url: "https://api.trakt.tv/movies/123",
         body: readFixture("movie-detail.json"),
@@ -744,54 +771,24 @@ test("/movies/:id NOT_FOUND 负缓存时详情页强制直查中文翻译并自�
         persistentData: createUnifiedPersistentData({
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "movie:123": { status: 0, expiresAt: Date.now() + 24 * 60 * 60 * 1000 },
+                    "movie:123:cn": { status: 3, expiresAt: Date.now() + 24 * 60 * 60 * 1000 },
                 }),
             ),
         }),
     });
 
     const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "港版标题");
-    assert.ok(hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL), "NOT_FOUND 负缓存时详情页应强制直查中文翻译");
+    assert.equal(payload.title, "Original Title");
+    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
+    assert.ok(!hasRequestedUrl(httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`));
 
-    const entry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
-    assert.ok(entry);
-    assert.equal(entry.status, translationCache.CACHE_STATUS.FOUND, "回源后应自愈为 FOUND");
-    assert.equal(entry.complete, true);
+    const entry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
+    assert.equal(entry.status, translationCache.CACHE_STATUS.NOT_FOUND);
+    assert.equal(entry.translation, undefined);
 });
 
-test("/movies/:id NOT_FOUND 负缓存（显式 status:3）时详情页同样强制回源自愈", async () => {
-    const { result, httpLogs, persistentData } = await runResponseCase({
-        url: "https://api.trakt.tv/movies/123",
-        body: readFixture("movie-detail.json"),
-        argument: {
-            backendBaseUrl: TEST_BACKEND_BASE_URL,
-        },
-        httpGetMocks: {
-            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
-            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
-        },
-        persistentData: createUnifiedPersistentData({
-            traktTranslation: JSON.parse(
-                createMediaTranslationCache({
-                    "movie:123": { status: 3, expiresAt: Date.now() + 24 * 60 * 60 * 1000 },
-                }),
-            ),
-        }),
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "港版标题");
-    assert.ok(hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL), "NOT_FOUND 负缓存时详情页应强制直查中文翻译");
-
-    const entry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
-    assert.ok(entry);
-    assert.equal(entry.status, translationCache.CACHE_STATUS.FOUND, "回源后应自愈为 FOUND");
-    assert.equal(entry.complete, true);
-});
-
-test("/shows/:id/seasons/:n/episodes/:m 无缓存时会直查集翻译并应用", async () => {
-    const { result, persistentData } = await runResponseCase({
+test("/shows/:id/seasons/:n/episodes/:m 无缓存时不再主动请求集翻译", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/shows/555/seasons/1/episodes/12",
         body: JSON.stringify({
             title: "Episode 12",
@@ -822,67 +819,13 @@ test("/shows/:id/seasons/:n/episodes/:m 无缓存时会直查集翻译并应用"
         },
     });
 
+    // 标题仍会生成本地占位译文（不发请求），overview 保持原文
     const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "第 12 集中文标题");
-    assert.equal(payload.overview, "中文剧集简介");
-
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12"];
-    assert.ok(cacheEntry);
-    assert.equal(cacheEntry.complete, true);
-});
-
-test("/movies/:id 后端缓存命中完整条目时不再请求 Trakt 直查", async () => {
-    const { result, httpLogs } = await runResponseCase({
-        url: "https://api.trakt.tv/movies/123",
-        body: readFixture("movie-detail.json"),
-        argument: {
-            backendBaseUrl: TEST_BACKEND_BASE_URL,
-        },
-        httpGetMocks: {
-            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(
-                200,
-                JSON.stringify({
-                    movies: {
-                        123: createMediaTranslationEntry({
-                            complete: true,
-                        }),
-                    },
-                }),
-            ),
-            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "中文电影");
-    assert.equal(payload.overview, "中文简介");
-    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
-});
-
-test("/movies/:id available_translations 不含 zh 时不会发起直查", async () => {
-    const { result, httpLogs } = await runResponseCase({
-        url: "https://api.trakt.tv/movies/123",
-        body: JSON.stringify({
-            title: "Original Title",
-            overview: "Original Overview",
-            tagline: "Original Tagline",
-            ids: {
-                trakt: 123,
-            },
-            available_translations: ["en", "ja"],
-        }),
-        argument: {
-            backendBaseUrl: TEST_BACKEND_BASE_URL,
-        },
-        httpGetMocks: {
-            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
-        },
-    });
-
-    const payload = JSON.parse(result.body);
-    assert.equal(payload.title, "Original Title");
-    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_TRANSLATION_URL));
-    assert.ok(!hasRequestedUrl(httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`));
+    assert.equal(payload.title, "第12集");
+    assert.equal(payload.overview, "Original Episode Overview");
+    assert.ok(!hasRequestedUrl(httpLogs, TEST_DIRECT_EPISODE_TRANSLATION_URL));
+    assert.ok(!hasRequestedUrl(httpLogs, `${TEST_BACKEND_TRANSLATIONS_URL}?episodes=555:1:12`));
+    assert.equal(parseUnifiedCache(persistentData).trakt.translation["episode:555:1:12:cn"], undefined);
 });
 
 test("/movies/:id 会用 TMDb 中文 w780 海报替换 images.poster[0]", async () => {
@@ -890,7 +833,7 @@ test("/movies/:id 会用 TMDb 中文 w780 海报替换 images.poster[0]", async 
         url: "https://api.trakt.tv/movies/123",
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData(),
         httpGetMocks: {
@@ -921,7 +864,7 @@ test("/movies/:id 会用 TMDb 中文 w780 海报替换 images.poster[0]", async 
     });
 
     const payload = JSON.parse(result.body);
-    const cachePoster = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"].poster;
+    const cachePoster = parseUnifiedCache(persistentData).trakt.image["cn:movies:123"].poster;
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/best-cn-poster.jpg");
     assert.equal(cachePoster.status, 1);
     assert.equal(cachePoster.url, "https://image.tmdb.org/t/p/original/best-cn-poster.jpg");
@@ -939,7 +882,7 @@ for (const userAgent of ["Rippple/1.0", "Infuse/8.0"]) {
             },
             body: JSON.stringify(original),
             argument: {
-                posterImageMode: "chinese",
+                posterImageMode: "cn",
             },
             persistentData: createUnifiedPersistentData(),
             httpGetMocks: {
@@ -1034,7 +977,7 @@ test("后端批量翻译即使保存时被本地缓存限额裁剪，当前响�
     const storedTranslationCache = parseUnifiedCache(persistentData).trakt.translation;
     assert.equal(payload.find((item) => item?.movie?.ids?.trakt === 101)?.movie?.title, "后端中文标题");
     assert.equal(payload.find((item) => item?.movie?.ids?.trakt === 101)?.movie?.overview, "后端中文简介");
-    assert.equal(storedTranslationCache["movie:101"], undefined);
+    assert.equal(storedTranslationCache["movie:101:cn"], undefined);
 });
 
 test("posterImageMode=default 时 movie/show 不请求也不替换中文图片", async () => {
@@ -1089,7 +1032,7 @@ test("TMDb 图片选择会优先 iso_3166_1 中文地区再比较评分", async 
         url: "https://api.trakt.tv/shows/555",
         body: JSON.stringify(createShowWithPoster()),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData(),
         httpGetMocks: {
@@ -1224,43 +1167,59 @@ test("posterImageMode=original 且 language=en 时不使用本地 original 图�
     );
 });
 
-test("posterImageMode=original 且中文原片无对应 country 时按中文地区优先级选图", async () => {
-    const movie = createMovieWithPoster({
-        language: "zh",
-        country: "MO",
-    });
-    const { result, persistentData } = await runResponseCase({
-        url: "https://api.trakt.tv/movies/123",
-        body: JSON.stringify(movie),
-        argument: {
-            posterImageMode: "original",
+test("posterImageMode=original 无对应 country 时按目标语言调整中文地区优先级", async () => {
+    const images = [
+        {
+            iso_639_1: "zh",
+            iso_3166_1: "TW",
+            file_path: "/tw-priority-original-poster.jpg",
+            vote_average: 1,
+            vote_count: 1,
         },
-        persistentData: createUnifiedPersistentData(),
-        httpGetMocks: {
-            [TEST_TMDB_MOVIE_IMAGES_ZH_URL]: createTmdbImagesResponse([
-                {
-                    iso_639_1: "zh",
-                    iso_3166_1: "HK",
-                    file_path: "/hk-high-score-original-poster.jpg",
-                    vote_average: 10,
-                    vote_count: 100,
-                },
-                {
-                    iso_639_1: "zh",
-                    iso_3166_1: "CN",
-                    file_path: "/cn-priority-original-poster.jpg",
-                    vote_average: 1,
-                    vote_count: 1,
-                },
-            ]),
+        {
+            iso_639_1: "zh",
+            iso_3166_1: "HK",
+            file_path: "/hk-priority-original-poster.jpg",
+            vote_average: 10,
+            vote_count: 100,
         },
-    });
+        {
+            iso_639_1: "zh",
+            iso_3166_1: "CN",
+            file_path: "/cn-priority-original-poster.jpg",
+            vote_average: 10,
+            vote_count: 100,
+        },
+    ];
 
-    const payload = JSON.parse(result.body);
-    const cachePoster = parseUnifiedCache(persistentData).trakt.image["original:movies:123"].poster;
-    assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/cn-priority-original-poster.jpg");
-    assert.equal(cachePoster.status, 2);
-    assert.ok(cachePoster.expiresAt > Date.now() + 29 * 24 * 60 * 60 * 1000);
+    for (const [locale, expectedPoster] of [
+        ["cn", "cn-priority-original-poster.jpg"],
+        ["tw", "tw-priority-original-poster.jpg"],
+        ["hk", "hk-priority-original-poster.jpg"],
+    ]) {
+        const movie = createMovieWithPoster({
+            language: "zh",
+            country: "MO",
+        });
+        const { result, persistentData } = await runResponseCase({
+            url: "https://api.trakt.tv/movies/123",
+            body: JSON.stringify(movie),
+            argument: {
+                chineseLocale: locale,
+                posterImageMode: "original",
+            },
+            persistentData: createUnifiedPersistentData(),
+            httpGetMocks: {
+                [TEST_TMDB_MOVIE_IMAGES_ZH_URL]: createTmdbImagesResponse(images),
+            },
+        });
+
+        const payload = JSON.parse(result.body);
+        const cachePoster = parseUnifiedCache(persistentData).trakt.image["original:movies:123"].poster;
+        assert.equal(payload.images.poster[0], `https://image.tmdb.org/t/p/w780/${expectedPoster}`);
+        assert.equal(cachePoster.status, 2);
+        assert.ok(cachePoster.expiresAt > Date.now() + 29 * 24 * 60 * 60 * 1000);
+    }
 });
 
 test("posterImageMode=original 缺少响应 language 时用 TMDb 详情 original_language", async () => {
@@ -1397,7 +1356,7 @@ test("/movies/:id 会用 TMDb 中文 logo 替换 images.logo[0] 并写回后端�
         ),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData(),
         httpGetMocks: {
@@ -1450,7 +1409,7 @@ test("/movies/:id 会用 TMDb 中文 logo 替换 images.logo[0] 并写回后端�
 
     const payload = JSON.parse(result.body);
     const imageCache = parseUnifiedCache(persistentData).trakt.image;
-    const cache = imageCache["chinese:movies:123"];
+    const cache = imageCache["cn:movies:123"];
     const imagePost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_IMAGES_URL);
     const imagePostBody = JSON.parse(imagePost.body);
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/movie-poster.jpg");
@@ -1473,7 +1432,7 @@ test("后端原片语言图片写入不受本地 original 缓存影响", async (
         ),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
@@ -1543,7 +1502,7 @@ test("posterImageMode=chinese 时原片语言详情失败不影响中文海报",
         url: "https://api.trakt.tv/movies/123",
         body: JSON.stringify(movie),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData(),
         httpGetMocks: {
@@ -1581,11 +1540,11 @@ test("posterImageMode=chinese 列表流缺少 language 时用合并详情请求�
         ]),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry(),
+                "movie:123:cn": createMediaTranslationEntry(),
             },
         }),
         httpGetMocks: {
@@ -1629,7 +1588,7 @@ test("posterImageMode=chinese 列表流缺少 language 时用合并详情请求�
         httpLogs.some((entry) => entry.method === "GET" && entry.url.startsWith("https://api.tmdb.org/3/movie/456/images")),
         false,
     );
-    assert.equal(imageCache["chinese:movies:123"].poster.url, "https://image.tmdb.org/t/p/original/merged-zh-poster.jpg");
+    assert.equal(imageCache["cn:movies:123"].poster.url, "https://image.tmdb.org/t/p/original/merged-zh-poster.jpg");
     assert.equal(imageCache["original:movies:123"], undefined);
     assert.equal(imagePostBody.modes.chinese.movies["123"].poster.url, "https://image.tmdb.org/t/p/original/merged-zh-poster.jpg");
     assert.equal(imagePostBody.modes.original.movies["123"].poster.url, "https://image.tmdb.org/t/p/original/merged-ja-poster.jpg");
@@ -1645,11 +1604,11 @@ test("posterImageMode=chinese 列表流合并详情请求失败时回退单独�
             }),
         ]),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry(),
+                "movie:123:cn": createMediaTranslationEntry(),
             },
         }),
         httpGetMocks: {
@@ -1691,7 +1650,7 @@ test("movie/show 向 TMDb 请求图片时会同时缓存 poster 和 logo", async
         body: JSON.stringify(movie),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData(),
         httpGetMocks: {
@@ -1720,7 +1679,7 @@ test("movie/show 向 TMDb 请求图片时会同时缓存 poster 和 logo", async
     });
 
     const payload = JSON.parse(result.body);
-    const cache = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"];
+    const cache = parseUnifiedCache(persistentData).trakt.image["cn:movies:123"];
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/movie-poster.jpg");
     assert.equal(payload.images.logo, undefined);
     assert.equal(cache.poster.url, "https://image.tmdb.org/t/p/original/movie-poster.jpg");
@@ -1733,7 +1692,7 @@ test("/movies/:id 命中后端图片缓存时替换 poster/logo 且不请求 TMD
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData(),
         httpGetMocks: {
@@ -1798,11 +1757,11 @@ test("本地图片缓存 PARTIAL_FOUND 未过期时直接替换且不请求 TMDb
         url: "https://api.trakt.tv/movies/123",
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "chinese:movies:123": {
+                "cn:movies:123": {
                     poster: {
                         status: 2,
                         url: "https://image.tmdb.org/t/p/original/partial-poster.jpg",
@@ -1832,11 +1791,11 @@ test("TMDb 获取后本地当前模式缓存会写入新获取的完整图片数
         url: "https://api.trakt.tv/movies/123",
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "chinese:movies:123": {
+                "cn:movies:123": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/old-poster.jpg",
@@ -1869,7 +1828,7 @@ test("TMDb 获取后本地当前模式缓存会写入新获取的完整图片数
     });
 
     const payload = JSON.parse(result.body);
-    const cache = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"];
+    const cache = parseUnifiedCache(persistentData).trakt.image["cn:movies:123"];
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/new-poster.jpg");
     assert.equal(payload.images.logo[0], "https://image.tmdb.org/t/p/w500/new-logo.png");
     assert.equal(cache.poster.url, "https://image.tmdb.org/t/p/original/new-poster.jpg");
@@ -1882,11 +1841,11 @@ test("当前模式本地图片缓存命中时不请求另一种模式后端缓�
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "chinese:movies:123": {
+                "cn:movies:123": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/cached-poster.jpg",
@@ -1992,11 +1951,11 @@ test("本地图片缓存 PARTIAL_FOUND/NOT_FOUND 过期后会重新请求 TMDb",
         url: "https://api.trakt.tv/movies/123",
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "chinese:movies:123": {
+                "cn:movies:123": {
                     poster: {
                         status: 2,
                         url: "https://image.tmdb.org/t/p/original/expired-poster.jpg",
@@ -2034,7 +1993,7 @@ test("本地图片缓存 PARTIAL_FOUND/NOT_FOUND 过期后会重新请求 TMDb",
     });
 
     const payload = JSON.parse(result.body);
-    const cache = parseUnifiedCache(persistentData).trakt.image["chinese:movies:123"];
+    const cache = parseUnifiedCache(persistentData).trakt.image["cn:movies:123"];
     assert.equal(payload.images.poster[0], "https://image.tmdb.org/t/p/w780/fresh-poster.jpg");
     assert.equal(cache.poster.status, 1);
     assert.equal(cache.poster.expiresAt, null);
@@ -2046,11 +2005,11 @@ test("/shows 直出列表会用 TMDb 中文海报替换剧集 images.poster[0]",
         url: "https://api.trakt.tv/shows/popular",
         body: JSON.stringify([createShowWithPoster()]),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                "show:555": createMediaTranslationEntry({
+                "show:555:cn": createMediaTranslationEntry({
                     translation: {
                         title: "中文剧集",
                     },
@@ -2080,7 +2039,7 @@ test("/shows 直出列表会用 TMDb 中文海报替换剧集 images.poster[0]",
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].title, "中文剧集");
     assert.equal(payload[0].images.poster[0], "https://image.tmdb.org/t/p/w780/sg-show-poster.jpg");
-    const cachePoster = parseUnifiedCache(persistentData).trakt.image["chinese:shows:555"].poster;
+    const cachePoster = parseUnifiedCache(persistentData).trakt.image["cn:shows:555"].poster;
     assert.equal(cachePoster.status, 2);
     assert.equal(cachePoster.url, "https://image.tmdb.org/t/p/original/sg-show-poster.jpg");
     assert.ok(cachePoster.expiresAt > Date.now() + 29 * 24 * 60 * 60 * 1000);
@@ -2149,7 +2108,7 @@ test("posterImageMode=original 且列表项 language=en 时不使用本地 origi
             url: "https://api.trakt.tv/movies/123",
             body: JSON.stringify(createMovieWithPoster()),
             argument: {
-                posterImageMode: "chinese",
+                posterImageMode: "cn",
             },
             persistentData: createUnifiedPersistentData(),
             httpGetMocks: {
@@ -2177,12 +2136,12 @@ test("缺少 images.poster 时仍会请求 TMDb 写入图片缓存，缺少 ids.
         ]),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry(),
-                "movie:124": createMediaTranslationEntry(),
+                "movie:123:cn": createMediaTranslationEntry(),
+                "movie:124:cn": createMediaTranslationEntry(),
             },
         }),
         httpGetMocks: {
@@ -2209,11 +2168,11 @@ test("TMDb poster 缓存命中时不会重复请求", async () => {
         url: "https://api.trakt.tv/movies/123",
         body: JSON.stringify(createMovieWithPoster()),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktImage: {
-                "chinese:movies:123": {
+                "cn:movies:123": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/cached-poster.jpg",
@@ -2291,7 +2250,7 @@ test("/shows/:id/seasons 会用 TMDb 中文季海报替换 season images.poster[
         ]),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
@@ -2303,7 +2262,7 @@ test("/shows/:id/seasons 会用 TMDb 中文季海报替换 season images.poster[
                 },
             },
             traktTranslation: {
-                "episode:555:1:1": createMediaTranslationEntry({
+                "episode:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                     },
@@ -2343,7 +2302,7 @@ test("/shows/:id/seasons 会用 TMDb 中文季海报替换 season images.poster[
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].images.poster[0], "https://image.tmdb.org/t/p/w780/best-season-poster.jpg");
     assert.equal(payload[0].episodes[0].title, "第一集中文");
-    assert.equal(parseUnifiedCache(persistentData).trakt.image["chinese:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/best-season-poster.jpg");
+    assert.equal(parseUnifiedCache(persistentData).trakt.image["cn:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/best-season-poster.jpg");
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === "https://api.trakt.tv/shows/555?extended=cloud9,full,watchnow"));
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === `${TEST_BACKEND_IMAGES_URL}?mode=chinese&seasons=555:1`));
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_SEASON_IMAGES_URL));
@@ -2593,7 +2552,7 @@ test("posterImageMode=chinese 季列表并发共享一次 TMDb show 详情请求
             },
         ]),
         argument: {
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {
@@ -2663,7 +2622,7 @@ test("/shows/:id/seasons 没有 currentSeason 时仍会替换季海报", async (
         ]),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {
@@ -2712,7 +2671,7 @@ test("/shows/:id/seasons 命中后端季图片缓存时写入新 season 本地 k
         ]),
         argument: {
             backendBaseUrl: TEST_BACKEND_BASE_URL,
-            posterImageMode: "chinese",
+            posterImageMode: "cn",
         },
         persistentData: createUnifiedPersistentData({
             traktLinkIds: {
@@ -2743,8 +2702,8 @@ test("/shows/:id/seasons 命中后端季图片缓存时写入新 season 本地 k
     const payload = JSON.parse(result.body);
     const imageCache = parseUnifiedCache(persistentData).trakt.image;
     assert.equal(payload[0].images.poster[0], "https://image.tmdb.org/t/p/w780/backend-season-poster.jpg");
-    assert.equal(imageCache["chinese:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/backend-season-poster.jpg");
-    assert.equal(imageCache["season:555:1"], undefined);
+    assert.equal(imageCache["cn:seasons:555:1"].poster.url, "https://image.tmdb.org/t/p/original/backend-season-poster.jpg");
+    assert.equal(imageCache["season:555:1:cn"], undefined);
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_TMDB_SEASON_IMAGES_URL),
         false,
@@ -2896,7 +2855,7 @@ test("/translations/zh 写回媒体缓存时只保留状态、翻译与 complete
         body: readFixture("translations.json"),
     });
 
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
+    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"];
     assert.ok(cacheEntry);
     assert.deepEqual(Object.keys(cacheEntry).sort(), ["complete", "status", "translation"]);
     assert.equal(cacheEntry.complete, true);
@@ -2926,12 +2885,12 @@ test("统一缓存 version 不匹配时会清空旧缓存并正常写入新翻�
                 version: 999,
                 trakt: {
                     translation: {
-                        "movie:123": createMediaTranslationEntry({
+                        "movie:123:cn": createMediaTranslationEntry({
                             translation: {
                                 title: "旧标题",
                             },
                         }),
-                        "movie:456": createMediaTranslationEntry({
+                        "movie:456:cn": createMediaTranslationEntry({
                             translation: {
                                 title: "应被清空的旧标题",
                             },
@@ -2944,8 +2903,8 @@ test("统一缓存 version 不匹配时会清空旧缓存并正常写入新翻�
 
     const unifiedCache = parseUnifiedCache(persistentData);
     assert.equal(unifiedCache.version, UNIFIED_CACHE_SCHEMA_VERSION);
-    assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "港版标题");
-    assert.equal(unifiedCache.trakt.translation["movie:456"], undefined);
+    assert.equal(unifiedCache.trakt.translation["movie:123:cn"].translation.title, "港版标题");
+    assert.equal(unifiedCache.trakt.translation["movie:456:cn"], undefined);
 });
 
 test("统一缓存超过上限时会裁剪低优先级 Google 评论并保留媒体翻译与持久状态", async () => {
@@ -2955,7 +2914,7 @@ test("统一缓存超过上限时会裁剪低优先级 Google 评论并保留媒
         body: readFixture("comments.json"),
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry({
+                "movie:123:cn": createMediaTranslationEntry({
                     translation: {
                         title: "保留标题",
                         overview: "保留简介",
@@ -2991,7 +2950,7 @@ test("统一缓存超过上限时会裁剪低优先级 Google 评论并保留媒
 
     const unifiedCache = parseUnifiedCache(persistentData);
     assert.equal(Object.keys(unifiedCache.google.comments).length, 2);
-    assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "保留标题");
+    assert.equal(unifiedCache.trakt.translation["movie:123:cn"].translation.title, "保留标题");
     assert.deepEqual(unifiedCache.persistent.historyShows["https://api.trakt.tv/users/me/history/episodes"], {
         shows: {
             555: true,
@@ -3036,14 +2995,14 @@ test("merged history episodes 列表会按 show 保留最新一条并应用缓�
         persistentData: createUnifiedPersistentData({
             traktTranslation: JSON.parse(
                 createMediaTranslationCache({
-                    "episode:555:1:2": createMediaTranslationEntry({
+                    "episode:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
                             tagline: "第二集中文标语",
                         },
                     }),
-                    "episode:777:2:1": createMediaTranslationEntry({
+                    "episode:777:2:1:cn": createMediaTranslationEntry({
                         translation: {
                             title: "其他剧中文",
                             overview: "其他剧中文简介",
@@ -3099,12 +3058,12 @@ test("historyEpisodesMergedByShow 启用时历史剧集只缓存合并后剧集�
     assert.equal(payload[1].episode.title, "港版标题");
 
     const translationCache = parseUnifiedCache(persistentData).trakt.translation;
-    assert.deepEqual(Object.keys(translationCache).sort(), ["episode:555:1:2", "episode:777:2:1", "show:555", "show:777"]);
-    assert.equal(translationCache["show:555"].translation.title, "港版标题");
-    assert.equal(translationCache["show:777"].translation.title, "港版标题");
-    assert.equal(translationCache["episode:555:1:2"].translation.title, "港版标题");
-    assert.equal(translationCache["episode:777:2:1"].translation.title, "港版标题");
-    assert.equal(translationCache["episode:555:1:1"], undefined);
+    assert.deepEqual(Object.keys(translationCache).sort(), ["episode:555:1:2:cn", "episode:777:2:1:cn", "show:555:cn", "show:777:cn"]);
+    assert.equal(translationCache["show:555:cn"].translation.title, "港版标题");
+    assert.equal(translationCache["show:777:cn"].translation.title, "港版标题");
+    assert.equal(translationCache["episode:555:1:2:cn"].translation.title, "港版标题");
+    assert.equal(translationCache["episode:777:2:1:cn"].translation.title, "港版标题");
+    assert.equal(translationCache["episode:555:1:1:cn"], undefined);
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === `${DEFAULT_BACKEND_BASE_URL}/api/trakt/translations?shows=555,777&episodes=555:1:2,777:2:1`),
         true,
@@ -3148,7 +3107,7 @@ test("translationEngine=off 时 comments 不触发 Google 翻译，但仍可应�
 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].comment, "很棒的电影");
-    assert.equal(parseUnifiedCache(persistentData).google.comments["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(parseUnifiedCache(persistentData).google.comments["9001:cn"].comment.translatedText, "很棒的电影");
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
         false,
@@ -3168,8 +3127,8 @@ test("comments 列表会翻译未命中的评论并写回缓存", async () => {
     assert.equal(payload[0].comment, "很棒的电影");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
     assert.equal(
         httpLogs.some((entry) => entry.method === "GET" && /^https:\/\/api[a-z]*\.trakt\.tv\//.test(entry.url)),
         false,
@@ -3198,8 +3157,8 @@ test("comments 本地未命中时会读取后端评论缓存并写回本地", as
     assert.equal(payload[0].comment, "很棒的电影");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
@@ -3231,8 +3190,8 @@ test("comments 后端未命中时会 Google 翻译并 fire-and-forget 回写后�
     assert.equal(payload[0].comment, "很棒的电影");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 
     assert.ok(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === `${TEST_BACKEND_COMMENT_TRANSLATIONS_URL}?comments=9001`),
@@ -3275,8 +3234,8 @@ test("translationEngine=off 时 comments 仍会读取并应用后端评论缓存
     assert.equal(payload[0].comment, "很棒的电影");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
@@ -3313,8 +3272,8 @@ test("comments 后端条目 hash 不匹配时不应用并走 Google 覆盖", asy
     assert.equal(payload[0].comment, "很棒的电影");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 
     const backendPost = httpLogs.find((entry) => entry.method === "POST" && entry.url === TEST_BACKEND_COMMENT_TRANSLATIONS_URL);
     assert.ok(backendPost, "expected the fresh translation to be written back to the backend");
@@ -3354,8 +3313,8 @@ test("comments 详情会读取后端评论缓存并跳过 Google 翻译", async 
     assert.equal(payload.comment, "故事感觉很牵强，只是为了加入复古演员。");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["453514"].comment.translatedText, "故事感觉很牵强，只是为了加入复古演员。");
-    assert.equal(cache["453514"].comment.sourceTextHash, computeStringHash("The story feels forced just to include retro actors."));
+    assert.equal(cache["453514:cn"].comment.translatedText, "故事感觉很牵强，只是为了加入复古演员。");
+    assert.equal(cache["453514:cn"].comment.sourceTextHash, computeStringHash("The story feels forced just to include retro actors."));
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
@@ -3388,8 +3347,8 @@ test("comments 详情会翻译单个评论对象并写回缓存", async () => {
     assert.equal(payload.comment, "故事感觉很牵强，只是为了加入复古演员。");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["453514"].comment.translatedText, "故事感觉很牵强，只是为了加入复古演员。");
-    assert.equal(cache["453514"].comment.sourceTextHash, computeStringHash("The story feels forced just to include retro actors."));
+    assert.equal(cache["453514:cn"].comment.translatedText, "故事感觉很牵强，只是为了加入复古演员。");
+    assert.equal(cache["453514:cn"].comment.sourceTextHash, computeStringHash("The story feels forced just to include retro actors."));
 });
 
 test("movie comments 会用双语片名上下文翻译未命中的评论", async () => {
@@ -3404,7 +3363,7 @@ test("movie comments 会用双语片名上下文翻译未命中的评论", async
                 },
             },
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry(),
+                "movie:123:cn": createMediaTranslationEntry(),
             },
         }),
         httpPostMocks: {
@@ -3422,8 +3381,8 @@ test("movie comments 会用双语片名上下文翻译未命中的评论", async
     assert.ok(!httpLogs.some((entry) => entry.method === "GET" && entry.url === "https://api.trakt.tv/movies/123?extended=cloud9,full,watchnow"));
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 });
 
 test("movie comments 缺少中文片名时会拉取翻译并添加双语片名上下文", async () => {
@@ -3455,9 +3414,9 @@ test("movie comments 缺少中文片名时会拉取翻译并添加双语片名�
     assert.ok(httpLogs.some((entry) => entry.method === "GET" && entry.url === TEST_DIRECT_TRANSLATION_URL));
 
     const unifiedCache = parseUnifiedCache(persistentData);
-    assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "港版标题");
-    assert.equal(unifiedCache.google.comments["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(unifiedCache.google.comments["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(unifiedCache.trakt.translation["movie:123:cn"].translation.title, "港版标题");
+    assert.equal(unifiedCache.google.comments["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(unifiedCache.google.comments["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 });
 
 test("movie comments 双缓存全冷时会并发拉取媒体详情和中文翻译并添加双语上下文", async () => {
@@ -3490,7 +3449,7 @@ test("movie comments 双缓存全冷时会并发拉取媒体详情和中文翻�
 
     const unifiedCache = parseUnifiedCache(persistentData);
     assert.equal(unifiedCache.trakt.linkIds[123].title, "Original Movie");
-    assert.equal(unifiedCache.trakt.translation["movie:123"].translation.title, "港版标题");
+    assert.equal(unifiedCache.trakt.translation["movie:123:cn"].translation.title, "港版标题");
 });
 
 test("episode comments 双缓存全冷时会并发拉取剧集详情和中文翻译并添加双语上下文", async () => {
@@ -3525,7 +3484,7 @@ test("episode comments 双缓存全冷时会并发拉取剧集详情和中文翻
 
     const unifiedCache = parseUnifiedCache(persistentData);
     assert.equal(unifiedCache.trakt.linkIds[808].title, "Episode 12");
-    assert.equal(unifiedCache.trakt.translation["episode:555:1:12"].translation.title, "港版标题");
+    assert.equal(unifiedCache.trakt.translation["episode:555:1:12:cn"].translation.title, "港版标题");
 });
 
 test("movie comments 抓取中文翻译失败时不写脏缓存且不加上下文", async () => {
@@ -3555,8 +3514,8 @@ test("movie comments 抓取中文翻译失败时不写脏缓存且不加上下�
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Great movie"]);
 
     const unifiedCache = parseUnifiedCache(persistentData);
-    assert.equal(unifiedCache.trakt.translation["movie:123"], undefined);
-    assert.equal(unifiedCache.google.comments["9001"].comment.translatedText, "很棒的电影");
+    assert.equal(unifiedCache.trakt.translation["movie:123:cn"], undefined);
+    assert.equal(unifiedCache.google.comments["9001:cn"].comment.translatedText, "很棒的电影");
 });
 
 test("episode comments 会用单集标题上下文翻译未命中的评论", async () => {
@@ -3574,7 +3533,7 @@ test("episode comments 会用单集标题上下文翻译未命中的评论", asy
                 },
             },
             traktTranslation: {
-                "episode:555:1:12": createMediaTranslationEntry({
+                "episode:555:1:12:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第十二集",
                     },
@@ -3593,8 +3552,8 @@ test("episode comments 会用单集标题上下文翻译未命中的评论", asy
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Episode 12 (第十二集)\nGreat movie"]);
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 });
 
 test("comments 写回缓存时会保留其他 comment 项", async () => {
@@ -3603,7 +3562,7 @@ test("comments 写回缓存时会保留其他 comment 项", async () => {
         body: readFixture("comments.json"),
         persistentData: createUnifiedPersistentData({
             googleComments: {
-                7777: {
+                "7777:cn": {
                     comment: {
                         sourceTextHash: "cafebabe",
                         translatedText: "其他评论",
@@ -3617,8 +3576,8 @@ test("comments 写回缓存时会保留其他 comment 项", async () => {
     });
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["7777"].comment.translatedText, "其他评论");
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["7777:cn"].comment.translatedText, "其他评论");
 });
 
 test("comments 列表会按语言分组翻译并跳过中文项", async () => {
@@ -3654,9 +3613,9 @@ test("comments 列表会按语言分组翻译并跳过中文项", async () => {
     assert.equal(payload[2].comment, "已经是中文");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9002"].comment.translatedText, "优秀的电影");
-    assert.equal(cache["9003"], undefined);
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9002:cn"].comment.translatedText, "优秀的电影");
+    assert.equal(cache["9003:cn"], undefined);
 });
 
 test("comments 在部分翻译结果为空时只更新成功项并保留其他原文", async () => {
@@ -3686,8 +3645,8 @@ test("comments 在部分翻译结果为空时只更新成功项并保留其他�
     assert.equal(payload[1].comment, "Needs work");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9002"], undefined);
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9002:cn"], undefined);
 });
 
 test("comments 列表遇到 hash 不匹配的旧缓存时会忽略旧值并刷新缓存", async () => {
@@ -3697,7 +3656,7 @@ test("comments 列表遇到 hash 不匹配的旧缓存时会忽略旧值并刷�
         persistentData: createUnifiedPersistentData({
             googleComments: JSON.parse(
                 createCommentTranslationCache({
-                    9001: {
+                    "9001:cn": {
                         comment: {
                             sourceTextHash: "deadbeef",
                             translatedText: "旧错误翻译",
@@ -3715,8 +3674,8 @@ test("comments 列表遇到 hash 不匹配的旧缓存时会忽略旧值并刷�
     assert.equal(payload[0].comment, "很棒的电影");
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 });
 
 createGoogleFailureCases().forEach(({ name, mock }) => {
@@ -3784,8 +3743,8 @@ test("recent comments 未命中评论缓存时会用媒体标题上下文翻译�
     assert.deepEqual(extractDeepLxRequestTexts(googleRequestBody), ["Original Movie (中文电影)\nGreat movie"]);
 
     const cache = parseUnifiedCache(persistentData).google.comments;
-    assert.equal(cache["9001"].comment.translatedText, "很棒的电影");
-    assert.equal(cache["9001"].comment.sourceTextHash, computeStringHash("Great movie"));
+    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(cache["9001:cn"].comment.sourceTextHash, computeStringHash("Great movie"));
 });
 
 test("list descriptions 会应用缓存中的描述翻译", async () => {
@@ -3804,7 +3763,7 @@ test("list descriptions 会应用缓存中的描述翻译", async () => {
 test("translationEngine=off 时 list descriptions 不触发 Google 翻译，但仍可应用缓存", async () => {
     const cachedList = JSON.parse(
         createListTranslationCache({
-            321: {
+            "321:cn": {
                 name: {
                     sourceTextHash: computeStringHash("Favorites"),
                     translatedText: "收藏夹",
@@ -3838,8 +3797,8 @@ test("translationEngine=off 时 list descriptions 不触发 Google 翻译，但�
     assert.equal(payload[0].name, "收藏夹");
     assert.equal(payload[0].description, "一个不错的列表");
     const cache = parseUnifiedCache(afterPersistentData).google.list;
-    assert.equal(cache["321"].name.translatedText, "收藏夹");
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["321:cn"].name.translatedText, "收藏夹");
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
     assert.equal(afterPersistentData[UNIFIED_CACHE_KEY], beforeCache);
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
@@ -3860,8 +3819,8 @@ test("list descriptions 会翻译未命中的描述并写回缓存", async () =>
     assert.equal(payload[0].description, "一个不错的列表");
 
     const cache = parseUnifiedCache(persistentData).google.list;
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
-    assert.equal(cache["321"].description.sourceTextHash, computeStringHash("A good list"));
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["321:cn"].description.sourceTextHash, computeStringHash("A good list"));
 });
 
 test("list descriptions 遇到 hash 不匹配的旧缓存时会忽略旧值并刷新缓存", async () => {
@@ -3871,7 +3830,7 @@ test("list descriptions 遇到 hash 不匹配的旧缓存时会忽略旧值并�
         persistentData: createUnifiedPersistentData({
             googleList: JSON.parse(
                 createListTranslationCache({
-                    321: {
+                    "321:cn": {
                         description: {
                             sourceTextHash: "deadbeef",
                             translatedText: "旧错误描述",
@@ -3889,8 +3848,8 @@ test("list descriptions 遇到 hash 不匹配的旧缓存时会忽略旧值并�
     assert.equal(payload[0].description, "一个不错的列表");
 
     const cache = parseUnifiedCache(persistentData).google.list;
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
-    assert.equal(cache["321"].description.sourceTextHash, computeStringHash("A good list"));
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["321:cn"].description.sourceTextHash, computeStringHash("A good list"));
 });
 
 test("list descriptions 会批量翻译多个非中文描述并跳过已是中文的描述", async () => {
@@ -3937,9 +3896,9 @@ test("list descriptions 会批量翻译多个非中文描述并跳过已是中�
     assert.equal(payload[2].description, "已经是中文描述");
 
     const cache = parseUnifiedCache(persistentData).google.list;
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
-    assert.equal(cache["322"].description.translatedText, "优秀列表");
-    assert.equal(cache["323"], undefined);
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["322:cn"].description.translatedText, "优秀列表");
+    assert.equal(cache["323:cn"], undefined);
 });
 
 test("list descriptions 在部分翻译结果为空时只更新成功项并保留其他原文", async () => {
@@ -3973,8 +3932,8 @@ test("list descriptions 在部分翻译结果为空时只更新成功项并保�
     assert.equal(payload[1].description, "Needs more detail");
 
     const cache = parseUnifiedCache(persistentData).google.list;
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
-    assert.equal(cache["322"], undefined);
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["322:cn"], undefined);
 });
 
 createGoogleFailureCases().forEach(({ name, mock }) => {
@@ -4034,9 +3993,9 @@ test("list descriptions 后端命中时会应用远端翻译并跳过 Google 请
     assert.equal(payload[0].description, "一个不错的列表");
 
     const cache = parseUnifiedCache(persistentData).google.list;
-    assert.equal(cache["321"].name.translatedText, "收藏夹");
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
-    assert.equal(cache["321"].description.sourceTextHash, computeStringHash("A good list"));
+    assert.equal(cache["321:cn"].name.translatedText, "收藏夹");
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["321:cn"].description.sourceTextHash, computeStringHash("A good list"));
 
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
@@ -4069,8 +4028,8 @@ test("list descriptions 后端未命中时会 Google 翻译并 fire-and-forget �
     assert.equal(payload[0].description, "一个不错的列表");
 
     const cache = parseUnifiedCache(persistentData).google.list;
-    assert.equal(cache["321"].name.translatedText, "收藏夹");
-    assert.equal(cache["321"].description.translatedText, "一个不错的列表");
+    assert.equal(cache["321:cn"].name.translatedText, "收藏夹");
+    assert.equal(cache["321:cn"].description.translatedText, "一个不错的列表");
 
     assert.ok(
         httpLogs.some((entry) => entry.method === "GET" && entry.url === `${TEST_BACKEND_LIST_TRANSLATIONS_URL}?lists=321`),
@@ -4134,8 +4093,8 @@ test("translationEngine=off 时 sentiments 不触发 Google 翻译，但仍可�
     assert.equal(payload.good[0].sentiment, "演员阵容出色");
     assert.equal(payload.text, "观众文本");
     const cache = parseUnifiedCache(persistentData).google.sentiments;
-    assert.equal(cache["movie:123"].translation.aspect.pros[0].translatedText, "剧情");
-    assert.equal(cache["movie:123"].translation.text.translatedText, "观众文本");
+    assert.equal(cache["movie:123:cn"].translation.aspect.pros[0].translatedText, "剧情");
+    assert.equal(cache["movie:123:cn"].translation.text.translatedText, "观众文本");
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === GOOGLE_TRANSLATE_URL),
         false,
@@ -4146,7 +4105,7 @@ test("translationEngine=off 时 sentiments 不触发 Google 翻译，但仍可�
     test(`${url} 会应用缓存中的 sentiments 翻译`, async () => {
         const data = JSON.parse(readFixture("sentiments.json"));
         const googleSentiments = JSON.parse(createSentimentTranslationCache());
-        googleSentiments["movie:853702"] = JSON.parse(JSON.stringify(googleSentiments["movie:123"]));
+        googleSentiments["movie:853702:cn"] = JSON.parse(JSON.stringify(googleSentiments["movie:123:cn"]));
 
         const { result } = await runResponseCase({
             url,
@@ -4192,7 +4151,7 @@ test("sentiments 会用双语片名语境翻译未命中的叙述内容并写回
                 },
             },
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry(),
+                "movie:123:cn": createMediaTranslationEntry(),
             },
         }),
         httpPostMocks: {
@@ -4223,10 +4182,10 @@ test("sentiments 会用双语片名语境翻译未命中的叙述内容并写回
     ]);
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;
-    assert.equal(cache["movie:123"].translation.aspect.pros[0].translatedText, "剧情");
-    assert.equal(cache["movie:123"].translation.summary[0].sourceTextHash, computeStringHash("Overall enjoyable"));
-    assert.equal(cache["movie:123"].translation.summary[0].translatedText, "整体观感不错");
-    assert.equal(cache["movie:123"].translation.text.translatedText, "观众文本");
+    assert.equal(cache["movie:123:cn"].translation.aspect.pros[0].translatedText, "剧情");
+    assert.equal(cache["movie:123:cn"].translation.summary[0].sourceTextHash, computeStringHash("Overall enjoyable"));
+    assert.equal(cache["movie:123:cn"].translation.summary[0].translatedText, "整体观感不错");
+    assert.equal(cache["movie:123:cn"].translation.text.translatedText, "观众文本");
 });
 
 test("sentiments 移除片名语境后会修复正文开头残缺书名号", async () => {
@@ -4252,7 +4211,7 @@ test("sentiments 移除片名语境后会修复正文开头残缺书名号", asy
                 },
             },
             traktTranslation: {
-                "movie:123": createMediaTranslationEntry({
+                "movie:123:cn": createMediaTranslationEntry({
                     translation: {
                         title: "家弑服务",
                         overview: "中文简介",
@@ -4270,7 +4229,7 @@ test("sentiments 移除片名语境后会修复正文开头残缺书名号", asy
     assert.equal(payload.analysis, "《家弑服务》是一部心理惊悚片。");
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;
-    assert.equal(cache["movie:123"].translation.analysis.translatedText, "《家弑服务》是一部心理惊悚片。");
+    assert.equal(cache["movie:123:cn"].translation.analysis.translatedText, "《家弑服务》是一部心理惊悚片。");
 });
 
 test("sentiments 在部分翻译结果为空时只更新成功项并保留其他原文", async () => {
@@ -4290,10 +4249,10 @@ test("sentiments 在部分翻译结果为空时只更新成功项并保留其他
     assert.equal(payload.text, "Audience text");
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;
-    assert.equal(cache["movie:123"].translation.aspect.pros[0].translatedText, "剧情");
-    assert.equal(cache["movie:123"].translation.aspect.cons[0].translatedText, "Pacing");
-    assert.equal(cache["movie:123"].translation.good[0].translatedText, "演员阵容出色");
-    assert.equal(cache["movie:123"].translation.bad[0].translatedText, "Weak ending");
+    assert.equal(cache["movie:123:cn"].translation.aspect.pros[0].translatedText, "剧情");
+    assert.equal(cache["movie:123:cn"].translation.aspect.cons[0].translatedText, "Pacing");
+    assert.equal(cache["movie:123:cn"].translation.good[0].translatedText, "演员阵容出色");
+    assert.equal(cache["movie:123:cn"].translation.bad[0].translatedText, "Weak ending");
 });
 
 test("sentiments 遇到 sourceTextHash 不匹配的旧缓存时会忽略旧值并刷新缓存", async () => {
@@ -4303,7 +4262,7 @@ test("sentiments 遇到 sourceTextHash 不匹配的旧缓存时会忽略旧值�
         persistentData: createUnifiedPersistentData({
             googleSentiments: JSON.parse(
                 createSentimentTranslationCache({
-                    "movie:123": {
+                    "movie:123:cn": {
                         translation: {
                             aspect: {
                                 pros: [{ sourceTextHash: "deadbeef", translatedText: "旧剧情" }],
@@ -4340,8 +4299,8 @@ test("sentiments 遇到 sourceTextHash 不匹配的旧缓存时会忽略旧值�
     assert.equal(payload.analysis, "详细分析");
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;
-    assert.equal(cache["movie:123"].translation.aspect.pros[0].translatedText, "剧情");
-    assert.equal(cache["movie:123"].translation.analysis.translatedText, "详细分析");
+    assert.equal(cache["movie:123:cn"].translation.aspect.pros[0].translatedText, "剧情");
+    assert.equal(cache["movie:123:cn"].translation.analysis.translatedText, "详细分析");
 });
 
 createGoogleFailureCases().forEach(({ name, mock }) => {
@@ -4377,8 +4336,8 @@ test("sentiments 在 Google 返回空翻译结果时会保留原文并按原文�
     assert.equal(payload.text, "Audience text");
 
     const cache = parseUnifiedCache(persistentData).google.sentiments;
-    assert.equal(cache["movie:123"].translation.aspect.pros[0].translatedText, "Story");
-    assert.equal(cache["movie:123"].translation.good[0].translatedText, "Great cast");
+    assert.equal(cache["movie:123:cn"].translation.aspect.pros[0].translatedText, "Story");
+    assert.equal(cache["movie:123:cn"].translation.good[0].translatedText, "Great cast");
 });
 
 // ===== 批量翻译接口（/v3/intl/bulk）测试 =====
@@ -4541,7 +4500,7 @@ test("批量四区全部失败时不再误判 NOT_FOUND，留空交给 per-item 
 
     const translationEntries = parseUnifiedCache(persistentData).trakt.translation;
     for (let index = 0; index < movieCount; index += 1) {
-        const entry = translationEntries[`movie:${1000 + index}`];
+        const entry = translationEntries[`movie:${1000 + index}:cn`];
         assert.ok(entry, `movie:${1000 + index} 应被逐条回源写入`);
         assert.notEqual(entry.status, translationCache.CACHE_STATUS.NOT_FOUND, `movie:${1000 + index} 不应被误判为 NOT_FOUND`);
         assert.equal(entry.translation.title, `中文电影 ${1000 + index}`);
@@ -4709,6 +4668,48 @@ test("源请求无 Authorization 但缓存有对应 apiKey 的 token 时走 bulk
     assert.equal(countHttpLogsByUrl(httpLogs, "/translations/zh"), 0);
 });
 
+test("篡改流程签发的 token 走 bulk 时会把 trakt-api-key 换成官方 client id", async () => {
+    const movieCount = 11;
+    const cachedApiKey = "cached-api-key-tamper";
+    const accessToken = "tamper-token-abc";
+    const httpPostMocks = createPendingBackendPostMocks();
+    const { httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/trending",
+        body: createBulkMovieListBody(movieCount),
+        argument: { backendBaseUrl: TEST_BACKEND_BASE_URL },
+        headers: { "trakt-api-key": cachedApiKey },
+        persistentData: createUnifiedPersistentData({
+            authTokens: { [cachedApiKey]: `Bearer ${accessToken}` },
+            tamperAppAuthorization: {
+                records: [],
+                tokens: [
+                    {
+                        accessToken,
+                        refreshToken: "tamper-refresh",
+                        clientId: cachedApiKey,
+                        expiresAt: Date.now() + 60 * 60 * 1000,
+                        createdAt: Date.now(),
+                    },
+                ],
+                pending: [],
+            },
+        }),
+        httpGetMocks: {
+            [BULK_API_COUNTRY_REGEX("CN")]: createBulkMovieResponse(movieCount, "中文标题"),
+            [BULK_API_COUNTRY_REGEX("SG")]: createBulkMovieResponse(movieCount, "English SG"),
+            [BULK_API_COUNTRY_REGEX("TW")]: createBulkMovieResponse(movieCount, "賣房子"),
+            [BULK_API_COUNTRY_REGEX("HK")]: createBulkMovieResponse(movieCount, "English HK"),
+        },
+        httpPostMocks,
+    });
+
+    const bulkLogs = httpLogs.filter((log) => log.url.includes("/v3/intl/bulk"));
+    assert.equal(bulkLogs.length, 4);
+    bulkLogs.forEach((log) => {
+        assert.equal(log.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    });
+});
+
 test("源请求带 Authorization 时会写入 authTokens 缓存", async () => {
     const movieCount = 11;
     const apiKey = "test-api-key-save";
@@ -4786,8 +4787,6 @@ test("详情页引擎为谷歌时 overview/tagline 非中文会谷歌兜底且�
             translationEngine: "google",
         },
         httpGetMocks: {
-            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
-            [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
             [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
         },
         httpPostMocks: {
@@ -4800,10 +4799,8 @@ test("详情页引擎为谷歌时 overview/tagline 非中文会谷歌兜底且�
     assert.equal(payload.tagline, "谷歌标语");
     assert.ok(findGooglePaTranslateLog(httpLogs), "应调用谷歌 translate-pa 端点");
 
-    // 兜底译文不落本地缓存：条目保持 NOT_FOUND 终态且无译文
-    const cacheEntry = parseUnifiedCache(persistentData).trakt.translation["movie:123"];
-    assert.equal(cacheEntry.status, translationCache.CACHE_STATUS.NOT_FOUND);
-    assert.equal(cacheEntry.translation, undefined);
+    // 兜底译文不落本地缓存，详情页也不再主动补翻译
+    assert.equal(parseUnifiedCache(persistentData).trakt.translation["movie:123:cn"], undefined);
 });
 
 test("详情页引擎为 DeepLX 或关闭时不做谷歌兜底，overview/tagline 保留原文", async () => {
@@ -4837,15 +4834,16 @@ test("详情页 overview/tagline 已是中文时不触发谷歌兜底", async ()
             translationEngine: "google",
         },
         httpGetMocks: {
-            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
-            [TEST_DIRECT_TRANSLATION_URL]: createDetailTranslationMock(),
             [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
         },
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMediaTranslationCache()),
+        }),
     });
 
     const payload = JSON.parse(result.body);
-    assert.equal(payload.overview, "港版简介");
-    assert.equal(payload.tagline, "港版标语");
+    assert.equal(payload.overview, "中文简介");
+    assert.equal(payload.tagline, "中文标语");
     assert.equal(findGooglePaTranslateLog(httpLogs), undefined);
 });
 
@@ -4858,13 +4856,23 @@ test("详情页仅 tagline 缺中文时只兜底缺失字段", async () => {
             translationEngine: "google",
         },
         httpGetMocks: {
-            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
-            [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, JSON.stringify([{ language: "zh", country: "cn", title: "中文标题", overview: "中文简介" }])),
             [GOOGLE_JS_KEY_URL_REGEX]: createGoogleJsKeyMock(),
         },
         httpPostMocks: {
             [GOOGLE_PA_TRANSLATE_URL_REGEX]: createGooglePaTranslateMock(["谷歌标语"]),
         },
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(
+                createMediaTranslationCache({
+                    "movie:123:cn": createMediaTranslationEntry({
+                        translation: {
+                            title: "中文标题",
+                            overview: "中文简介",
+                        },
+                    }),
+                }),
+            ),
+        }),
     });
 
     const payload = JSON.parse(result.body);
@@ -4905,6 +4913,37 @@ test("详情页 override 已覆盖 overview 时不对其谷歌兜底", async () 
     assert.ok(!paLog.body.includes("Original Overview"), "override 覆盖的字段不应送谷歌翻译");
 });
 
+test("详情页 tw 不使用 cn 覆盖字段", async () => {
+    const { result } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        argument: {
+            chineseLocale: "tw",
+            backendBaseUrl: TEST_BACKEND_BASE_URL,
+            translationEngine: "off",
+        },
+        httpGetMocks: {
+            [`${TEST_BACKEND_TRANSLATIONS_URL}?movies=123`]: createHttpStatusMock(200, "{}"),
+            [TEST_DIRECT_TRANSLATION_URL]: createHttpStatusMock(200, "[]"),
+            [TEST_BACKEND_OVERRIDES_URL]: createHttpStatusMock(
+                200,
+                JSON.stringify({
+                    movies: {
+                        123: {
+                            cn: { translation: { overview: "管理员修订简介" } },
+                            tw: { translation: { title: "台灣標題" } },
+                        },
+                    },
+                }),
+            ),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "台灣標題");
+    assert.equal(payload.overview, "Original Overview", "tw 不应使用 cn 覆盖的 overview");
+});
+
 test("季集列表引擎为谷歌时季与每集 overview 兜底翻译且不落缓存", async () => {
     const { result, persistentData, httpLogs } = await runResponseCase({
         url: "https://api.trakt.tv/shows/555/seasons",
@@ -4930,9 +4969,9 @@ test("季集列表引擎为谷歌时季与每集 overview 兜底翻译且不落�
 
     // 兜底译文不落本地缓存：季条目保持 NOT_FOUND，集条目不产生缓存
     const translationCacheSections = parseUnifiedCache(persistentData).trakt.translation;
-    assert.equal(translationCacheSections["season:555:1"].translation, undefined);
-    assert.equal(translationCacheSections["episode:555:1:1"], undefined);
-    assert.equal(translationCacheSections["episode:555:1:2"], undefined);
+    assert.equal(translationCacheSections["season:555:1:cn"].translation, undefined);
+    assert.equal(translationCacheSections["episode:555:1:1:cn"], undefined);
+    assert.equal(translationCacheSections["episode:555:1:2:cn"], undefined);
 });
 
 test("media.videos 引擎为谷歌时翻译非中文标题且不落缓存", async () => {

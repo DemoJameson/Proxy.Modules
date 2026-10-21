@@ -8,6 +8,44 @@
     - `POST`：写入翻译
 - 实现文件：`/api/trakt/translations.js`
 
+## 中文地区与存储结构
+
+- 脚本参数 `chineseLocale`：`cn` 简体（默认）、`tw` 台湾繁体、`hk` 香港繁体；接口用 `locale` 参数传递。
+- 每个 key 的条目统一存放三个地区字段（旧数据是根字段平铺，等价于 `cn`）：
+
+```json
+{
+    "cn": { "status": 1, "translation": { "title": "蜘蛛侠：英雄无归" }, "expiresAt": null },
+    "tw": { "status": 1, "translation": { "title": "蜘蛛人：無家日" }, "expiresAt": null },
+    "hk": { "status": 2, "translation": { "title": "蜘蛛俠：不戰無歸" }, "expiresAt": 1763596800000 }
+}
+```
+
+- 读取：`cn` 优先取 `cn` 字段、回退根字段；`tw`/`hk` 只读各自字段，未命中时不回退（避免大陆译名固化）。
+- 写入：先用一条 `JSON.MGET` 读取本批 key，判断哪些 key 已存在；再用一条 `JSON.MSET` 写入。已存在的 key 只写 `$.cn`/`$.tw`/`$.hk` 路径并清空旧根字段，不存在的 key 直接写 `$` 根文档。每批固定 2 条命令，不会随 key 数量变成 N+1。REST pipeline 只接受字符串/数字参数，因此 JSON 值必须序列化成字符串，清空旧根字段用字符串 `"null"`（写入 JSON null，读取侧按缺失处理）。只有拿到 cn 数据（读取响应回带的 `cn` 提示或上游数据）时才清空根字段，不会出现"根字段已清、cn 缺失"。
+- CDN 响应缓存：`FOUND` 为 24 小时，`PARTIAL_FOUND` 为 5 分钟，`NOT_FOUND` 为 15 分钟；浏览器缓存仍分别为 300/60/60 秒，以减少重复回源 Redis。
+- `translation-overrides` 的 CDN 缓存为 5 分钟，管理端修改最多延迟 5 分钟生效。
+- 过期时间写在数据字段 `expiresAt`（毫秒时间戳）：`FOUND` 为 `null`，`PARTIAL_FOUND` 30 天，`NOT_FOUND` 1 天；后端**不再发送 `EXPIRE`/`PTTL`**，读取时过滤已过期条目（图片按 poster/logo 字段过滤），缺少 `expiresAt` 的旧条目按不过期处理。
+
+### 旧缓存结构迁移
+
+旧部署升级后建议对已有缓存执行一次迁移，把根字段平铺结构折叠为 `cn`/`tw`/`hk` 地区字段：
+
+```bash
+# 1) dry-run：只读取并统计，不写入
+npm run migrate:trakt:translation-layout
+
+# 2) 确认统计后执行：折叠旧根字段，并对写过的 key 补发 PERSIST
+npm run migrate:trakt:translation-layout -- --execute
+
+# 可选：同时清理已过期的地区字段（图片按 poster/logo 字段判断）
+npm run migrate:trakt:translation-layout -- --execute --prune-expired
+```
+
+- 运行环境需配置 `KV_REST_API_URL` / `KV_REST_API_TOKEN`（或 Upstash 同名变量）。
+- 不执行迁移也能正常工作：读取会回退旧根字段，写入会在拿到 cn 数据时折叠。但旧 key 上残留的 Redis TTL 不会被清除，折叠进去的新数据会随旧 TTL 到期一起消失，因此**建议执行一次 `--execute`**。
+- 脚本幂等，可重复执行；`--scan-count`、`--batch-size`、`--max-keys` 控制扫描与批次大小。
+
 ## 接口说明
 
 ### GET `/api/trakt/translations`
@@ -17,6 +55,7 @@
 - `shows=1,2,3`
 - `movies=11,12,13`
 - `episodes=198225:1:1,198225:1:2,198225:1:3`
+- `locale=cn|tw|hk`（缺省 `cn`）：返回该地区的条目投影；`tw`/`hk` 未命中且该 key 仍是旧结构时，响应会在 `cn` 字段回带旧数据供客户端折叠
 
 至少需要提供一类参数，否则会返回 `400`。
 
@@ -193,7 +232,8 @@ https://your-project.vercel.app/admin
 | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | 按 ID 搜索 | 搜索框输入纯数字时，直接读取对应 ID 的电影 / 剧集翻译记录；单集可输入 `showId:season:episode`。                                      |
 | 按标题搜索 | 搜索框输入标题时，通过 Trakt API 最多取 3 个候选 Trakt ID，再从 Redis 读取已有翻译；选择全部时一次搜索电影和电视剧，不需要搜索索引。 |
-| 列表浏览   | 搜索框留空时，可按媒体类型和锁定状态浏览已有缓存记录。                                                                               |
+| 列表浏览   | 搜索框留空时，可按媒体类型、中文地区和锁定状态浏览已有缓存记录。                                                                     |
+| 中文地区   | 顶部筛选可选择简体 / 繁体（台湾）/ 繁体（香港）；列表、详情、保存与删除都只作用于所选地区。                                          |
 | 编辑翻译   | 可修改标题、简介、标语，并按字段固定。保存后写入修订翻译。                                                                           |
 | 当前翻译   | 页面只展示合并后的当前翻译，不区分原翻译和修订翻译。                                                                                 |
 | 恢复原翻译 | 删除修订翻译，让条目恢复为原翻译结果。                                                                                               |
@@ -227,14 +267,13 @@ POST https://your-project.vercel.app/api/trakt/translations
     - `trakt:translation:shows:{id}`
     - `trakt:translation:movies:{id}`
     - `trakt:translation:episodes:{showId}:{seasonNumber}:{episodeNumber}`
-- 管理页保存的修订翻译 key 格式为：
-    - `trakt:translation:revision:shows:{id}`
-    - `trakt:translation:revision:movies:{id}`
-    - `trakt:translation:revision:episodes:{showId}:{seasonNumber}:{episodeNumber}`
-- `FOUND` 永不过期
-- `PARTIAL_FOUND` 保留 30 天
-- `NOT_FOUND` 保留 7 天
-- 修订翻译不设置过期时间；修订字段优先于原翻译，原翻译缺失时修订翻译可作为回退
+- 条目统一存放三个地区字段（旧数据是根字段平铺，等价于 `cn`）：
+    - `{"cn":{"status":1,"translation":{...},"expiresAt":null},"tw":{...},"hk":{...}}`
+    - 读取：`cn` 优先取 `cn` 字段、回退根字段；`tw`/`hk` 只读各自字段
+    - 写入：先一次 `JSON.MGET` 判断 key 是否存在，再一次 `JSON.MSET`；已存在的 key 写 `$.cn`/`$.tw`/`$.hk` + 根字段置字符串 `"null"`，不存在的 key 直接写 `$` 根文档；没有 cn 数据时不清根字段；固定 2 条命令
+- 管理页保存的修订翻译存在 `trakt:translation-overrides` 文档内：`{cn:{translation}, tw:{translation}, hk:{translation}}`，各字段只存对应地区的修订字段；旧文档的根字段 `translation` 仍按 `cn` 读取，并在下次写入时迁移到 `cn`。修订字段优先于原翻译
+- 过期时间写在数据字段 `expiresAt`：`FOUND` 为 `null`，`PARTIAL_FOUND` 30 天，`NOT_FOUND` 1 天
+- 后端不再发送 `EXPIRE`/`PTTL`；读取时过滤已过期条目（图片按字段过滤），缺少 `expiresAt` 的旧条目按不过期处理
 
 ## 说明
 
