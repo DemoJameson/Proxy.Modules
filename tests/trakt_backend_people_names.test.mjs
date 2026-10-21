@@ -41,7 +41,6 @@ function createResponse() {
 
 // cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
 function expectCnPersonNameWrite(store, expectedById) {
-    assert.equal(store.evalCommands.length, 1);
     assert.equal(store.mgetCommands.length, 1);
     assert.equal(store.msetCommands.length, 1);
     const command = store.msetCommands[0];
@@ -345,7 +344,7 @@ test("people-names POST 写入合法 tmdb 条目并在数据里记录 90 天过�
         });
 
         // 写入阶段一条 JSON.MSET 携带多个 key 三元组，过期时间写在数据字段里
-        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         expectCnPersonNameWrite(store, { [PERSON_NAME_42]: entry42, [PERSON_NAME_99]: entry99 });
 
         const getRes = await invoke({

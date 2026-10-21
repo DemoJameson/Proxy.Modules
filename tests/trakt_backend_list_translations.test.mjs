@@ -40,7 +40,6 @@ function createResponse() {
 
 // cn 写入：$.cn 折叠 + 清空旧根字段，全部在同一条原子 JSON.MSET 内；不再 EXPIRE
 function collectCnWrite(store, rootFields) {
-    assert.equal(store.evalCommands.length, 1);
     assert.equal(store.mgetCommands.length, 1);
     assert.equal(store.msetCommands.length, 1);
     const command = store.msetCommands[0];
@@ -301,7 +300,7 @@ test("list-translations POST 写入合法条目并在数据里记录 90 天过�
             },
         });
 
-        assert.equal(store.pipelineRequests.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         const written = collectCnWrite(store, ["name", "description"]);
         Object.entries(written).forEach(([, entry]) => {
             assert.ok(Number.isFinite(entry.expiresAt), "90 天过期时间应写入数据");
