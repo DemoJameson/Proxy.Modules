@@ -4,7 +4,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { formatBuildDateTimeText, formatBuildVersion, renderGeneratedTargets, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
+import { formatBuildDateTimeText, formatBuildVersion, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
 import { argumentFields, BOXJS_CONFIG_KEY, metadata, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { createRequestPhaseRoutes } from "../trakt_simplified_chinese/src/request.mjs";
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
@@ -251,6 +251,29 @@ test("模块清单不再包含定时任务，产物里也没有 cron 行", async
     for (const targetFile of ["trakt_simplified_chinese_clear_cache.js", "trakt_simplified_chinese_expand_cache.js"]) {
         assert.equal(plugin.includes(targetFile), false, `${targetFile} 不应再出现在插件里`);
         await assert.rejects(readFile(path.join(rootDir, "trakt_simplified_chinese", targetFile), "utf8"));
+    }
+});
+
+test("Loon 插件使用 Script v2 语法并由模块清单生成", () => {
+    const plugin = normalizeLineEndings(renderPlugin(new Date("2026-10-12T14:33:00Z")));
+    const lines = plugin.split("\n");
+    const pluginRules = scriptRules.filter((rule) => !Array.isArray(rule.targets) || rule.targets.includes("plugin"));
+
+    assert.equal(
+        lines.some((line) => /^https?-(?:request|response) /.test(line)),
+        false,
+        "不应再生成旧版 HTTP 语法",
+    );
+    assert.equal(plugin.includes("script-path="), false, "Script v2 不应使用 script-path");
+    assert.equal(plugin.includes("argument=["), false, "Script v2 不应使用 argument=[]");
+
+    for (const rule of pluginRules) {
+        const action = rule.phase === "http-request" ? "request" : "response";
+        const argumentKeys = rule.argumentKeys ?? [];
+        const argumentObject = `{${argumentKeys.map((key) => `\${${key}}`).join(", ")}}`;
+        const expected = `${action} if \${url} ~= /${rule.pattern}/i then script("${metadata.rawBaseUrl}/${metadata.modulePath}/${rule.scriptFile}", ${argumentObject}) with tag="${rule.title}", timeout=${rule.timeout}${rule.requiresBody ? ", requires_body=true" : ""}`;
+
+        assert.ok(lines.includes(expected), `插件规则「${rule.title}」应使用 Script v2 语法`);
     }
 });
 
