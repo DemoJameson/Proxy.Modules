@@ -453,8 +453,7 @@ test("backend images POST 写入 FOUND/NOT_FOUND 并在数据里记录 3 天过�
             movies: 2,
             seasons: 1,
         });
-        assert.equal(store.pipelineRequests.length, 1);
-        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         assert.equal(store.mgetCommands.length, 1);
         assert.equal(store.msetCommands.length, 1);
         assert.equal(store.setCommands, undefined);
@@ -701,8 +700,7 @@ test("backend POST keeps writing auto cache while override stays separate", asyn
             episodes: 0,
         });
         assert.equal(getJsonValue(store, AUTO_MOVIE_123).cn.translation.title, "新自动标题");
-        assert.equal(store.pipelineRequests.length, 1);
-        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         assert.equal(store.mgetCommands.length, 1);
         assert.equal(store.msetCommands.length, 1);
         // 真实 KV 要求 JSON 值序列化成字符串、清空根字段用字符串 "null"
@@ -803,8 +801,7 @@ test("backend POST writes grouped auto entries with JSON.MSET and stores expires
             movies: 2,
             episodes: 1,
         });
-        assert.equal(store.pipelineRequests.length, 1);
-        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         assert.equal(store.mgetCommands.length, 1);
         assert.equal(store.msetCommands.length, 1);
         assert.deepEqual(
@@ -865,8 +862,7 @@ test("backend POST batches existing and new keys into one JSON.MSET", async () =
         });
 
         assert.equal(res.statusCode, 200);
-        assert.equal(store.pipelineRequests.length, 1);
-        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         assert.equal(store.mgetCommands.length, 1);
         assert.equal(store.msetCommands.length, 1);
         assert.equal(store.setCommands, undefined);
@@ -883,7 +879,7 @@ test("backend POST batches existing and new keys into one JSON.MSET", async () =
     });
 });
 
-test("backend POST EVAL 只发送字符串/数字参数且新 key 写根文档", async () => {
+test("backend POST pipeline 只发送字符串/数字参数且新 key 写根文档", async () => {
     const store = new Map();
 
     await withBackend(store, async () => {
@@ -908,8 +904,7 @@ test("backend POST EVAL 只发送字符串/数字参数且新 key 写根文档",
                 assert.ok(typeof arg === "string" || typeof arg === "number", `命令参数必须是字符串或数字：${JSON.stringify(arg)}`);
             });
         });
-        assert.equal(store.pipelineRequests.length, 1);
-        assert.equal(store.evalCommands.length, 1);
+        assert.equal(store.pipelineRequests.length, 2);
         assert.equal(store.mgetCommands.length, 1);
         assert.equal(store.setCommands, undefined);
         assert.equal(store.msetCommands.length, 1);

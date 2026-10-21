@@ -35,5 +35,5 @@
             "maxDuration": 10
         }
     },
-    "ignoreCommand": "git diff --quiet HEAD^ HEAD -- api/ lib/ public/ vercel.json"
+    "ignoreCommand": "node scripts/vercel-ignore-build.mjs"
 }

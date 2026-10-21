@@ -3,7 +3,7 @@
 // - JSON.SET / JSON.MSET：$ 根路径可创建新 key，非根路径写入不存在的 key 返回 ERR new objects must be created at the root
 // - JSON.SET 支持 NX/XX；字符串 "null" 按 JSON null 写入（与真实 RedisJSON 一致，不再删除字段）
 // - JSON.DEL 删除路径或整个 key，key/路径不存在时返回 0
-// - JSON.MGET / JSON.GET 返回 [value] 包装；EVAL 模拟地区写入脚本；EXPIRE/PTTL/PERSIST/DEL/SCAN 保持可用
+// - JSON.MGET / JSON.GET 返回 [value] 包装；EXPIRE/PTTL/PERSIST/DEL/SCAN 保持可用
 function jsonValue(value) {
     return {
         __redisJson: true,
@@ -103,79 +103,6 @@ function applyPathDelete(store, key, path) {
     return 1;
 }
 
-function runLocaleWriteEval(store, command) {
-    const numKeys = Number.parseInt(command[2], 10);
-    const keys = command.slice(3, 3 + numKeys);
-    const payload = JSON.parse(command[3 + numKeys] || "{}");
-    const rootFields = Array.isArray(payload.rootFields) ? payload.rootFields : [];
-    const writesByKey = Array.isArray(payload.writes) ? payload.writes : [];
-    const docs = keys.map((key) => (hasJsonValue(store, key) ? [getJsonValue(store, key)] : null));
-
-    store.mgetCommands = [...(store.mgetCommands || []), ["JSON.MGET", ...keys, "$"]];
-    const msetArgs = [];
-    keys.forEach((key, index) => {
-        const doc = docs[index]?.[0] ?? null;
-        const writes = Array.isArray(writesByKey[index]) ? writesByKey[index] : [];
-        if (doc !== null) {
-            writes.forEach((item) => {
-                if (item.locale === "cn") {
-                    msetArgs.push(key, "$.cn", JSON.stringify(item.entry));
-                    rootFields.forEach((field) => {
-                        msetArgs.push(key, `$.${field}`, "null");
-                    });
-                    return;
-                }
-                if (item.cnData !== undefined && item.cnData !== null) {
-                    msetArgs.push(key, "$.cn", JSON.stringify(item.cnData));
-                    rootFields.forEach((field) => {
-                        msetArgs.push(key, `$.${field}`, "null");
-                    });
-                }
-                msetArgs.push(key, `$.${item.locale}`, JSON.stringify(item.entry));
-            });
-            return;
-        }
-
-        const rootDoc = {};
-        writes.forEach((item) => {
-            if (item.locale === "cn") {
-                rootDoc.cn = item.entry;
-                return;
-            }
-            if (item.cnData !== undefined && item.cnData !== null) {
-                rootDoc.cn = item.cnData;
-            }
-            rootDoc[item.locale] = item.entry;
-        });
-        msetArgs.push(key, "$", JSON.stringify(rootDoc));
-    });
-
-    if (msetArgs.length === 0) {
-        return { result: keys.length };
-    }
-
-    store.msetCommands = [...(store.msetCommands || []), ["JSON.MSET", ...msetArgs]];
-    const snapshot = new Map();
-    for (let index = 0; index < msetArgs.length; index += 3) {
-        const itemKey = msetArgs[index];
-        if (!snapshot.has(itemKey)) {
-            snapshot.set(itemKey, store.has(itemKey) ? store.get(itemKey) : null);
-        }
-        const error = applyPathWrite(store, itemKey, msetArgs[index + 1], msetArgs[index + 2]);
-        if (error) {
-            snapshot.forEach((value, snapshotKey) => {
-                if (value === null) {
-                    store.delete(snapshotKey);
-                } else {
-                    store.set(snapshotKey, value);
-                }
-            });
-            return { error };
-        }
-    }
-    return { result: keys.length };
-}
-
 // 返回 { requestError }（整个请求 400）或 { results }（逐条命令结果，含 { error } 项）
 function runKvPipeline(store, commands) {
     store.pipelineRequests = [...(store.pipelineRequests || []), commands];
@@ -231,10 +158,6 @@ function runKvPipeline(store, commands) {
             } else {
                 results.push({ result: "OK" });
             }
-        } else if (name === "EVAL") {
-            store.evalCommands = [...(store.evalCommands || []), command];
-            const outcome = runLocaleWriteEval(store, command);
-            results.push("error" in outcome ? { error: outcome.error } : { result: outcome.result });
         } else if (name === "JSON.MGET") {
             store.mgetCommands = [...(store.mgetCommands || []), command];
             const keys = command.slice(1, -1);
