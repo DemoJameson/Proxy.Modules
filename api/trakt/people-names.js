@@ -26,9 +26,8 @@ async function handleGet(req, res, kvConfig) {
     const locale = normalizeLocale(req.query.locale);
     const { people, cn } = await readManyPersonNameEntriesFromKv(kvConfig, peopleIds, { locale });
 
-    // 区分完整/部分命中：部分命中说明客户端即将回写缺失条目，CDN 不能长缓存
-    const foundCount = Object.keys(people).length;
-    const cacheStatus = foundCount === 0 ? CACHE_STATUS.NOT_FOUND : foundCount >= peopleIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.PARTIAL_FOUND;
+    const foundCount = Object.values(people).filter((entry) => entry?.status === CACHE_STATUS.FOUND).length;
+    const cacheStatus = foundCount === peopleIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND;
     setResponseCacheHeaders(res, cacheStatus);
     const response = { people };
     if (cn && Object.keys(cn).length > 0) {
@@ -46,7 +45,7 @@ async function handlePost(req, res, kvConfig) {
     const payload = await readJsonBody(req);
     const incomingPeople = payload?.people && typeof payload.people === "object" ? payload.people : {};
 
-    // 仅接受合法 tmdb 来源条目，非法条目直接跳过
+    // 仅接受新的人名 provider 结构，非法条目直接跳过
     const validEntries = {};
     Object.entries(incomingPeople).forEach(([id, entry]) => {
         const normalizedId = /^\d+$/.test(String(id).trim()) ? String(id).trim() : "";

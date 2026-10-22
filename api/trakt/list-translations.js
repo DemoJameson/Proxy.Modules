@@ -28,7 +28,7 @@ async function handleGet(req, res, kvConfig) {
 
     // 区分完整/部分命中：部分命中说明客户端即将回写缺失条目，CDN 不能长缓存
     const foundCount = Object.keys(lists).length;
-    const cacheStatus = foundCount === 0 ? CACHE_STATUS.NOT_FOUND : foundCount >= listIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.PARTIAL_FOUND;
+    const cacheStatus = foundCount === listIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND;
     setResponseCacheHeaders(res, cacheStatus);
     const response = { lists };
     if (cn && Object.keys(cn).length > 0) {

@@ -4,6 +4,8 @@ import { fileURLToPath } from "node:url";
 
 import {
     DOUBAN_CACHE_TTL_MS,
+    PERSON_NAME_GOOGLE_TTL_MS,
+    PERSON_NAME_TMDB_TTL_MS,
     TAMPER_AUTHORIZATION_KEY,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_MAX_BYTES,
@@ -13,9 +15,6 @@ import {
 import { runScript } from "./run-script.mjs";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const TMDB_PERSON_NAME_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-const GOOGLE_PERSON_NAME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-
 function readFixture(name) {
     return fs.readFileSync(path.resolve(__dirname, "..", "fixtures", "trakt", name), "utf8");
 }
@@ -44,10 +43,10 @@ function createMediaTranslationEntry(overrides = {}) {
     };
 }
 
-// 本地缓存键统一为 `<base>:<locale>`：测试默认造简体（cn）数据
+// 本地媒体翻译缓存键与 Redis V2 对齐：translation:<group>:<lookupKey>:<locale>
 function createMediaTranslationCache(entries = {}) {
     return JSON.stringify({
-        "movie:123:cn": createMediaTranslationEntry(),
+        "translation:movies:123:cn": createMediaTranslationEntry(),
         ...entries,
     });
 }
@@ -69,7 +68,6 @@ function createUnifiedCache(overrides = {}) {
             translation: overrides.traktTranslation ?? {},
             linkIds: overrides.traktLinkIds ?? {},
             image: overrides.traktImage ?? {},
-            ...(Object.hasOwn(overrides, "traktPoster") ? { poster: overrides.traktPoster ?? {} } : {}),
         },
         google: {
             comments: overrides.googleComments ?? {},
@@ -98,8 +96,8 @@ function createUnifiedPersistentData(overrides = {}) {
     const data = {
         [UNIFIED_CACHE_KEY]: createUnifiedCache(overrides),
     };
-    if (Object.hasOwn(overrides, "tamperAppAuthorization")) {
-        const store = overrides.tamperAppAuthorization ?? {};
+    if (Object.hasOwn(overrides, "tamperAuthorization")) {
+        const store = overrides.tamperAuthorization ?? {};
         data[TAMPER_AUTHORIZATION_KEY] = JSON.stringify({
             records: store.records ?? [],
             tokens: store.tokens ?? [],
@@ -136,11 +134,11 @@ function createMovieTranslationCache() {
 
 function createPeopleTranslationCache(overrides = {}) {
     const defaultPerson = {
-        name: {
-            sourceTextHash: computeStringHash("Tom Hanks"),
-            translatedText: "汤姆·汉克斯",
-            source: "google",
-        },
+        status: 1,
+        name: "汤姆·汉克斯",
+        sourceTextHash: computeStringHash("Tom Hanks"),
+        source: "google",
+        expiresAt: Date.now() + PERSON_NAME_GOOGLE_TTL_MS,
         biography: {
             sourceTextHash: computeStringHash("An American actor and filmmaker."),
             translatedText: "一位美国演员和电影制作人。",
@@ -151,20 +149,20 @@ function createPeopleTranslationCache(overrides = {}) {
         ...defaultPerson,
         ...overrides["42"],
     };
-    if (mergedPerson.name && mergedPerson.name.expiresAt === undefined) {
-        const ttlMs = mergedPerson.name.source === "tmdb" ? TMDB_PERSON_NAME_TTL_MS : GOOGLE_PERSON_NAME_TTL_MS;
-        mergedPerson.name = { ...mergedPerson.name, expiresAt: Date.now() + ttlMs };
+    if (!Number.isFinite(Number(mergedPerson.expiresAt))) {
+        const ttlMs = mergedPerson.source === "tmdb" ? PERSON_NAME_TMDB_TTL_MS : PERSON_NAME_GOOGLE_TTL_MS;
+        mergedPerson.expiresAt = Date.now() + ttlMs;
     }
 
     return JSON.stringify({
-        "42:cn": mergedPerson,
+        "person:name:42:cn": mergedPerson,
         ...Object.fromEntries(Object.entries(overrides).filter(([key]) => key !== "42")),
     });
 }
 
 function createCommentTranslationCache(overrides = {}) {
     return JSON.stringify({
-        "9001:cn": {
+        "comment:translation:9001:cn": {
             comment: {
                 sourceTextHash: computeStringHash("Great movie"),
                 translatedText: "很棒的电影",
@@ -176,7 +174,7 @@ function createCommentTranslationCache(overrides = {}) {
 
 function createListTranslationCache(overrides = {}) {
     return JSON.stringify({
-        "321:cn": {
+        "list:translation:321:cn": {
             description: {
                 sourceTextHash: computeStringHash("A good list"),
                 translatedText: "一个不错的列表",

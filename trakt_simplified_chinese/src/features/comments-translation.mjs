@@ -271,7 +271,7 @@ function mergeBackendCommentTranslationEntry(cache, commentId, entry) {
         return false;
     }
 
-    const cacheKey = cacheUtils.buildFieldTranslationCacheKey(commentId);
+    const cacheKey = cacheUtils.buildFieldTranslationCacheKey(commentId, "comment:translation");
     if (!cacheKey) {
         return false;
     }
@@ -288,6 +288,7 @@ function mergeBackendCommentTranslationEntry(cache, commentId, entry) {
             sourceTextHash,
             translatedText,
         },
+        expiresAt: Number.isFinite(Number(entry?.expiresAt)) ? Number(entry.expiresAt) : Date.now() + cacheUtils.COMMENT_TRANSLATION_TTL_MS,
     };
     return true;
 }
@@ -333,7 +334,7 @@ async function translateCommentsInPlace(payload, options = {}) {
     const missingCommentIds = translateableEntries
         .map((entry) => {
             const sourceText = String(entry.comment.comment ?? "").trim();
-            return cacheUtils.getHashedFieldTranslation(cache, entry.comment.id, "comment", sourceText) ? "" : String(entry.comment.id);
+            return cacheUtils.getHashedFieldTranslation(cache, entry.comment.id, "comment", sourceText, "comment:translation") ? "" : String(entry.comment.id);
         })
         .filter(Boolean);
     const [hydratedChanged, resolveContextLine] = await Promise.all([hydrateCommentTranslationsFromBackend(cache, missingCommentIds), createCommentContextResolver(options)]);
@@ -348,11 +349,19 @@ async function translateCommentsInPlace(payload, options = {}) {
             sourceLanguage: String(comment.language ?? "en").toLowerCase(),
             sourceText: requestText,
             getCachedTranslation() {
-                return cacheUtils.getHashedFieldTranslation(cache, comment.id, "comment", sourceText);
+                return cacheUtils.getHashedFieldTranslation(cache, comment.id, "comment", sourceText, "comment:translation");
             },
             setCachedTranslation(translatedText) {
                 const normalizedTranslation = normalizeTranslatedComment(translatedText);
-                const targetCacheChanged = cacheUtils.setHashedFieldTranslation(cache, comment.id, "comment", sourceText, normalizedTranslation);
+                const targetCacheChanged = cacheUtils.setHashedFieldTranslation(
+                    cache,
+                    comment.id,
+                    "comment",
+                    sourceText,
+                    normalizedTranslation,
+                    "comment:translation",
+                    Date.now() + cacheUtils.COMMENT_TRANSLATION_TTL_MS,
+                );
                 if (targetCacheChanged) {
                     queueCommentTranslationBackendWrite(comment.id, {
                         sourceTextHash: commonUtils.computeStringHash(sourceText),

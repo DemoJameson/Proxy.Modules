@@ -5,12 +5,11 @@
         "build:trakt": "node scripts/build-trakt.mjs",
         "serve:files": "node scripts/serve-project-files.mjs",
         "sync:env.js": "node scripts/build-trakt.mjs --sync-env",
-        "migrate:trakt:image-keys": "node scripts/migrate-trakt-image-cache-keys.mjs",
-        "migrate:trakt:translation-layout": "node scripts/migrate-trakt-translation-layout.mjs",
+        "migrate:cache:v2": "node scripts/migrate-cache-v2.mjs",
         "format": "biome check --write .",
         "format:check": "biome check .",
         "check:trakt": "npm run format:check && npm run build:trakt && node --check scripts/vendor/Env.js && node --check scripts/vendor/Env.module.mjs && node --check trakt_simplified_chinese/src/main.mjs && node --check trakt_simplified_chinese/src/utils/common.mjs && node --check trakt_simplified_chinese/src/utils/script-user-agent.mjs && node --check trakt_simplified_chinese/trakt_simplified_chinese.js",
-        "test": "npm run build:trakt && node --test tests/trakt_argument.test.mjs tests/trakt_translation_layout_migration.test.mjs tests/trakt_script_locale.test.mjs tests/trakt_live_runner.test.mjs tests/trakt_backend_admin_cache.test.mjs tests/trakt_backend_api_keys.test.mjs tests/trakt_backend_comment_translations.test.mjs tests/trakt_backend_douban_cache.test.mjs tests/trakt_backend_list_translations.test.mjs tests/trakt_backend_people_names.test.mjs tests/trakt_cache_utils.test.mjs tests/trakt_module_manifest.test.mjs tests/trakt_google_translation_client.test.mjs tests/trakt_google_translation_parallel.test.mjs tests/trakt_script_tmdb_api_key.test.mjs tests/trakt_script_user_agent.test.mjs tests/trakt_script_watchnow.test.mjs tests/trakt_script_translations.test.mjs tests/trakt_script_people.test.mjs tests/trakt_script_routes.test.mjs",
+        "test": "npm run build:trakt && node --test tests/trakt_argument.test.mjs tests/trakt_cache_v2_migration.test.mjs tests/trakt_cache_v2_keys.test.mjs tests/trakt_script_locale.test.mjs tests/trakt_live_runner.test.mjs tests/trakt_backend_admin_cache.test.mjs tests/trakt_backend_api_keys.test.mjs tests/trakt_backend_comment_translations.test.mjs tests/trakt_backend_douban_cache.test.mjs tests/trakt_backend_list_translations.test.mjs tests/trakt_backend_people_names.test.mjs tests/trakt_cache_utils.test.mjs tests/trakt_module_manifest.test.mjs tests/trakt_google_translation_client.test.mjs tests/trakt_google_translation_parallel.test.mjs tests/trakt_script_tmdb_api_key.test.mjs tests/trakt_script_user_agent.test.mjs tests/trakt_script_watchnow.test.mjs tests/trakt_script_translations.test.mjs tests/trakt_script_people.test.mjs tests/trakt_script_routes.test.mjs",
         "test:trakt:live": "node scripts/run-trakt-live-tests.mjs",
         "test:trakt:all": "node scripts/run-all-trakt-tests.mjs"
     },
@@ -18,6 +17,7 @@
         "@biomejs/biome": "^2.4.14",
         "@nsnanocat/url": "^1.2.5",
         "esbuild": "^0.28.1",
+        "ioredis": "^5.11.1",
         "opencc-js": "^1.3.0"
     }
 }

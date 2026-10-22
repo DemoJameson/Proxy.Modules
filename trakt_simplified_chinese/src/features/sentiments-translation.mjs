@@ -14,6 +14,11 @@ function buildSentimentCacheKey(mediaType, traktId) {
     return cacheUtils.buildLocaleCacheKey(`${mediaType}:${traktId}`);
 }
 
+function buildSentimentTranslationCacheKey(mediaType, traktId) {
+    const group = mediaType === mediaTypes.MEDIA_TYPE.MOVIE ? "movies" : "shows";
+    return traktId ? cacheUtils.buildLocaleCacheKey(`translation:${group}:${traktId}`) : "";
+}
+
 function resolveSentimentRequestTarget() {
     const normalizedPath = globalThis.$ctx.url.shortPathname;
     let match = normalizedPath.match(/^(?:v3\/)?media\/(movie|show)\/(\d+)\/info\/(\d+)\/version\/(\d+)$/i);
@@ -307,7 +312,7 @@ function buildSentimentGoogleContextLine(env, target) {
     }
 
     const linkEntry = commonUtils.ensureObject(cacheUtils.loadLinkIdsCache(env)[traktId]);
-    const translationEntry = commonUtils.ensureObject(cacheUtils.loadCache(env)[buildSentimentCacheKey(target?.mediaType, traktId)]);
+    const translationEntry = commonUtils.ensureObject(cacheUtils.loadCache(env)[buildSentimentTranslationCacheKey(target?.mediaType, traktId)]);
     return googleTranslationContext.buildContextLine(linkEntry.title, translationEntry.translation?.title);
 }
 

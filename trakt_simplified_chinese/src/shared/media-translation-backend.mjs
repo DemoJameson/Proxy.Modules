@@ -52,14 +52,14 @@ function resolvePreferredTranslationLanguage(locale = chineseLocale.resolveChine
 }
 const BACKEND_FETCH_MIN_REFS = 3;
 const BACKEND_WRITE_BATCH_SIZE = 50;
-const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
+const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 
 const TRANSLATION_NOT_FOUND_TTL_MS = 1 * 24 * 60 * 60 * 1000;
 const BULK_API_MAX_IDS_PER_CATEGORY = 100;
 const BULK_API_MIN_REFS = 10;
 const BULK_API_COUNTRIES = ["cn", "sg", "tw", "hk"];
 
-// 后端在 tw/hk 命中旧结构文档时回带的 cn 数据：写回时一并折叠根字段
+// 后端在 tw/hk 目标缺失时回带的 cn 数据：写回时一并合并到 cn 桶
 const translationCnHints = {};
 
 function buildBackendHintKey(mediaType, ref) {
@@ -151,10 +151,18 @@ function buildMediaCacheLookupKey(mediaType, ref) {
     return commonUtils.isNonNullish(ref.traktId) ? String(ref.traktId) : "";
 }
 
-// 本地缓存按地区分键（设备本地）：统一 `<mediaType>:<lookupKey>:<locale>`，cn 也显式带后缀
+const MEDIA_TRANSLATION_GROUP = {
+    [mediaTypes.MEDIA_TYPE.MOVIE]: "movies",
+    [mediaTypes.MEDIA_TYPE.SHOW]: "shows",
+    [mediaTypes.MEDIA_TYPE.EPISODE]: "episodes",
+    [mediaTypes.MEDIA_TYPE.SEASON]: "shows",
+};
+
+// 本地缓存与 Redis V2 对齐：translation:<group>:<lookupKey>:<locale>
 function buildMediaCacheKey(mediaType, ref) {
     const lookupKey = buildMediaCacheLookupKey(mediaType, ref);
-    return lookupKey ? cacheUtils.buildLocaleCacheKey(`${mediaType}:${lookupKey}`) : "";
+    const group = MEDIA_TRANSLATION_GROUP[mediaType] || "";
+    return lookupKey && group ? cacheUtils.buildLocaleCacheKey(`translation:${group}:${lookupKey}`) : "";
 }
 
 // 相同条目不重复标记缓存变更：status/complete/translation 一致即视为相同。
@@ -170,11 +178,14 @@ function isSameStoredTranslationEntry(current, next) {
     if (!translationCache.areTranslationsEqual(current.translation, next.translation)) {
         return false;
     }
-    if (next.status === translationCache.CACHE_STATUS.NOT_FOUND) {
-        const expiresAt = Number(current.expiresAt);
+    const expiresAt = Number(current.expiresAt);
+    if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+        return false;
+    }
+    if (next.status === translationCache.CACHE_STATUS.NOT_FOUND || next.status === translationCache.CACHE_STATUS.PARTIAL_FOUND) {
         return Number.isFinite(expiresAt) && expiresAt > Date.now();
     }
-    return true;
+    return Number.isFinite(expiresAt) && expiresAt > Date.now();
 }
 
 function storeTranslationEntry(cache, mediaType, ref, entry) {
@@ -191,9 +202,16 @@ function storeTranslationEntry(cache, mediaType, ref, entry) {
         (status === translationCache.CACHE_STATUS.FOUND || status === translationCache.CACHE_STATUS.PARTIAL_FOUND) && canonicalTranslation
             ? buildTranslationCacheEntry(status, canonicalTranslation, complete)
             : buildTranslationCacheEntry(translationCache.CACHE_STATUS.NOT_FOUND, canonicalTranslation, complete);
-    if (storedEntry.status === translationCache.CACHE_STATUS.NOT_FOUND) {
-        storedEntry.expiresAt = Date.now() + TRANSLATION_NOT_FOUND_TTL_MS;
-    }
+    const now = Date.now();
+    const providedExpiresAt = Number(entry?.expiresAt);
+    storedEntry.expiresAt =
+        Number.isFinite(providedExpiresAt) && providedExpiresAt > 0
+            ? providedExpiresAt
+            : storedEntry.status === translationCache.CACHE_STATUS.NOT_FOUND
+              ? now + TRANSLATION_NOT_FOUND_TTL_MS
+              : storedEntry.status === translationCache.CACHE_STATUS.PARTIAL_FOUND
+                ? now + cacheUtils.TRANSLATION_PARTIAL_FOUND_TTL_MS
+                : now + cacheUtils.FOUND_TTL_MS;
     const current = cache[cacheKey];
     if (isSameStoredTranslationEntry(current, storedEntry)) {
         return current;
@@ -208,11 +226,9 @@ function getCachedTranslation(cache, mediaType, ref) {
         return null;
     }
     const entry = cache[cacheKey];
-    if (entry?.status === translationCache.CACHE_STATUS.NOT_FOUND) {
-        const expiresAt = Number(entry.expiresAt);
-        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-            return null;
-        }
+    const expiresAt = Number(entry?.expiresAt);
+    if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+        return null;
     }
     return entry ?? null;
 }
@@ -390,7 +406,7 @@ function getPendingBackendWriteCount(backendState) {
     }, 0);
 }
 
-// 只有存在折叠数据时才带上 cn 段：cn 用户的请求体与旧版本完全一致。
+// 只有存在 cn fallback 时才带上 cn 段。
 // 批次被截断时也必须先挂载，否则循环里已消费掉的 cn 提示会随 return 一起丢失
 function attachCnFoldPayload(payload, cnPayload) {
     if (Object.values(cnPayload).some((entries) => Object.keys(entries).length > 0)) {

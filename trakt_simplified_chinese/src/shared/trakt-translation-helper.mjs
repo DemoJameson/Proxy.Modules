@@ -100,10 +100,10 @@ function applyTranslation(userAgent, target, entry, mediaType = null) {
 
 function getOverrideCnTranslation(entry) {
     const source = commonUtils.ensureObject(entry);
-    return commonUtils.isPlainObject(source.cn?.translation) ? source.cn.translation : source.translation;
+    return commonUtils.isPlainObject(source.cn?.translation) ? source.cn.translation : null;
 }
 
-// 覆盖按地区生效：cn 只用 cn/旧根字段，tw/hk 只用各自槽位，不回退 cn；
+// 覆盖按地区生效：cn 只用 cn 槽位，tw/hk 只用各自槽位，不回退 cn；
 // 与 cn 相同的 tw/hk 值视为管理端复制出来的伪本地区覆盖，忽略后保留原生译名
 function resolveOverrideField(override, field, locale) {
     const entry = commonUtils.ensureObject(override);

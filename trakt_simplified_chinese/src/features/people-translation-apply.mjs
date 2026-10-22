@@ -1,5 +1,6 @@
 import * as googleTranslationContext from "../shared/google-translation-context.mjs";
 import * as googleTranslationPipeline from "../shared/google-translation-pipeline.mjs";
+import * as cacheUtils from "../utils/cache.mjs";
 import * as commonUtils from "../utils/common.mjs";
 
 import {
@@ -200,12 +201,13 @@ function applyPeopleListCastNameTranslations(data, tmdbCastNameMap, cache) {
         }
 
         const tmdbNameEntry = {
+            status: cacheUtils.PERSON_NAME_STATUS.FOUND,
+            name: translatedName,
             sourceTextHash: commonUtils.computeStringHash(originalName),
-            translatedText: translatedName,
             source: PEOPLE_NAME_SOURCE.TMDB,
         };
         getPersonTranslationCacheKeys(person).forEach((personKey) => {
-            changed = setPeopleTranslationCacheEntry(cache, personKey, { name: tmdbNameEntry }, true) || changed;
+            changed = setPeopleTranslationCacheEntry(cache, personKey, tmdbNameEntry, true) || changed;
         });
     });
 
@@ -263,11 +265,10 @@ function applyPeopleListGoogleNameTranslations(translationTargets, translatedTex
                 cache,
                 personKey,
                 {
-                    name: {
-                        sourceTextHash: commonUtils.computeStringHash(originalName),
-                        translatedText: translatedName,
-                        source: PEOPLE_NAME_SOURCE.GOOGLE,
-                    },
+                    status: cacheUtils.PERSON_NAME_STATUS.FOUND,
+                    name: translatedName,
+                    sourceTextHash: commonUtils.computeStringHash(originalName),
+                    source: PEOPLE_NAME_SOURCE.GOOGLE,
                 },
                 true,
             );
@@ -382,11 +383,10 @@ async function applyPeopleCollectionGoogleNameTranslations(translationTargets, c
                                 cache,
                                 personKey,
                                 {
-                                    name: {
-                                        sourceTextHash: commonUtils.computeStringHash(originalName),
-                                        translatedText: translatedName,
-                                        source: PEOPLE_NAME_SOURCE.GOOGLE,
-                                    },
+                                    status: cacheUtils.PERSON_NAME_STATUS.FOUND,
+                                    name: translatedName,
+                                    sourceTextHash: commonUtils.computeStringHash(originalName),
+                                    source: PEOPLE_NAME_SOURCE.GOOGLE,
                                 },
                                 true,
                             ) || changed;

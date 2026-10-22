@@ -26,7 +26,9 @@ async function handleGet(req, res, kvConfig) {
     const locale = normalizeLocale(req.query.locale);
     const { comments, cn } = await readManyCommentTranslationEntriesFromKv(kvConfig, commentIds, { locale });
 
-    setResponseCacheHeaders(res, Object.keys(comments).length > 0 ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND);
+    const foundCount = Object.keys(comments).length;
+    const cacheStatus = foundCount === commentIds.length ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND;
+    setResponseCacheHeaders(res, cacheStatus);
     const response = { comments };
     if (cn && Object.keys(cn).length > 0) {
         response.cn = { comments: cn };

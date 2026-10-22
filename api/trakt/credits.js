@@ -1,6 +1,5 @@
 const {
-    CACHE_STATUS,
-    DOUBAN_TARGET_TYPES,
+    getCreditCacheStatus,
     getKvConfig,
     mergeCreditEntriesByField,
     parseIds,
@@ -11,13 +10,6 @@ const {
     splitCreditEntriesByCompleteness,
     writeManyCreditEntriesToKv,
 } = require("./translation-cache");
-
-function hasAnyCreditHit(entries) {
-    return DOUBAN_TARGET_TYPES.some((type) => {
-        const items = entries?.[type] && typeof entries[type] === "object" ? entries[type] : {};
-        return Object.keys(items).length > 0;
-    });
-}
 
 async function handleGet(req, res, kvConfig) {
     if (!kvConfig) {
@@ -39,7 +31,7 @@ async function handleGet(req, res, kvConfig) {
     });
 
     const entries = { movies, shows };
-    setResponseCacheHeaders(res, hasAnyCreditHit(entries) ? CACHE_STATUS.FOUND : CACHE_STATUS.NOT_FOUND);
+    setResponseCacheHeaders(res, getCreditCacheStatus(entries, { movies: movieIds.length, shows: showIds.length }));
     res.status(200).json(entries);
 }
 

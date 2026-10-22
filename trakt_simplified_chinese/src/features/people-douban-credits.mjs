@@ -123,7 +123,7 @@ function deriveDoubanCacheKey(targetType, traktId) {
     if (!normalizedTargetType || !normalizedTraktId) {
         return "";
     }
-    return `${normalizedTargetType}:${normalizedTraktId}`;
+    return `credit:${normalizedTargetType}:${normalizedTraktId}`;
 }
 
 function resolveDoubanCacheTarget(target) {

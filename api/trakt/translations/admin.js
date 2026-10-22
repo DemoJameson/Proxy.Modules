@@ -1,7 +1,11 @@
 const {
+    buildCacheKeyForLocale,
+    buildOverrideField,
+    buildTranslationOverridesKey,
     deleteCacheEntriesFromKv,
     getKvConfig,
     isSupportedMediaType,
+    isValidOverrideId,
     listCacheItemsFromKv,
     readCachePairFromKv,
     normalizeLocale,
@@ -92,13 +96,19 @@ async function handleItem(req, res, kvConfig) {
         sendBadRequest(res, "Missing id");
         return;
     }
+    if (!isValidOverrideId(type, id)) {
+        sendBadRequest(res, "Invalid id");
+        return;
+    }
 
+    const locale = getLocale(req);
     res.status(200).json({
         type,
         id,
-        ...(await readCachePairFromKv(kvConfig, type, id, {
-            locale: getLocale(req),
-        })),
+        autoKey: buildCacheKeyForLocale(type, id, locale),
+        overrideKey: buildTranslationOverridesKey(),
+        overrideField: buildOverrideField(type, id, locale),
+        ...(await readCachePairFromKv(kvConfig, type, id, { locale })),
     });
 }
 
@@ -112,6 +122,10 @@ async function handlePut(req, res, kvConfig) {
     }
     if (!id) {
         sendBadRequest(res, "Missing id");
+        return;
+    }
+    if (!isValidOverrideId(type, id)) {
+        sendBadRequest(res, "Invalid id");
         return;
     }
 
@@ -156,6 +170,10 @@ async function handleDelete(req, res, kvConfig) {
     }
     if (!id) {
         sendBadRequest(res, "Missing id");
+        return;
+    }
+    if (!isValidOverrideId(type, id)) {
+        sendBadRequest(res, "Invalid id");
         return;
     }
     if (!["override", "auto", "all"].includes(target)) {

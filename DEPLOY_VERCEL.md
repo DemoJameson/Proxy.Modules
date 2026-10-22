@@ -11,40 +11,43 @@
 ## 中文地区与存储结构
 
 - 脚本参数 `chineseLocale`：`cn` 简体（默认）、`tw` 台湾繁体、`hk` 香港繁体；接口用 `locale` 参数传递。
-- 每个 key 的条目统一存放三个地区字段（旧数据是根字段平铺，等价于 `cn`）：
+- 每个地区使用独立 String key，不再把一个 ID 的 cn/tw/hk 放在同一个 RedisJSON 文档里：
 
-```json
-{
-    "cn": { "status": 1, "translation": { "title": "蜘蛛侠：英雄无归" }, "expiresAt": null },
-    "tw": { "status": 1, "translation": { "title": "蜘蛛人：無家日" }, "expiresAt": null },
-    "hk": { "status": 2, "translation": { "title": "蜘蛛俠：不戰無歸" }, "expiresAt": 1763596800000 }
-}
+```text
+translation:movies:123:cn
+translation:movies:123:tw
+translation:movies:123:hk
 ```
 
-- 读取：`cn` 优先取 `cn` 字段、回退根字段；`tw`/`hk` 只读各自字段，未命中时不回退（避免大陆译名固化）。
-- 写入：先用一条 `JSON.MGET` 读取本批 key，判断哪些 key 已存在；再用一条 `JSON.MSET` 写入。已存在的 key 只写 `$.cn`/`$.tw`/`$.hk` 路径并清空旧根字段，不存在的 key 直接写 `$` 根文档。每批固定 2 条命令，不会随 key 数量变成 N+1。REST pipeline 只接受字符串/数字参数，因此 JSON 值必须序列化成字符串，清空旧根字段用字符串 `"null"`（写入 JSON null，读取侧按缺失处理）。只有拿到 cn 数据（读取响应回带的 `cn` 提示或上游数据）时才清空根字段，不会出现"根字段已清、cn 缺失"。
-- CDN 响应缓存：`FOUND` 为 24 小时，`PARTIAL_FOUND` 为 5 分钟，`NOT_FOUND` 为 15 分钟；浏览器缓存仍分别为 300/60/60 秒，以减少重复回源 Redis。
-- `translation-overrides` 的 CDN 缓存为 5 分钟，管理端修改最多延迟 5 分钟生效。
-- 过期时间写在数据字段 `expiresAt`（毫秒时间戳）：`FOUND` 为 `null`，`PARTIAL_FOUND` 30 天，`NOT_FOUND` 1 天；后端**不再发送 `EXPIRE`/`PTTL`**，读取时过滤已过期条目（图片按 poster/logo 字段过滤），缺少 `expiresAt` 的旧条目按不过期处理。
+- 读取使用一次 `MGET`；写入使用一次 `MSET`。同一 locale 内允许 last-write-wins，不同 locale 不会互相覆盖。
+- 所有 key 去掉 `trakt:` 前缀，连字符改为冒号。
+- CDN 响应缓存：全部请求条目命中且状态均为 `FOUND` 时使用 `FOUND`，缓存 7 天；全部条目命中但含 `PARTIAL_FOUND` 时使用 `PARTIAL_FOUND`，缓存时长与 `NOT_FOUND` 相同；任意条目缺失或为 `NOT_FOUND` 时使用 `NOT_FOUND`。浏览器缓存分别为 300/120 秒，CDN 同时带 `stale-while-revalidate`。
+- `translation-overrides` 的 CDN 基础缓存为 5 分钟，并允许 5 分钟 `stale-while-revalidate`；管理端修改最坏约 10 分钟生效。
+- 所有缓存响应条目都会返回 `expiresAt`（毫秒时间戳）：翻译和图片 `FOUND` 365 天、翻译 `PARTIAL_FOUND` 30 天、`NOT_FOUND` 1 天；图片 partial 30 天、not found 3 天；评论/片单 90 天；credits 30 天；人名按来源 90/30 天、TMDB 未命中 7 天。后端**不再发送 `EXPIRE`/`PTTL`**，读取时过滤已过期条目，脚本使用同一个 `expiresAt` 设置本地缓存有效期。
 
-### 旧缓存结构迁移
+### V2 缓存结构迁移
 
-旧部署升级后建议对已有缓存执行一次迁移，把根字段平铺结构折叠为 `cn`/`tw`/`hk` 地区字段：
+V2 迁移使用 RDB，不在生产库上逐 key 执行 RENAME/SCAN：
 
 ```bash
-# 1) dry-run：只读取并统计，不写入
-npm run migrate:trakt:translation-layout
+# 1) 导出 Upstash RDB，并在本地 Redis 8 + RedisJSON 加载
+# 2) dry-run：只读取并统计，不写入
+npm run migrate:cache:v2
 
-# 2) 确认统计后执行：折叠旧根字段，并对写过的 key 补发 PERSIST
-npm run migrate:trakt:translation-layout -- --execute
+# 3) 确认统计后执行：写入新 String/Hash key，并删除旧 key
+npm run migrate:cache:v2 -- --execute --max-output-bytes 175000000
 
-# 可选：同时清理已过期的地区字段（图片按 poster/logo 字段判断）
-npm run migrate:trakt:translation-layout -- --execute --prune-expired
+# 4) 本地 SAVE 新 RDB，导入 Upstash 新库或维护窗口中的原库
 ```
 
-- 运行环境需配置 `KV_REST_API_URL` / `KV_REST_API_TOKEN`（或 Upstash 同名变量）。
-- 不执行迁移也能正常工作：读取会回退旧根字段，写入会在拿到 cn 数据时折叠。但旧 key 上残留的 Redis TTL 不会被清除，折叠进去的新数据会随旧 TTL 到期一起消失，因此**建议执行一次 `--execute`**。
-- 脚本幂等，可重复执行；`--scan-count`、`--batch-size`、`--max-keys` 控制扫描与批次大小。
+- 默认使用 `redis://127.0.0.1:6379`；可用 `--redis-url` 指定本地 Redis。
+- 默认最多生成 2,000,000 个新 key；`--max-output-bytes` 是 `--execute` 的必填项，建议设为当前套餐上限的 70%。
+- 迁移前必须备份旧 RDB；Upstash RDB 导入会清空目标库。
+- 迁移脚本会把旧 RedisJSON 文档和旧 String JSON 缓存展开为 V2 String key，把 `trakt:translation:overrides` 展开为 `translation:overrides` Hash field；非 JSON String 会跳过并保留原 key，同时兼容 `original:{group}:*` 和 `trakt:image:{group}:*` 两代旧图片 key。
+- 迁移会读取旧 key 的 `PTTL`；旧数据没有 `expiresAt` 时，将剩余 TTL 写入新条目的 `expiresAt`，不会把有限缓存变成永久缓存。
+- 旧数据中的永久缓存（`expiresAt: null` 或缺失）统一改为 365 天；如果旧 key 还有有限 `PTTL`，优先使用剩余 TTL。
+- 旧人物名的 `name`/`notFound` 值会转换为数字 `status`、扁平 `name`、`sourceTextHash`、`source`、顶层 `expiresAt`，TMDB 无中文名时增加 `tmdbMissing: true`。
+- 迁移后 key 数量约为 locale 数量的倍数；导入前必须检查数据库大小和 key 数量安全门禁。
 
 ## 接口说明
 
@@ -55,7 +58,7 @@ npm run migrate:trakt:translation-layout -- --execute --prune-expired
 - `shows=1,2,3`
 - `movies=11,12,13`
 - `episodes=198225:1:1,198225:1:2,198225:1:3`
-- `locale=cn|tw|hk`（缺省 `cn`）：返回该地区的条目投影；`tw`/`hk` 未命中且该 key 仍是旧结构时，响应会在 `cn` 字段回带旧数据供客户端折叠
+- `locale=cn|tw|hk`（缺省 `cn`）：返回该地区的条目投影；`tw`/`hk` 未命中时会回带 `cn` 提示数据，供客户端写回时使用
 
 至少需要提供一类参数，否则会返回 `400`。
 
@@ -98,9 +101,9 @@ npm run migrate:trakt:translation-layout -- --execute --prune-expired
 说明：
 
 - `status = 1` 表示 `FOUND`
-- `status = 2` 表示 `PARTIAL_FOUND`
-    - 条件是任意中文地区语言的 `title` 字段有值，但未达到完整命中
+- `status = 2` 表示 `PARTIAL_FOUND`，内容仍会原样返回
 - `status = 3` 表示 `NOT_FOUND`
+- 全部条目为 `FOUND` 时使用 `FOUND`；全部条目命中但含 `PARTIAL_FOUND` 时使用 `PARTIAL_FOUND`；任意条目缺失或为 `NOT_FOUND` 时使用 `NOT_FOUND`。`PARTIAL_FOUND` 与 `NOT_FOUND` 使用同一组缓存头
 - 后端只返回已存储的翻译内容，不会主动请求 Trakt
 
 ### POST `/api/trakt/translations`
@@ -154,7 +157,7 @@ npm run migrate:trakt:translation-layout -- --execute --prune-expired
     - `GET`：读取评论翻译，查询参数 `comments=9001,9002`（数字评论 ID，去重）
     - `POST`：写入评论翻译
 - 实现文件：`/api/trakt/comment-translations.js`
-- KV key：`trakt:comment-translation:{commentId}`，TTL 90 天；评论正文变更由 `sourceTextHash` 兜底失效
+- KV key：`comment:translation:{commentId}:{locale}`，数据内 TTL 90 天；评论正文变更由 `sourceTextHash` 兜底失效
 
 GET 返回示例：
 
@@ -265,17 +268,16 @@ POST https://your-project.vercel.app/api/trakt/translations
     1. 先向后端批量读取翻译记录
     2. 对未命中的条目，由插件直接请求 Trakt `translations/zh`
     3. 再将结果批量写回后端
-- 后端按单条记录写入 KV，key 格式为：
-    - `trakt:translation:shows:{id}`
-    - `trakt:translation:movies:{id}`
-    - `trakt:translation:episodes:{showId}:{seasonNumber}:{episodeNumber}`
-- 条目统一存放三个地区字段（旧数据是根字段平铺，等价于 `cn`）：
-    - `{"cn":{"status":1,"translation":{...},"expiresAt":null},"tw":{...},"hk":{...}}`
-    - 读取：`cn` 优先取 `cn` 字段、回退根字段；`tw`/`hk` 只读各自字段
-    - 写入：先一次 `JSON.MGET` 判断 key 是否存在，再一次 `JSON.MSET`；已存在的 key 写 `$.cn`/`$.tw`/`$.hk` + 根字段置字符串 `"null"`，不存在的 key 直接写 `$` 根文档；没有 cn 数据时不清根字段；固定 2 条命令
-- 管理页保存的修订翻译存在 `trakt:translation-overrides` 文档内：`{cn:{translation}, tw:{translation}, hk:{translation}}`，各字段只存对应地区的修订字段；旧文档的根字段 `translation` 仍按 `cn` 读取，并在下次写入时迁移到 `cn`。修订字段优先于原翻译
-- 过期时间写在数据字段 `expiresAt`：`FOUND` 为 `null`，`PARTIAL_FOUND` 30 天，`NOT_FOUND` 1 天
-- 后端不再发送 `EXPIRE`/`PTTL`；读取时过滤已过期条目（图片按字段过滤），缺少 `expiresAt` 的旧条目按不过期处理
+- 后端按单条记录写入 KV，locale 使用独立 String key：
+    - `translation:shows:{id}:{locale}`
+    - `translation:movies:{id}:{locale}`
+    - `translation:episodes:{showId}:{seasonNumber}:{episodeNumber}:{locale}`
+- 读取使用一次 `MGET`，写入使用一次 `MSET`；同一 locale 内允许 last-write-wins，不同 locale 不会互相覆盖。
+- 管理页修订翻译存在 `translation:overrides` Hash 内，field 为 `{mediaType}:{id}:{locale}`，value 为 `{translation, updatedAt}`；读取使用 `HGETALL`/`HMGET`，写入使用 `HSET`，删除使用 `HDEL`。
+- 过期时间写在数据字段 `expiresAt`：`FOUND` 365 天，`PARTIAL_FOUND` 30 天，`NOT_FOUND` 1 天
+- 后端不再发送 `EXPIRE`/`PTTL`；读取时过滤已过期条目（图片按字段过滤）
+- `PARTIAL_FOUND` 不会被归一为 `NOT_FOUND`，也不会丢失翻译或图片 URL；它与 `NOT_FOUND` 使用相同的缓存时长
+- 人物名使用单个 `person:name:{traktId}:{locale}` String key，value 为 `{status, name, sourceTextHash, source, expiresAt, tmdbMissing?}`；`status` 复用 `1/3`，`name` 为最终字符串，不再返回 `providers`。运行时硬切该结构，不再接受旧 `notFound`、`providers` 或 name-only 条目
 
 ## 说明
 

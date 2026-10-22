@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { getPeopleTranslationCacheEntry, setPeopleTranslationCacheEntry } from "../trakt_simplified_chinese/src/features/people-name-cache.mjs";
 import { convertChineseForLocale, normalizeChineseLocale } from "../trakt_simplified_chinese/src/shared/chinese-script-converter.mjs";
+import { getImageCacheEntry, normalizeImageFieldEntry } from "../trakt_simplified_chinese/src/shared/media-image-replacement.mjs";
 import { storeTranslationEntry } from "../trakt_simplified_chinese/src/shared/media-translation-backend.mjs";
 import { containsChineseText, extractNormalizedTranslation, normalizeTranslations } from "../trakt_simplified_chinese/src/shared/translation-cache.mjs";
 import {
     clearCurrentSeason,
     createEmptyUnifiedCache,
+    FOUND_TTL_MS,
     GOOGLE_PEOPLE_CACHE_MAX_BYTES,
     getAuthToken,
     getHashedFieldTranslation,
@@ -91,11 +93,11 @@ function estimateEntryMapBytes(env, entries) {
 
 function createPeopleEntry(size, sourceTextHash = "person-name") {
     return {
-        name: {
-            sourceTextHash,
-            translatedText: "汤姆·汉克斯",
-            source: "tmdb",
-        },
+        status: 1,
+        name: "汤姆·汉克斯",
+        sourceTextHash,
+        source: "tmdb",
+        expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000,
         biography: {
             sourceTextHash: `${sourceTextHash}-biography`,
             translatedText: "P".repeat(size),
@@ -106,10 +108,10 @@ function createPeopleEntry(size, sourceTextHash = "person-name") {
 test("cache utils: hashed field translation roundtrip works for comments cache shape", () => {
     const cache = {};
 
-    assert.equal(setHashedFieldTranslation(cache, 9001, "comment", "Great movie", " 很棒的电影 "), true);
-    assert.equal(getHashedFieldTranslation(cache, 9001, "comment", "Great movie"), "很棒的电影");
-    assert.equal(getHashedFieldTranslation(cache, 9001, "comment", "Another movie"), "");
-    assert.equal(cache["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(setHashedFieldTranslation(cache, 9001, "comment", "Great movie", " 很棒的电影 ", "comment:translation"), true);
+    assert.equal(getHashedFieldTranslation(cache, 9001, "comment", "Great movie", "comment:translation"), "很棒的电影");
+    assert.equal(getHashedFieldTranslation(cache, 9001, "comment", "Another movie", "comment:translation"), "");
+    assert.equal(cache["comment:translation:9001:cn"].comment.translatedText, "很棒的电影");
 });
 
 test("cache utils: 篡改授权独立 key 会截断超量的流程、token 与 pending", () => {
@@ -128,15 +130,6 @@ test("cache utils: 篡改授权独立 key 会截断超量的流程、token 与 p
     assert.notEqual(env.data[TAMPER_AUTHORIZATION_KEY], undefined);
 });
 
-test("cache utils: normalizeUnifiedCache 不再保留篡改授权字段", () => {
-    const normalized = normalizeUnifiedCache({
-        version: UNIFIED_CACHE_SCHEMA_VERSION,
-        persistent: { tamperAppAuthorization: { records: [{ id: "record-1" }], tokens: [], pending: [] } },
-    });
-
-    assert.equal(Object.hasOwn(normalized.persistent, "tamperAppAuthorization"), false);
-});
-
 test("cache utils: normalizeUnifiedCache keeps comments cache in current nested shape", () => {
     const normalized = normalizeUnifiedCache({
         version: 5,
@@ -144,7 +137,7 @@ test("cache utils: normalizeUnifiedCache keeps comments cache in current nested 
         maxBytes: 512,
         google: {
             comments: {
-                "9001:cn": {
+                "comment:translation:9001:cn": {
                     comment: {
                         sourceTextHash: "cafebabe",
                         translatedText: "很棒的电影",
@@ -154,8 +147,8 @@ test("cache utils: normalizeUnifiedCache keeps comments cache in current nested 
         },
     });
 
-    assert.equal(normalized.google.comments["9001:cn"].comment.translatedText, "很棒的电影");
-    assert.equal(normalized.google.comments["9001:cn"].rev, undefined);
+    assert.equal(normalized.google.comments["comment:translation:9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(normalized.google.comments["comment:translation:9001:cn"].rev, undefined);
     assert.deepEqual(normalized.douban, {});
 });
 
@@ -165,7 +158,7 @@ test("cache utils: normalizeUnifiedCache 保留豆瓣角色缓存摘要", () => 
     const normalized = normalizeUnifiedCache({
         version: 9,
         douban: {
-            "shows:123": {
+            "credit:shows:123": {
                 subject: {
                     id: "35517044",
                     targetType: "shows",
@@ -181,13 +174,13 @@ test("cache utils: normalizeUnifiedCache 保留豆瓣角色缓存摘要", () => 
         },
     });
 
-    assert.deepEqual(normalized.douban["shows:123"].subject, {
+    assert.deepEqual(normalized.douban["credit:shows:123"].subject, {
         id: "35517044",
         targetType: "shows",
     });
-    assert.deepEqual(normalized.douban["shows:123"].seasons.ids, ["4707205", "6312211"]);
-    assert.deepEqual(normalized.douban["shows:123"].credits.王骁, ["张一昂"]);
-    assert.equal(normalized.douban["shows:123"].expiresAt, expiresAt);
+    assert.deepEqual(normalized.douban["credit:shows:123"].seasons.ids, ["4707205", "6312211"]);
+    assert.deepEqual(normalized.douban["credit:shows:123"].credits.王骁, ["张一昂"]);
+    assert.equal(normalized.douban["credit:shows:123"].expiresAt, expiresAt);
 });
 
 test("cache utils: normalizeUnifiedCache 丢弃过期豆瓣缓存条目", () => {
@@ -197,7 +190,7 @@ test("cache utils: normalizeUnifiedCache 丢弃过期豆瓣缓存条目", () => 
     const normalized = normalizeUnifiedCache({
         version: 12,
         douban: {
-            "shows:123": {
+            "credit:shows:123": {
                 subject: {
                     id: "35517044",
                     targetType: "shows",
@@ -207,7 +200,7 @@ test("cache utils: normalizeUnifiedCache 丢弃过期豆瓣缓存条目", () => 
                 },
                 expiresAt: fresh,
             },
-            "shows:456": {
+            "credit:shows:456": {
                 subject: {
                     id: "4707205",
                     targetType: "shows",
@@ -217,24 +210,8 @@ test("cache utils: normalizeUnifiedCache 丢弃过期豆瓣缓存条目", () => 
         },
     });
 
-    assert.equal(normalized.douban["shows:123"].subject.id, "35517044");
-    assert.equal(normalized.douban["shows:456"], undefined);
-});
-
-test("cache utils: normalizeUnifiedCache 不迁移旧 poster 图片缓存", () => {
-    const normalized = normalizeUnifiedCache({
-        version: 6,
-        trakt: {
-            poster: {
-                "movie:123": {
-                    status: 1,
-                    url: "https://image.tmdb.org/t/p/w780/old-poster.jpg",
-                },
-            },
-        },
-    });
-
-    assert.deepEqual(normalized.trakt.image, {});
+    assert.equal(normalized.douban["credit:shows:123"].subject.id, "35517044");
+    assert.equal(normalized.douban["credit:shows:456"], undefined);
 });
 
 test("cache utils: normalizeUnifiedCache 保留未过期图片 TTL 并移除过期字段", () => {
@@ -243,7 +220,7 @@ test("cache utils: normalizeUnifiedCache 保留未过期图片 TTL 并移除过�
         version: 7,
         trakt: {
             image: {
-                "cn:movies:123": {
+                "image:chinese:movies:123:cn": {
                     poster: {
                         status: 2,
                         url: "https://image.tmdb.org/t/p/original/partial.jpg",
@@ -254,13 +231,13 @@ test("cache utils: normalizeUnifiedCache 保留未过期图片 TTL 并移除过�
                         expiresAt: now - 1000,
                     },
                 },
-                "cn:movies:124": {
+                "image:chinese:movies:124:cn": {
                     poster: {
                         status: 3,
                         expiresAt: now - 1000,
                     },
                 },
-                "cn:movies:125": {
+                "image:chinese:movies:125:cn": {
                     poster: {
                         status: 1,
                         url: "https://image.tmdb.org/t/p/original/found.jpg",
@@ -270,10 +247,44 @@ test("cache utils: normalizeUnifiedCache 保留未过期图片 TTL 并移除过�
         },
     });
 
-    assert.equal(normalized.trakt.image["cn:movies:123"].poster.status, 2);
-    assert.equal(normalized.trakt.image["cn:movies:123"].logo, undefined);
-    assert.equal(normalized.trakt.image["cn:movies:124"], undefined);
-    assert.equal(normalized.trakt.image["cn:movies:125"].poster.expiresAt, null);
+    assert.equal(normalized.trakt.image["image:chinese:movies:123:cn"].poster.status, 2);
+    assert.equal(normalized.trakt.image["image:chinese:movies:123:cn"].logo, undefined);
+    assert.equal(normalized.trakt.image["image:chinese:movies:124:cn"], undefined);
+    assert.ok(normalized.trakt.image["image:chinese:movies:125:cn"].poster.expiresAt > Date.now());
+    assert.ok(normalized.trakt.image["image:chinese:movies:125:cn"].poster.expiresAt <= Date.now() + FOUND_TTL_MS);
+});
+
+test("cache utils: 过期 FOUND 图片字段会被清理", () => {
+    const expired = Date.now() - 1000;
+    const normalized = normalizeUnifiedCache({
+        version: UNIFIED_CACHE_SCHEMA_VERSION,
+        trakt: {
+            image: {
+                "image:chinese:movies:126:cn": {
+                    poster: {
+                        status: 1,
+                        url: "https://image.tmdb.org/t/p/original/expired.jpg",
+                        expiresAt: expired,
+                    },
+                },
+            },
+        },
+    });
+
+    assert.equal(normalized.trakt.image["image:chinese:movies:126:cn"], undefined);
+    assert.equal(normalizeImageFieldEntry({ status: 1, url: "https://image.tmdb.org/t/p/original/expired.jpg", expiresAt: expired }), null);
+    assert.equal(
+        getImageCacheEntry(
+            {
+                "image:chinese:movies:126:cn": {
+                    poster: { status: 1, url: "https://image.tmdb.org/t/p/original/expired.jpg", expiresAt: expired },
+                },
+            },
+            "movie",
+            { traktId: 126, imageMode: "cn" },
+        ),
+        null,
+    );
 });
 
 test("cache utils: pruneUnifiedCacheToLimit removes lower-priority entries first", () => {
@@ -286,7 +297,7 @@ test("cache utils: pruneUnifiedCacheToLimit removes lower-priority entries first
             translatedText: "A".repeat(420),
         },
     };
-    cache.trakt.translation["movie:1:cn"] = {
+    cache.trakt.translation["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "保留标题",
@@ -297,7 +308,7 @@ test("cache utils: pruneUnifiedCacheToLimit removes lower-priority entries first
     const pruned = pruneUnifiedCacheToLimit(env, cache, 3, 700);
 
     assert.equal(pruned.google.comments.large, undefined);
-    assert.equal(pruned.trakt.translation["movie:1:cn"].translation.title, "保留标题");
+    assert.equal(pruned.trakt.translation["translation:movies:1:cn"].translation.title, "保留标题");
 });
 
 test("cache utils: pruneUnifiedCacheToLimit keeps people translations before media translations", () => {
@@ -305,17 +316,17 @@ test("cache utils: pruneUnifiedCacheToLimit keeps people translations before med
     const cache = createEmptyUnifiedCache(3, 900);
 
     cache.google.people["person:1:cn"] = {
-        name: {
-            sourceTextHash: "person-name",
-            translatedText: "汤姆·汉克斯",
-            source: "tmdb",
-        },
+        status: 1,
+        name: "汤姆·汉克斯",
+        sourceTextHash: "person-name",
+        source: "tmdb",
+        expiresAt: Date.now() + 90 * 24 * 60 * 60 * 1000,
         biography: {
             sourceTextHash: "person-biography",
             translatedText: "A".repeat(180),
         },
     };
-    cache.trakt.translation["movie:1:cn"] = {
+    cache.trakt.translation["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "保留标题",
@@ -325,14 +336,14 @@ test("cache utils: pruneUnifiedCacheToLimit keeps people translations before med
 
     const pruned = pruneUnifiedCacheToLimit(env, cache, 3, 900);
 
-    assert.equal(pruned.trakt.translation["movie:1:cn"], undefined);
-    assert.equal(pruned.google.people["person:1:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(pruned.trakt.translation["translation:movies:1:cn"], undefined);
+    assert.equal(pruned.google.people["person:1:cn"].name, "汤姆·汉克斯");
 });
 
 test("cache utils: pruneUnifiedCacheToLimit can prune douban cache before link ids", () => {
     const env = createEnv();
     const cache = createEmptyUnifiedCache(9, 900);
-    cache.douban["shows:123"] = {
+    cache.douban["credit:shows:123"] = {
         credits: {
             王骁: ["A".repeat(800)],
         },
@@ -350,7 +361,7 @@ test("cache utils: pruneUnifiedCacheToLimit can prune douban cache before link i
 
     const pruned = pruneUnifiedCacheToLimit(env, cache, 9, 900);
 
-    assert.equal(pruned.douban["shows:123"], undefined);
+    assert.equal(pruned.douban["credit:shows:123"], undefined);
     assert.equal(pruned.trakt.linkIds["123"].ids.imdb, "tt123");
     assert.equal(pruned.trakt.linkIds["123"].title, "Original Movie");
 });
@@ -381,7 +392,7 @@ test("cache utils: pruneUnifiedCacheToLimit caps oversized people translations e
     const pruned = pruneUnifiedCacheToLimit(env, cache, 3, GOOGLE_PEOPLE_CACHE_MAX_BYTES * 4);
 
     assert.equal(pruned.google.people["large:cn"], undefined);
-    assert.equal(pruned.google.people["small:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(pruned.google.people["small:cn"].name, "汤姆·汉克斯");
     assert.ok(estimateEntryMapBytes(env, pruned.google.people) <= GOOGLE_PEOPLE_CACHE_MAX_BYTES);
 });
 
@@ -399,7 +410,7 @@ test("cache utils: pruneUnifiedCacheToLimit prunes lower priorities before cappe
     const pruned = pruneUnifiedCacheToLimit(env, cache, 3, 900);
 
     assert.equal(pruned.google.comments["large:cn"], undefined);
-    assert.equal(pruned.google.people["small:cn"].name.translatedText, "汤姆·汉克斯");
+    assert.equal(pruned.google.people["small:cn"].name, "汤姆·汉克斯");
 });
 
 test("cache utils: pruneUnifiedCacheToLimit keeps serialization calls bounded", () => {
@@ -438,13 +449,13 @@ test("cache utils: 同一次请求内多次 load 共享 unified cache 实例", (
 test("cache utils: version 不匹配时清空旧 unified cache 且不做键迁移", () => {
     const oldCache = createStoredUnifiedCache(100);
     oldCache.version = 999;
-    oldCache.trakt.translation["movie:1"] = {
+    oldCache.trakt.translation["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "旧标题",
         },
     };
-    oldCache.google.people["42:cn"] = createPeopleEntry(32);
+    oldCache.google.people["person:name:42:cn"] = createPeopleEntry(32);
 
     const env = createEnv({
         [UNIFIED_CACHE_KEY]: oldCache,
@@ -459,79 +470,6 @@ test("cache utils: version 不匹配时清空旧 unified cache 且不做键迁�
     assert.deepEqual(unifiedCache.douban, {});
     assert.equal(readStoredUnifiedCache(env).version, UNIFIED_CACHE_SCHEMA_VERSION);
     assert.deepEqual(readStoredUnifiedCache(env).trakt.translation, {}, "旧键不迁移，随旧版本一起丢弃");
-    assert.equal(readStoredUnifiedCache(env).persistent.tamperAppAuthorization, undefined);
-});
-
-test("cache utils: 升级清空 unified cache 时把篡改授权数据搬到独立 key", () => {
-    const oldCache = createStoredUnifiedCache(100);
-    oldCache.version = UNIFIED_CACHE_SCHEMA_VERSION - 1;
-    oldCache.persistent.tamperAppAuthorization = {
-        records: [{ id: "state-1", createdAt: Date.now() }],
-        tokens: [{ accessToken: "access-1", refreshToken: "refresh-1", createdAt: Date.now() }],
-        pending: [{ kind: "device_code", id: "device-1", createdAt: Date.now(), expiresAt: Date.now() + 60 * 1000 }],
-    };
-
-    const env = createEnv({
-        [UNIFIED_CACHE_KEY]: oldCache,
-        [UNIFIED_CACHE_REV_KEY]: 100,
-    });
-
-    loadUnifiedCache(env);
-
-    const adopted = loadTamperAuthorization(env);
-    assert.equal(adopted.records.length, 1);
-    assert.equal(adopted.tokens[0].accessToken, "access-1");
-    assert.equal(adopted.pending[0].id, "device-1");
-    assert.equal(readStoredUnifiedCache(env).persistent.tamperAppAuthorization, undefined);
-});
-
-test("cache utils: 篡改授权搬迁会与独立 key 已有数据按去重键合并", () => {
-    const oldCache = createStoredUnifiedCache(100);
-    oldCache.version = UNIFIED_CACHE_SCHEMA_VERSION - 1;
-    oldCache.persistent.tamperAppAuthorization = {
-        records: [{ id: "state-1", createdAt: Date.now() }],
-        tokens: [{ accessToken: "access-old", refreshToken: "refresh-old", createdAt: Date.now() }],
-        pending: [],
-    };
-
-    const env = createEnv({
-        [UNIFIED_CACHE_KEY]: oldCache,
-        [UNIFIED_CACHE_REV_KEY]: 100,
-        [TAMPER_AUTHORIZATION_KEY]: {
-            records: [],
-            tokens: [{ accessToken: "access-new", refreshToken: "refresh-new", createdAt: Date.now() }],
-            pending: [],
-        },
-    });
-
-    loadUnifiedCache(env);
-
-    const merged = loadTamperAuthorization(env);
-    assert.deepEqual(
-        merged.tokens.map((token) => token.accessToken),
-        ["access-new", "access-old"],
-    );
-    assert.equal(merged.records[0].id, "state-1");
-});
-
-test("cache utils: 版本号一致但仍有旧字段时也搬迁篡改授权数据", () => {
-    const cache = createStoredUnifiedCache(100);
-    cache.persistent.tamperAppAuthorization = {
-        records: [{ id: "state-1", createdAt: Date.now() }],
-        tokens: [{ accessToken: "access-1", refreshToken: "refresh-1", createdAt: Date.now() }],
-        pending: [],
-    };
-
-    const env = createEnv({
-        [UNIFIED_CACHE_KEY]: cache,
-        [UNIFIED_CACHE_REV_KEY]: 100,
-    });
-
-    loadUnifiedCache(env);
-
-    const adopted = loadTamperAuthorization(env);
-    assert.equal(adopted.records[0].id, "state-1");
-    assert.equal(adopted.tokens[0].accessToken, "access-1");
 });
 
 test("cache utils: 无 revision 冲突时 save 不会重读完整 unified cache", () => {
@@ -541,7 +479,7 @@ test("cache utils: 无 revision 冲突时 save 不会重读完整 unified cache"
     });
 
     const commentsCache = {
-        "9001:cn": {
+        "comment:translation:9001:cn": {
             comment: {
                 sourceTextHash: "hash-9001",
                 translatedText: "很棒的电影",
@@ -553,7 +491,7 @@ test("cache utils: 无 revision 冲突时 save 不会重读完整 unified cache"
     saveCommentTranslationCache(env, commentsCache);
 
     assert.equal(env.getjsonCallsFor(UNIFIED_CACHE_KEY), 1);
-    assert.equal(readStoredUnifiedCache(env).google.comments["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(readStoredUnifiedCache(env).google.comments["comment:translation:9001:cn"].comment.translatedText, "很棒的电影");
 });
 
 test("cache utils: revision 冲突时会重读最新 unified cache 并按桶合并", () => {
@@ -563,7 +501,7 @@ test("cache utils: revision 冲突时会重读最新 unified cache 并按桶合�
     });
 
     const translationCache = loadCache(env);
-    translationCache["movie:1:cn"] = {
+    translationCache["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "本地标题",
@@ -571,7 +509,7 @@ test("cache utils: revision 冲突时会重读最新 unified cache 并按桶合�
     };
 
     const latestCache = createStoredUnifiedCache(101);
-    latestCache.google.comments["9001:cn"] = {
+    latestCache.google.comments["comment:translation:9001:cn"] = {
         comment: {
             sourceTextHash: "hash-9001",
             translatedText: "外部评论",
@@ -583,8 +521,8 @@ test("cache utils: revision 冲突时会重读最新 unified cache 并按桶合�
     saveCache(env, translationCache);
 
     const storedCache = readStoredUnifiedCache(env);
-    assert.equal(storedCache.trakt.translation["movie:1:cn"].translation.title, "本地标题");
-    assert.equal(storedCache.google.comments["9001:cn"].comment.translatedText, "外部评论");
+    assert.equal(storedCache.trakt.translation["translation:movies:1:cn"].translation.title, "本地标题");
+    assert.equal(storedCache.google.comments["comment:translation:9001:cn"].comment.translatedText, "外部评论");
     assert.ok(env.getjsonCallsFor(UNIFIED_CACHE_KEY) >= 2);
 });
 
@@ -595,7 +533,7 @@ test("cache utils: 同桶 revision 冲突保持后写覆盖", () => {
     });
 
     const translationCache = loadCache(env);
-    translationCache["movie:1:cn"] = {
+    translationCache["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "本地标题",
@@ -603,7 +541,7 @@ test("cache utils: 同桶 revision 冲突保持后写覆盖", () => {
     };
 
     const latestCache = createStoredUnifiedCache(101);
-    latestCache.trakt.translation["movie:1:cn"] = {
+    latestCache.trakt.translation["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "外部标题",
@@ -614,7 +552,7 @@ test("cache utils: 同桶 revision 冲突保持后写覆盖", () => {
 
     saveCache(env, translationCache);
 
-    assert.equal(readStoredUnifiedCache(env).trakt.translation["movie:1:cn"].translation.title, "本地标题");
+    assert.equal(readStoredUnifiedCache(env).trakt.translation["translation:movies:1:cn"].translation.title, "本地标题");
 });
 
 test("cache utils: body rev 落后于 sidecar rev 时不会把 sidecar rev 错记进 memo", () => {
@@ -625,7 +563,7 @@ test("cache utils: body rev 落后于 sidecar rev 时不会把 sidecar rev 错�
     });
 
     const unifiedCache = loadUnifiedCache(env);
-    unifiedCache.trakt.translation["movie:1:cn"] = {
+    unifiedCache.trakt.translation["translation:movies:1:cn"] = {
         status: 1,
         translation: {
             title: "本地标题",
@@ -636,7 +574,7 @@ test("cache utils: body rev 落后于 sidecar rev 时不会把 sidecar rev 错�
 
     const storedCache = readStoredUnifiedCache(env);
     assert.equal(storedCache.rev > 101, true);
-    assert.equal(storedCache.trakt.translation["movie:1:cn"].translation.title, "本地标题");
+    assert.equal(storedCache.trakt.translation["translation:movies:1:cn"].translation.title, "本地标题");
     assert.equal(env.getjsonCallsFor(UNIFIED_CACHE_KEY) >= 2, true);
 });
 
@@ -804,6 +742,8 @@ test("cache utils: storeTranslationEntry 对相同条目不重复标记变更", 
 
     const first = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "标题" } });
     assert.equal(first.status, 1);
+    assert.ok(first.expiresAt > Date.now());
+    assert.ok(first.expiresAt <= Date.now() + FOUND_TTL_MS);
 
     const second = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "标题" } });
     assert.equal(second, first);
@@ -812,6 +752,8 @@ test("cache utils: storeTranslationEntry 对相同条目不重复标记变更", 
     const third = storeTranslationEntry(cache, "movie", ref, { status: 1, translation: { title: "标题" }, complete: true });
     assert.notEqual(third, first);
     assert.equal(third.complete, true);
+    assert.ok(third.expiresAt > Date.now());
+    assert.ok(third.expiresAt <= Date.now() + FOUND_TTL_MS);
 });
 
 test("cache utils: storeTranslationEntry 未过期负缓存判同，过期则刷新 TTL", () => {
@@ -823,7 +765,7 @@ test("cache utils: storeTranslationEntry 未过期负缓存判同，过期则刷
     assert.equal(second, first);
     assert.ok(second.expiresAt > Date.now());
 
-    cache["movie:102:cn"].expiresAt = Date.now() - 1;
+    cache["translation:movies:102:cn"].expiresAt = Date.now() - 1;
     const refreshed = storeTranslationEntry(cache, "movie", ref, { status: 3 });
     assert.notEqual(refreshed, first);
     assert.ok(refreshed.expiresAt > Date.now());
@@ -872,15 +814,15 @@ test("cache utils: clearCurrentSeason 已为空时不再写回", () => {
 
 test("cache utils: 加载时丢弃过期负缓存条目并触发修复写回", () => {
     const stored = createStoredUnifiedCache(100);
-    stored.trakt.translation["movie:1:cn"] = { status: 3, expiresAt: Date.now() - 1000 };
+    stored.trakt.translation["translation:movies:1:cn"] = { status: 3, expiresAt: Date.now() - 1000 };
     const env = createEnv({
         [UNIFIED_CACHE_KEY]: stored,
         [UNIFIED_CACHE_REV_KEY]: 100,
     });
 
     const cache = loadCache(env);
-    assert.equal(cache["movie:1"], undefined);
-    assert.equal(readStoredUnifiedCache(env).trakt.translation["movie:1:cn"], undefined);
+    assert.equal(cache["translation:movies:1:cn"], undefined);
+    assert.equal(readStoredUnifiedCache(env).trakt.translation["translation:movies:1:cn"], undefined);
 });
 
 test("cache utils: 正常缓存加载不触发修复写回", () => {
@@ -951,18 +893,18 @@ test("cache utils: 翻译条目按缓存键地区归一化，cn 设备不会把 
             version: UNIFIED_CACHE_SCHEMA_VERSION,
             trakt: {
                 translation: {
-                    "movie:123:cn": { status: 1, translation: { title: "蜘蛛侠：英雄无归", overview: "简体简介" } },
-                    "movie:123:tw": { status: 1, translation: { title: "蜘蛛人：無家日", overview: "台灣簡介" } },
-                    "movie:123:hk": { status: 1, translation: { title: "蜘蛛俠：不戰無歸", overview: "香港簡介" } },
+                    "translation:movies:123:cn": { status: 1, translation: { title: "蜘蛛侠：英雄无归", overview: "简体简介" } },
+                    "translation:movies:123:tw": { status: 1, translation: { title: "蜘蛛人：無家日", overview: "台灣簡介" } },
+                    "translation:movies:123:hk": { status: 1, translation: { title: "蜘蛛俠：不戰無歸", overview: "香港簡介" } },
                 },
             },
         });
 
-        assert.equal(normalized.trakt.translation["movie:123:cn"].translation.title, "蜘蛛侠：英雄无归");
-        assert.equal(normalized.trakt.translation["movie:123:tw"].translation.title, "蜘蛛人：無家日");
-        assert.equal(normalized.trakt.translation["movie:123:tw"].translation.overview, "台灣簡介");
-        assert.equal(normalized.trakt.translation["movie:123:hk"].translation.title, "蜘蛛俠：不戰無歸");
-        assert.equal(normalized.trakt.translation["movie:123:hk"].translation.overview, "香港簡介");
+        assert.equal(normalized.trakt.translation["translation:movies:123:cn"].translation.title, "蜘蛛侠：英雄无归");
+        assert.equal(normalized.trakt.translation["translation:movies:123:tw"].translation.title, "蜘蛛人：無家日");
+        assert.equal(normalized.trakt.translation["translation:movies:123:tw"].translation.overview, "台灣簡介");
+        assert.equal(normalized.trakt.translation["translation:movies:123:hk"].translation.title, "蜘蛛俠：不戰無歸");
+        assert.equal(normalized.trakt.translation["translation:movies:123:hk"].translation.overview, "香港簡介");
     } finally {
         globalThis.$ctx = originalContext;
     }
@@ -978,7 +920,7 @@ test("cache utils: 整缓存落盘不会把 tw/hk 条目改写成简体", () => 
                 rev: 100,
                 trakt: {
                     translation: {
-                        "movie:123:tw": { status: 1, translation: { title: "蜘蛛人：無家日", overview: "台灣簡介" } },
+                        "translation:movies:123:tw": { status: 1, translation: { title: "蜘蛛人：無家日", overview: "台灣簡介" } },
                     },
                 },
             },
@@ -986,13 +928,13 @@ test("cache utils: 整缓存落盘不会把 tw/hk 条目改写成简体", () => 
         });
 
         const cache = loadCache(env);
-        cache["movie:456:cn"] = { status: 1, translation: { title: "中文电影" } };
+        cache["translation:movies:456:cn"] = { status: 1, translation: { title: "中文电影" } };
         saveCache(env, cache);
 
         const stored = readStoredUnifiedCache(env).trakt.translation;
-        assert.equal(stored["movie:123:tw"].translation.title, "蜘蛛人：無家日");
-        assert.equal(stored["movie:123:tw"].translation.overview, "台灣簡介");
-        assert.equal(stored["movie:456:cn"].translation.title, "中文电影");
+        assert.equal(stored["translation:movies:123:tw"].translation.title, "蜘蛛人：無家日");
+        assert.equal(stored["translation:movies:123:tw"].translation.overview, "台灣簡介");
+        assert.equal(stored["translation:movies:456:cn"].translation.title, "中文电影");
     } finally {
         globalThis.$ctx = originalContext;
     }
@@ -1010,7 +952,6 @@ test("cache utils: 只有 tw/hk 的覆盖条目不会被归一化丢弃", () => 
                     123: { tw: { translation: { title: "蜘蛛人：無家日" } } },
                     456: { hk: { translation: { title: "蜘蛛俠：不戰無歸" } } },
                     789: { cn: { translation: { title: "蜘蛛侠：英雄无归" } } },
-                    890: { translation: { title: "旧根字段覆盖" } },
                     999: { en: { translation: { title: "Spider-Man" } } },
                 },
             },
@@ -1021,7 +962,6 @@ test("cache utils: 只有 tw/hk 的覆盖条目不会被归一化丢弃", () => 
     assert.equal(overrides["123"].tw.translation.title, "蜘蛛人：無家日");
     assert.equal(overrides["456"].hk.translation.title, "蜘蛛俠：不戰無歸");
     assert.equal(overrides["789"].cn.translation.title, "蜘蛛侠：英雄无归");
-    assert.equal(overrides["890"].translation.title, "旧根字段覆盖", "过渡期保留旧根字段覆盖");
     assert.equal(overrides["999"], undefined, "没有任何中文地区覆盖的条目仍应丢弃");
 });
 
@@ -1031,20 +971,26 @@ test("人物名本地缓存按中文地区分键，cn 同样带后缀且切换�
         const cache = {};
         globalThis.$ctx = { argument: { chineseLocale: "cn" } };
         setPeopleTranslationCacheEntry(cache, 42, {
-            name: { sourceTextHash: "hash-1", translatedText: "汤姆·汉克斯", source: "tmdb" },
+            status: 1,
+            name: "汤姆·汉克斯",
+            sourceTextHash: "hash-1",
+            source: "tmdb",
         });
-        assert.ok(cache["42:cn"], "cn 与 tw/hk 共用 `<id>:<locale>` 键格式");
+        assert.ok(cache["person:name:42:cn"], "cn 与 tw/hk 共用 `person:name:<id>:<locale>` 键格式");
         assert.equal(cache["42"], undefined, "不再写入无地区后缀的历史键");
-        assert.equal(cache["42:tw"], undefined);
+        assert.equal(cache["person:name:42:tw"], undefined);
 
         globalThis.$ctx = { argument: { chineseLocale: "tw" } };
         setPeopleTranslationCacheEntry(cache, 42, {
-            name: { sourceTextHash: "hash-1", translatedText: "湯姆·漢克斯", source: "tmdb" },
+            status: 1,
+            name: "湯姆·漢克斯",
+            sourceTextHash: "hash-1",
+            source: "tmdb",
         });
-        assert.equal(getPeopleTranslationCacheEntry(cache, 42).name.translatedText, "湯姆·漢克斯");
+        assert.equal(getPeopleTranslationCacheEntry(cache, 42).name, "湯姆·漢克斯");
 
         globalThis.$ctx = { argument: { chineseLocale: "cn" } };
-        assert.equal(getPeopleTranslationCacheEntry(cache, 42).name.translatedText, "汤姆·汉克斯");
+        assert.equal(getPeopleTranslationCacheEntry(cache, 42).name, "汤姆·汉克斯");
     } finally {
         globalThis.$ctx = originalContext;
     }

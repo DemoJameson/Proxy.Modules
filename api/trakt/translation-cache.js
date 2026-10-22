@@ -16,9 +16,12 @@ const { parseIds, parseEpisodeKeys, parseSeasonKeys, readJsonBody } = require(".
 
 const {
     buildCacheKey,
-    buildOverrideCacheKey,
+    buildCacheKeyForLocale,
+    buildCacheKeyPattern,
+    buildOverrideField,
     buildTranslationOverridesKey,
     deleteCacheEntriesFromKv,
+    isValidOverrideId,
     readAllTranslationOverridesFromKv,
     readManyAutoFromKv,
     readManyAutoGroupsFromKv,
@@ -34,13 +37,21 @@ const { buildImageCacheKey, buildImageCacheKeyForMode, readManyImageGroupsFromKv
 const {
     DOUBAN_TARGET_TYPES,
     buildCreditCacheKey,
+    getCreditCacheStatus,
+    isCompleteCreditEntry,
     mergeCreditEntriesByField,
     splitCreditEntriesByCompleteness,
     readManyCreditEntriesFromKv,
     writeManyCreditEntriesToKv,
 } = require("../../lib/trakt-cache/credit-store");
 
-const { buildPersonNameCacheKey, normalizePersonNameEntry, readManyPersonNameEntriesFromKv, writeManyPersonNameEntriesToKv } = require("../../lib/trakt-cache/person-name-store");
+const {
+    buildPersonNameCacheKey,
+    normalizePersonNameEntry,
+    readManyPersonNameEntriesFromKv,
+    writeManyPersonNameEntriesToKv,
+    PERSON_NAME_STATUS,
+} = require("../../lib/trakt-cache/person-name-store");
 
 const {
     buildCommentTranslationCacheKey,
@@ -68,11 +79,15 @@ module.exports = {
     IMAGE_GROUPS,
     DOUBAN_TARGET_TYPES,
     buildCacheKey,
+    buildCacheKeyForLocale,
+    buildCacheKeyPattern,
     buildImageCacheKey,
     buildImageCacheKeyForMode,
     buildCreditCacheKey,
-    buildOverrideCacheKey,
+    getCreditCacheStatus,
+    buildOverrideField,
     buildTranslationOverridesKey,
+    isValidOverrideId,
     buildPersonNameCacheKey,
     buildCommentTranslationCacheKey,
     buildListTranslationCacheKey,
@@ -80,9 +95,11 @@ module.exports = {
     getKvConfig,
     getResponseCacheStatus,
     isSupportedMediaType,
+    isCompleteCreditEntry,
     listCacheItemsFromKv,
     mergeCreditEntriesByField,
     normalizePersonNameEntry,
+    PERSON_NAME_STATUS,
     normalizeCommentTranslationEntry,
     normalizeListTranslationEntry,
     normalizeLocale,
