@@ -26,7 +26,6 @@ import {
     createUnifiedPersistentData,
     createWrappedMovieBody,
     parseTamperAuthorization,
-    parseUnifiedCache,
     readFixture,
     runRequestCase,
     runResponseCase,
@@ -59,7 +58,7 @@ function readTamperTokens(persistentData) {
 }
 
 function createTamperPersistentData({ records = [], tokens = [], pending = [] } = {}) {
-    return createUnifiedPersistentData({ tamperAppAuthorization: { records, tokens, pending } });
+    return createUnifiedPersistentData({ tamperAuthorization: { records, tokens, pending } });
 }
 
 function createTamperTokenRecord(accessToken, refreshToken, overrides = {}) {
@@ -109,7 +108,7 @@ function createMoviePersistentData() {
 function createShowPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "show:456:cn": createMediaTranslationEntry({
+            "translation:shows:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
@@ -123,14 +122,14 @@ function createShowPersistentData() {
 function createMixedDirectMediaPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "movie:123:cn": createMediaTranslationEntry({
+            "translation:movies:123:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文电影",
                     overview: "中文电影简介",
                     tagline: "中文电影标语",
                 },
             }),
-            "show:456:cn": createMediaTranslationEntry({
+            "translation:shows:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
@@ -144,21 +143,21 @@ function createMixedDirectMediaPersistentData() {
 function createEpisodePersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
-            "episode:555:1:1:cn": createMediaTranslationEntry({
+            "translation:episodes:555:1:1:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第一集中文",
                     overview: "第一集中文简介",
                     tagline: "第一集中文标语",
                 },
             }),
-            "episode:555:1:2:cn": createMediaTranslationEntry({
+            "translation:episodes:555:1:2:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第二集中文",
                     overview: "第二集中文简介",
                     tagline: "第二集中文标语",
                 },
             }),
-            "episode:777:2:1:cn": createMediaTranslationEntry({
+            "translation:episodes:777:2:1:cn": createMediaTranslationEntry({
                 translation: {
                     title: "其他剧中文",
                     overview: "其他剧中文简介",
@@ -197,7 +196,7 @@ function createBackendTranslationOverridesBody(fieldName, lookupKey, entry) {
     });
 }
 
-// 覆盖条目按地区存放：cn/tw/hk 各一份 translation（旧文档的根字段 translation 等价 cn）
+// 覆盖条目按地区存放：cn/tw/hk 各一份 translation
 function createTranslationOverrideEntry(translation) {
     return {
         cn: { translation },
@@ -343,14 +342,14 @@ function createCalendarPersistentData() {
     return createUnifiedPersistentData({
         traktTranslation: {
             ...JSON.parse(createMovieTranslationCache()),
-            "show:456:cn": createMediaTranslationEntry({
+            "translation:shows:456:cn": createMediaTranslationEntry({
                 translation: {
                     title: "中文剧名",
                     overview: "中文剧集简介",
                     tagline: "中文剧集标语",
                 },
             }),
-            "episode:456:1:2:cn": createMediaTranslationEntry({
+            "translation:episodes:456:1:2:cn": createMediaTranslationEntry({
                 translation: {
                     title: "第二集中文",
                     overview: "第二集中文简介",
@@ -637,7 +636,7 @@ test("handleList 按 direct list、wrapped list 与 prominent list 路由分组�
     const persistentData = createUnifiedPersistentData({
         googleList: JSON.parse(
             createListTranslationCache({
-                "321:cn": {
+                "list:translation:321:cn": {
                     name: {
                         sourceTextHash: computeStringHash("Favorites"),
                         translatedText: "收藏夹",
@@ -1137,14 +1136,14 @@ test("handleWrapperMediaObject 覆盖 watching 单对象响应", async (t) => {
             body: createWatchingEpisodeBody(),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "show:555:cn": createMediaTranslationEntry({
+                    "translation:shows:555:cn": createMediaTranslationEntry({
                         translation: {
                             title: "中文剧名",
                             overview: "中文剧集简介",
                             tagline: "中文剧集标语",
                         },
                     }),
-                    "episode:555:1:2:cn": createMediaTranslationEntry({
+                    "translation:episodes:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -1413,7 +1412,7 @@ test("handleMediaDetail 覆盖 movie、show、season info 与 episode detail 路
             persistentData: createUnifiedPersistentData({
                 traktTranslation: JSON.parse(
                     createMovieTranslationCache({
-                        "movie:123:cn": createMediaTranslationEntry({
+                        "translation:movies:123:cn": createMediaTranslationEntry({
                             translation: {
                                 title: "中文电影",
                                 overview: "中文简介",
@@ -1458,7 +1457,7 @@ test("handleMediaDetail 覆盖 movie、show、season info 与 episode detail 路
             }),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "season:555:1:cn": createMediaTranslationEntry({
+                    "translation:shows:555:1:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第一季",
                             overview: "第一季简介",
@@ -1996,14 +1995,14 @@ test("handleSeasonEpisodesList 覆盖 /shows/:id/seasons 路由", async () => {
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: {
-                "episode:555:1:1:cn": createMediaTranslationEntry({
+                "translation:episodes:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                         overview: "第一集中文简介",
                         tagline: "第一集中文标语",
                     },
                 }),
-                "episode:555:1:2:cn": createMediaTranslationEntry({
+                "translation:episodes:555:1:2:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第二集中文",
                         overview: "第二集中文简介",
@@ -2026,14 +2025,14 @@ test("handleSeasonEpisodesList 会叠加 episode translationOverrides", async ()
         persistentData: createUnifiedPersistentData({
             persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
             traktTranslation: {
-                "episode:555:1:1:cn": createMediaTranslationEntry({
+                "translation:episodes:555:1:1:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第一集中文",
                         overview: "第一集中文简介",
                         tagline: "第一集中文标语",
                     },
                 }),
-                "episode:555:1:2:cn": createMediaTranslationEntry({
+                "translation:episodes:555:1:2:cn": createMediaTranslationEntry({
                     translation: {
                         title: "第二集中文",
                         overview: "第二集中文简介",
@@ -2766,7 +2765,6 @@ test("篡改应用授权 token 响应写入记录后状态过期仍能改写 ref
     });
 
     assert.equal(Object.hasOwn(callbackRun.persistentData, TAMPER_AUTHORIZATION_KEY), true, "篡改授权状态写入独立持久化 key");
-    assert.equal(Object.hasOwn(parseUnifiedCache(callbackRun.persistentData).persistent, "tamperAppAuthorization"), false, "篡改授权状态不再占用 unified cache");
 
     const tokenRequestBody = JSON.stringify({
         client_id: clientId,

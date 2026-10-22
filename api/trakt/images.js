@@ -36,7 +36,7 @@ async function handleGet(req, res, kvConfig) {
         seasons: seasonKeys,
     });
 
-    setResponseCacheHeaders(res, getResponseCacheStatus(shows, movies, seasons));
+    setResponseCacheHeaders(res, getResponseCacheStatus({ shows, movies, seasons }, { shows: showIds.length, movies: movieIds.length, seasons: seasonKeys.length }));
     const response = { shows, movies, seasons };
     if (cn && Object.keys(cn.shows).length + Object.keys(cn.movies).length + Object.keys(cn.seasons).length > 0) {
         response.cn = cn;

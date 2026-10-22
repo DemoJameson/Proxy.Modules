@@ -40,7 +40,7 @@ import {
 // 篡改流程签发的 token 记录：让 oauth/token 路由识别出这是篡改流程并改写 client
 function createTamperTokenPersistentData(clientId, refreshToken) {
     return createUnifiedPersistentData({
-        tamperAppAuthorization: {
+        tamperAuthorization: {
             records: [],
             tokens: [
                 {
@@ -112,7 +112,7 @@ function createMirPayload(movie) {
 
 function createEpisodeTranslationCache(sample, title = "中文剧集标题") {
     return {
-        [`episode:${sample.traktId}:${sample.seasonNumber}:${sample.episodeNumber}:cn`]: {
+        [`translation:episodes:${sample.traktId}:${sample.seasonNumber}:${sample.episodeNumber}:cn`]: {
             status: 1,
             translation: {
                 title,
@@ -171,7 +171,7 @@ const TAMPER_RESPONSE_MATRIX_CASES = [
         // fixture 用工厂延迟到用例执行时求值：tamper state 有 5 分钟 TTL，模块加载时定型会在长跑后过期
         persistentData: () =>
             createUnifiedPersistentData({
-                tamperAppAuthorization: {
+                tamperAuthorization: {
                     records: [
                         {
                             id: "live-challenge",
@@ -204,7 +204,7 @@ const TAMPER_RESPONSE_MATRIX_CASES = [
         }),
         persistentData: () =>
             createUnifiedPersistentData({
-                tamperAppAuthorization: {
+                tamperAuthorization: {
                     records: [],
                     tokens: [],
                     pending: [
@@ -522,7 +522,7 @@ test("live script: /shows/popular 会命中列表翻译路由并应用缓存中�
         body: sample.listBody,
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                [`show:${sample.traktId}:cn`]: createMediaTranslationEntry({
+                [`translation:shows:${sample.traktId}:cn`]: createMediaTranslationEntry({
                     translation: {
                         title: String(cnTranslation?.title ?? ""),
                         overview: String(cnTranslation?.overview ?? ""),
@@ -576,7 +576,7 @@ test("live script: /movies/popular 会命中列表翻译路由并应用缓存中
         body: sample.listBody,
         persistentData: createUnifiedPersistentData({
             traktTranslation: {
-                [`movie:${sample.traktId}:cn`]: createMediaTranslationEntry({
+                [`translation:movies:${sample.traktId}:cn`]: createMediaTranslationEntry({
                     translation: {
                         title: String(cnTranslation?.title ?? ""),
                         overview: String(cnTranslation?.overview ?? ""),
@@ -630,13 +630,12 @@ test("live script: /people/:id 会应用缓存中的中文姓名和 biography", 
         persistentData: createUnifiedPersistentData({
             googlePeople: {
                 // 用 tmdb 来源 + 未过期 TTL 造缓存，避免线上 TMDb 中文名覆盖缓存译文导致断言不稳定
-                [`${sample.personId}:cn`]: {
-                    name: {
-                        sourceTextHash: computeStringHash(originalName),
-                        translatedText: translatedName,
-                        source: "tmdb",
-                        expiresAt: Date.now() + TMDB_PERSON_NAME_TTL_MS,
-                    },
+                [`person:name:${sample.personId}:cn`]: {
+                    status: 1,
+                    name: translatedName,
+                    sourceTextHash: computeStringHash(originalName),
+                    source: "tmdb",
+                    expiresAt: Date.now() + TMDB_PERSON_NAME_TTL_MS,
                     biography: {
                         sourceTextHash: computeStringHash(originalBiography),
                         translatedText: translatedBiography,
@@ -679,13 +678,12 @@ test("live script: /movies/:id/people 会应用缓存中的中文姓名", async 
         persistentData: createUnifiedPersistentData({
             googlePeople: {
                 // 同上：tmdb 来源 + 未过期 TTL，确保走「应用缓存译文」而不是线上 TMDb 查询
-                [`${sample.personId}:cn`]: {
-                    name: {
-                        sourceTextHash: computeStringHash(originalName),
-                        translatedText: translatedName,
-                        source: "tmdb",
-                        expiresAt: Date.now() + TMDB_PERSON_NAME_TTL_MS,
-                    },
+                [`person:name:${sample.personId}:cn`]: {
+                    status: 1,
+                    name: translatedName,
+                    sourceTextHash: computeStringHash(originalName),
+                    source: "tmdb",
+                    expiresAt: Date.now() + TMDB_PERSON_NAME_TTL_MS,
                 },
             },
         }),
@@ -723,7 +721,7 @@ test("live script: comments 响应会应用缓存中的评论翻译", async (t) 
         body: JSON.stringify(sample.comments),
         persistentData: createUnifiedPersistentData({
             googleComments: {
-                [`${commentId}:cn`]: {
+                [`comment:translation:${commentId}:cn`]: {
                     comment: {
                         sourceTextHash: computeStringHash(originalComment),
                         translatedText: translatedComment,
@@ -938,14 +936,14 @@ test("live script: response route coverage matrix covers all response phase rout
     const mirPayload = createMirPayload(movieSample.movie);
 
     const movieTranslation = {
-        [`movie:${movieSample.traktId}:cn`]: createMediaTranslationEntry({
+        [`translation:movies:${movieSample.traktId}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖中文电影",
                 overview: "覆盖中文简介",
                 tagline: "覆盖中文标语",
             },
         }),
-        [`movie:${directMovieSample.traktId}:cn`]: createMediaTranslationEntry({
+        [`translation:movies:${directMovieSample.traktId}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖直出中文电影",
                 overview: "覆盖直出中文简介",
@@ -954,7 +952,7 @@ test("live script: response route coverage matrix covers all response phase rout
         }),
     };
     const personCreditsMovieTranslation = {
-        [`movie:${personCreditsSample.movie.ids.trakt}:cn`]: createMediaTranslationEntry({
+        [`translation:movies:${personCreditsSample.movie.ids.trakt}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: "覆盖人物作品中文电影",
                 overview: "覆盖人物作品中文简介",
@@ -964,7 +962,7 @@ test("live script: response route coverage matrix covers all response phase rout
     };
     const preferredShowTranslation = pickPreferredZhTranslation(showSample.translations);
     const showTranslation = {
-        [`show:${showSample.traktId}:cn`]: createMediaTranslationEntry({
+        [`translation:shows:${showSample.traktId}:cn`]: createMediaTranslationEntry({
             translation: {
                 title: String(preferredShowTranslation?.title ?? showSample.show.title ?? ""),
                 overview: String(preferredShowTranslation?.overview ?? showSample.show.overview ?? ""),
@@ -975,7 +973,7 @@ test("live script: response route coverage matrix covers all response phase rout
     const expectedShowTitle = String(preferredShowTranslation?.title ?? showSample.show.title ?? "");
     const episodeTranslation = createEpisodeTranslationCache(episodeSample);
     const listTranslation = {
-        [`${String(listSample.list.ids.trakt)}:cn`]: {
+        [`list:translation:${String(listSample.list.ids.trakt)}:cn`]: {
             description: {
                 sourceTextHash: computeStringHash(String(listSample.list.description)),
                 translatedText: "覆盖中文列表描述",
@@ -983,7 +981,7 @@ test("live script: response route coverage matrix covers all response phase rout
         },
     };
     const commentTranslation = {
-        [`${String(commentsSample.firstComment.id)}:cn`]: {
+        [`comment:translation:${String(commentsSample.firstComment.id)}:cn`]: {
             comment: {
                 sourceTextHash: computeStringHash(String(commentsSample.firstComment.comment)),
                 translatedText: "覆盖中文评论",
@@ -1861,7 +1859,7 @@ test("live script: response route coverage matrix covers all response phase rout
             ]),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "show:456:cn": createMediaTranslationEntry({
+                    "translation:shows:456:cn": createMediaTranslationEntry({
                         translation: {
                             title: "中文剧名",
                             overview: "中文剧集简介",
@@ -1880,14 +1878,14 @@ test("live script: response route coverage matrix covers all response phase rout
             persistentData: createUnifiedPersistentData({
                 persistentCurrentSeason: { showId: "555", seasonNumber: 1 },
                 traktTranslation: {
-                    "episode:555:1:1:cn": createMediaTranslationEntry({
+                    "translation:episodes:555:1:1:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第一集中文",
                             overview: "第一集中文简介",
                             tagline: "第一集中文标语",
                         },
                     }),
-                    "episode:555:1:2:cn": createMediaTranslationEntry({
+                    "translation:episodes:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -1956,7 +1954,7 @@ test("live script: response route coverage matrix covers all response phase rout
             body: readFixture("movie-detail.json"),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "movie:123:cn": createMediaTranslationEntry(),
+                    "translation:movies:123:cn": createMediaTranslationEntry(),
                 },
             }),
             assertPayload(payload) {
@@ -1986,7 +1984,7 @@ test("live script: response route coverage matrix covers all response phase rout
             }),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "episode:555:1:2:cn": createMediaTranslationEntry({
+                    "translation:episodes:555:1:2:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第二集中文",
                             overview: "第二集中文简介",
@@ -2084,7 +2082,7 @@ test("live script: response route coverage matrix covers all response phase rout
             }),
             persistentData: createUnifiedPersistentData({
                 traktTranslation: {
-                    "season:555:1:cn": createMediaTranslationEntry({
+                    "translation:shows:555:1:cn": createMediaTranslationEntry({
                         translation: {
                             title: "第一季",
                             overview: "第一季简介",

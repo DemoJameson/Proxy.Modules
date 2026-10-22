@@ -279,7 +279,7 @@ test("translationEngine=deeplx 时 comments 会请求 DeepLX 翻译并写回缓�
 
     const payload = JSON.parse(result.body);
     assert.equal(payload[0].comment, "很棒的电影");
-    assert.equal(parseUnifiedCache(persistentData).google.comments["9001:cn"].comment.translatedText, "很棒的电影");
+    assert.equal(parseUnifiedCache(persistentData).google.comments["comment:translation:9001:cn"].comment.translatedText, "很棒的电影");
     assert.equal(
         httpLogs.some((entry) => entry.method === "POST" && entry.url === DEEPLX_TRANSLATE_URL),
         true,

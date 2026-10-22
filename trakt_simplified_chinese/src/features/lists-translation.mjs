@@ -60,7 +60,7 @@ function normalizeBackendListIds(listIds) {
 }
 
 function mergeBackendListTranslationEntry(cache, listId, entry) {
-    const cacheKey = cacheUtils.buildFieldTranslationCacheKey(listId);
+    const cacheKey = cacheUtils.buildFieldTranslationCacheKey(listId, "list:translation");
     if (!cacheKey) {
         return false;
     }
@@ -85,6 +85,7 @@ function mergeBackendListTranslationEntry(cache, listId, entry) {
                 sourceTextHash,
                 translatedText,
             },
+            expiresAt: Number.isFinite(Number(entry?.expiresAt)) ? Number(entry.expiresAt) : Date.now() + cacheUtils.LIST_TRANSLATION_TTL_MS,
         };
         changed = true;
     });
@@ -152,7 +153,7 @@ async function handleList() {
 
     // 本地未命中的片单先从后端批量补齐（不受 translationEngine 限制，与评论/人物名行为一致）
     const missingListIds = entries
-        .filter((entry) => entry.listId && !cacheUtils.getHashedFieldTranslation(cache, entry.listId, entry.field, entry.sourceText))
+        .filter((entry) => entry.listId && !cacheUtils.getHashedFieldTranslation(cache, entry.listId, entry.field, entry.sourceText, "list:translation"))
         .map((entry) => entry.listId);
     const hydratedChanged = await hydrateListTranslationsFromBackend(cache, missingListIds);
 
@@ -160,10 +161,18 @@ async function handleList() {
         sourceLanguage: "en",
         sourceText: entry.sourceText,
         getCachedTranslation() {
-            return cacheUtils.getHashedFieldTranslation(cache, entry.listId, entry.field, entry.sourceText);
+            return cacheUtils.getHashedFieldTranslation(cache, entry.listId, entry.field, entry.sourceText, "list:translation");
         },
         setCachedTranslation(translatedText) {
-            const targetCacheChanged = cacheUtils.setHashedFieldTranslation(cache, entry.listId, entry.field, entry.sourceText, translatedText);
+            const targetCacheChanged = cacheUtils.setHashedFieldTranslation(
+                cache,
+                entry.listId,
+                entry.field,
+                entry.sourceText,
+                translatedText,
+                "list:translation",
+                Date.now() + cacheUtils.LIST_TRANSLATION_TTL_MS,
+            );
             if (targetCacheChanged && entry.listId) {
                 queueListTranslationBackendWrite(entry.listId, entry.field, {
                     sourceTextHash: commonUtils.computeStringHash(entry.sourceText),

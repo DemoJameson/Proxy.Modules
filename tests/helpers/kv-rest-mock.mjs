@@ -21,6 +21,18 @@ function hasJsonValue(store, key) {
     return !!stored && stored.__redisJson === true;
 }
 
+function hashValue(value) {
+    return {
+        __redisHash: true,
+        value,
+    };
+}
+
+function getHashValue(store, key) {
+    const stored = store.get(key);
+    return stored && stored.__redisHash === true ? stored.value : null;
+}
+
 function validateCommandArgs(commands) {
     for (const command of commands) {
         for (const arg of command) {
@@ -51,6 +63,11 @@ function parseJsonArg(rawValue) {
 
 function splitJsonPath(path) {
     return String(path).replace(/^\$\./, "").split(".");
+}
+
+function globToRegExp(pattern) {
+    const escaped = String(pattern).replace(/[.+^${}()|[\]\\]/g, "\\$&");
+    return new RegExp(`^${escaped.replace(/\*/g, ".*")}$`);
 }
 
 function applyPathWrite(store, key, path, rawValue) {
@@ -158,6 +175,54 @@ function runKvPipeline(store, commands) {
             } else {
                 results.push({ result: "OK" });
             }
+        } else if (name === "MGET") {
+            store.mgetCommands = [...(store.mgetCommands || []), command];
+            const keys = command.slice(1);
+            results.push({
+                result: keys.map((itemKey) => (typeof store.get(itemKey) === "string" ? store.get(itemKey) : null)),
+            });
+        } else if (name === "MSET") {
+            store.msetCommands = [...(store.msetCommands || []), command];
+            for (let index = 1; index < command.length; index += 2) {
+                store.set(command[index], command[index + 1]);
+            }
+            results.push({ result: "OK" });
+        } else if (name === "HGETALL") {
+            store.hgetallCommands = [...(store.hgetallCommands || []), command];
+            results.push({ result: getHashValue(store, key) || {} });
+        } else if (name === "HMGET") {
+            store.hmgetCommands = [...(store.hmgetCommands || []), command];
+            const hash = getHashValue(store, key) || {};
+            results.push({ result: command.slice(2).map((field) => hash[field] ?? null) });
+        } else if (name === "HSET") {
+            store.hsetCommands = [...(store.hsetCommands || []), command];
+            const hash = { ...(getHashValue(store, key) || {}) };
+            let added = 0;
+            for (let index = 2; index < command.length; index += 2) {
+                const field = command[index];
+                if (!Object.hasOwn(hash, field)) {
+                    added += 1;
+                }
+                hash[field] = command[index + 1];
+            }
+            store.set(key, hashValue(hash));
+            results.push({ result: added });
+        } else if (name === "HDEL") {
+            store.hdelCommands = [...(store.hdelCommands || []), command];
+            const hash = { ...(getHashValue(store, key) || {}) };
+            let deleted = 0;
+            command.slice(2).forEach((field) => {
+                if (Object.hasOwn(hash, field)) {
+                    delete hash[field];
+                    deleted += 1;
+                }
+            });
+            if (Object.keys(hash).length === 0) {
+                store.delete(key);
+            } else {
+                store.set(key, hashValue(hash));
+            }
+            results.push({ result: deleted });
         } else if (name === "JSON.MGET") {
             store.mgetCommands = [...(store.mgetCommands || []), command];
             const keys = command.slice(1, -1);
@@ -187,9 +252,17 @@ function runKvPipeline(store, commands) {
             results.push({ result: store.has(key) ? (Number.isFinite(ttl) ? ttl : -1) : -2 });
         } else if (name === "DEL") {
             if (store.ttlByKey) {
-                store.ttlByKey.delete(key);
+                command.slice(1).forEach((itemKey) => {
+                    store.ttlByKey.delete(itemKey);
+                });
             }
-            results.push({ result: store.delete(key) ? 1 : 0 });
+            let deleted = 0;
+            command.slice(1).forEach((itemKey) => {
+                if (store.delete(itemKey)) {
+                    deleted += 1;
+                }
+            });
+            results.push({ result: deleted });
         } else if (name === "SCAN") {
             store.scanCommands = [...(store.scanCommands || []), command];
             const cursor = Number.parseInt(command[1] || "0", 10) || 0;
@@ -197,8 +270,8 @@ function runKvPipeline(store, commands) {
             const countIndex = command.indexOf("COUNT");
             const match = matchIndex >= 0 ? command[matchIndex + 1] || "" : "";
             const count = countIndex >= 0 ? Number.parseInt(command[countIndex + 1] || "10", 10) || 10 : 10;
-            const prefix = match.endsWith("*") ? match.slice(0, -1) : match;
-            const keys = Array.from(store.keys()).filter((itemKey) => itemKey.startsWith(prefix));
+            const pattern = globToRegExp(match);
+            const keys = Array.from(store.keys()).filter((itemKey) => pattern.test(itemKey));
             const nextCursor = cursor + count >= keys.length ? "0" : String(cursor + count);
             results.push({ result: [nextCursor, keys.slice(cursor, cursor + count)] });
         } else {
@@ -225,4 +298,4 @@ function createPipelineResponse(store, init) {
     };
 }
 
-export { createPipelineResponse, getJsonValue, jsonValue, runKvPipeline, validateCommandArgs };
+export { createPipelineResponse, getHashValue, getJsonValue, hashValue, jsonValue, runKvPipeline, validateCommandArgs };

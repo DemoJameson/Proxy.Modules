@@ -26,7 +26,7 @@
 - `trakt_live_runner.test.mjs`
   测 live runner 的 OAuth 刷新：用 refresh token 换新 access token、缺省 refresh token 时保留旧值、永久失败回退设备授权、429/5xx/网络错误只跳过本次登录态用例。
 - `trakt_backend_*.test.mjs`
-  直接测 Vercel 后端 `api/trakt/` 接口的行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）、`trakt_backend_api_keys.test.mjs`（API key 下发接口的环境变量与 UA 门槛）。
+  直接测 Vercel 后端 `api/trakt/` 接口的行为（mock Upstash REST），如 `trakt_backend_douban_cache.test.mjs`（豆瓣缓存）、`trakt_backend_people_names.test.mjs`（演职人员 TMDB 姓名远端缓存）、`trakt_backend_list_translations.test.mjs`（片单翻译远端缓存）、`trakt_backend_admin_cache.test.mjs`（管理后台缓存）、`trakt_backend_api_keys.test.mjs`（API key 下发接口的环境变量与 UA 门槛）。V2 schema 的 RDB 转换由 `trakt_cache_v2_migration.test.mjs` 覆盖。
 
 新增脚本级测试时，优先按“行为域”归类，不按 URL 数量平均拆分。
 

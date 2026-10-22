@@ -6,8 +6,16 @@ const UNIFIED_CACHE_KEY = "dj_trakt_unified_cache";
 const UNIFIED_CACHE_REV_KEY = "dj_trakt_unified_cache_rev";
 // 篡改应用授权是鉴权关键数据，单独一个持久化 key：unified cache 版本升级清空缓存时不受影响
 const TAMPER_AUTHORIZATION_KEY = "dj_trakt_tamper_authorization";
-const UNIFIED_CACHE_SCHEMA_VERSION = 16;
+const UNIFIED_CACHE_SCHEMA_VERSION = 17;
 const DOUBAN_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const COMMENT_TRANSLATION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const LIST_TRANSLATION_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const TRANSLATION_PARTIAL_FOUND_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const TRANSLATION_NOT_FOUND_TTL_MS = 1 * 24 * 60 * 60 * 1000;
+const FOUND_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+const PERSON_NAME_TMDB_TTL_MS = 90 * 24 * 60 * 60 * 1000;
+const PERSON_NAME_GOOGLE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+const PERSON_NAME_TMDB_MISSING_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const UNIFIED_CACHE_MAX_BYTES = 1024 * 1024;
 const GOOGLE_PEOPLE_CACHE_MAX_BYTES = 256 * 1024;
 // 篡改应用授权记录的条数上限：归一化与功能侧写入共用，避免损坏数据把缓存撑爆
@@ -32,6 +40,10 @@ const PRUNE_PRIORITY = {
     "google.people": 9,
 };
 
+const PERSON_NAME_STATUS = translationCache.CACHE_STATUS;
+
+const PERSON_NAME_SOURCES = ["tmdb", "google"];
+
 function isLocalCacheDisabled() {
     const mode = globalThis.$ctx?.argument?.debugMode;
     return mode === "disableLocal" || mode === "disableAll";
@@ -43,8 +55,16 @@ function buildLocaleCacheKey(base) {
     return normalizedBase ? `${normalizedBase}:${chineseLocale.resolveChineseLocale()}` : "";
 }
 
-function buildFieldTranslationCacheKey(id) {
-    return commonUtils.isNullish(id) ? "" : buildLocaleCacheKey(String(id));
+function buildFieldTranslationCacheKey(id, namespace) {
+    if (commonUtils.isNullish(id)) {
+        return "";
+    }
+    const normalizedId = String(id).trim();
+    const normalizedNamespace = String(namespace ?? "").trim();
+    if (!normalizedId || !normalizedNamespace) {
+        return "";
+    }
+    return buildLocaleCacheKey(`${normalizedNamespace}:${normalizedId}`);
 }
 
 function estimatePrunableEntryBytes(env, key, entry) {
@@ -69,33 +89,76 @@ function normalizeHashedTranslationEntry(entry) {
     return sourceTextHash && translatedText ? { sourceTextHash, translatedText } : null;
 }
 
-function normalizePersonTranslationEntry(entry) {
+function normalizeExpiringFieldTranslationEntry(entry, ttlMs) {
     const source = commonUtils.ensureObject(entry);
     const normalized = {};
-    const name = commonUtils.isPlainObject(source.name) ? source.name : null;
-    const normalizedName = normalizeHashedTranslationEntry(name);
-    if (normalizedName && (name.source === "google" || name.source === "tmdb")) {
-        normalized.name = {
-            ...normalizedName,
-            source: name.source,
-        };
-        if (commonUtils.isNonNullish(name.expiresAt) && Number.isFinite(Number(name.expiresAt))) {
-            normalized.name.expiresAt = Number(name.expiresAt);
+    Object.entries(source).forEach(([field, value]) => {
+        if (field === "expiresAt") {
+            return;
+        }
+        const normalizedField = normalizeHashedTranslationEntry(value);
+        if (normalizedField) {
+            normalized[field] = normalizedField;
+        }
+    });
+    if (Object.keys(normalized).length === 0) {
+        return null;
+    }
+    const expiresAt = Number(source.expiresAt);
+    if (Number.isFinite(expiresAt) && expiresAt > 0) {
+        if (expiresAt <= Date.now()) {
+            return null;
+        }
+        normalized.expiresAt = expiresAt;
+    } else {
+        normalized.expiresAt = Date.now() + ttlMs;
+    }
+    return normalized;
+}
+
+function normalizePersonTranslationEntry(entry) {
+    const source = commonUtils.ensureObject(entry);
+    const status =
+        source.status === translationCache.CACHE_STATUS.FOUND
+            ? translationCache.CACHE_STATUS.FOUND
+            : source.status === translationCache.CACHE_STATUS.NOT_FOUND
+              ? translationCache.CACHE_STATUS.NOT_FOUND
+              : null;
+    const expiresAt = Number(source.expiresAt);
+    if (!status || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
+        return null;
+    }
+
+    const normalized = { status, expiresAt };
+    const biography = normalizeHashedTranslationEntry(source.biography);
+    if (status === translationCache.CACHE_STATUS.NOT_FOUND) {
+        if (source.tmdbMissing !== true && !biography) {
+            return null;
+        }
+        if (source.tmdbMissing === true) {
+            normalized.tmdbMissing = true;
+        }
+    } else {
+        const name = String(source.name ?? "").trim();
+        const sourceTextHash = String(source.sourceTextHash ?? "").trim();
+        const nameSource = String(source.source ?? "")
+            .trim()
+            .toLowerCase();
+        if (!name || !sourceTextHash || !PERSON_NAME_SOURCES.includes(nameSource)) {
+            return null;
+        }
+        normalized.name = name;
+        normalized.sourceTextHash = sourceTextHash;
+        normalized.source = nameSource;
+        if (nameSource !== "tmdb" && source.tmdbMissing === true) {
+            normalized.tmdbMissing = true;
         }
     }
 
-    const biography = normalizeHashedTranslationEntry(source.biography);
     if (biography) {
         normalized.biography = biography;
     }
-
-    // TMDB 查询无中文名的负缓存条目，7 天 TTL
-    const notFound = commonUtils.ensureObject(source.notFound);
-    if (commonUtils.isNonNullish(notFound.expiresAt) && Number.isFinite(Number(notFound.expiresAt))) {
-        normalized.notFound = { expiresAt: Number(notFound.expiresAt) };
-    }
-
-    return Object.keys(normalized).length > 0 ? normalized : null;
+    return normalized;
 }
 
 const LOCALE_CACHE_KEY_PATTERN = new RegExp(`:(${chineseLocale.CHINESE_LOCALES.join("|")})$`);
@@ -118,21 +181,12 @@ function normalizeMediaTranslationValue(translation, locale) {
 function normalizeMediaTranslationEntry(entry, cacheKey) {
     const translation = normalizeMediaTranslationValue(entry?.translation, resolveLocaleFromCacheKey(cacheKey));
     const status = translationCache.normalizeTranslationStatus(entry?.status);
-    if (status === translationCache.CACHE_STATUS.NOT_FOUND) {
-        // 负缓存条目依赖未过期的 expiresAt，过期或缺失（旧版本数据）时直接丢弃
-        const expiresAt = Number(entry?.expiresAt);
-        if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-            return null;
-        }
-        const normalized = { status, expiresAt };
-        if (translation) {
-            normalized.translation = translation;
-        }
-        if (entry?.complete === true) {
-            normalized.complete = true;
-        }
-        return normalized;
+    const now = Date.now();
+    const expiresAt = Number(entry?.expiresAt);
+    if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
+        return null;
     }
+
     const normalized = { status };
     if (translation) {
         normalized.translation = translation;
@@ -140,6 +194,14 @@ function normalizeMediaTranslationEntry(entry, cacheKey) {
     if (entry?.complete === true) {
         normalized.complete = true;
     }
+    normalized.expiresAt =
+        Number.isFinite(expiresAt) && expiresAt > 0
+            ? expiresAt
+            : status === translationCache.CACHE_STATUS.NOT_FOUND
+              ? now + TRANSLATION_NOT_FOUND_TTL_MS
+              : status === translationCache.CACHE_STATUS.PARTIAL_FOUND
+                ? now + TRANSLATION_PARTIAL_FOUND_TTL_MS
+                : now + FOUND_TTL_MS;
     return normalized;
 }
 
@@ -151,12 +213,16 @@ function normalizeImageField(entry) {
               ? translationCache.CACHE_STATUS.PARTIAL_FOUND
               : translationCache.CACHE_STATUS.NOT_FOUND;
     const url = String(entry?.url ?? "").trim();
-    const expiresAt = entry?.expiresAt === null ? null : Number(entry?.expiresAt);
+    const expiresAt = Number(entry?.expiresAt);
     if (status === translationCache.CACHE_STATUS.FOUND && url) {
+        const now = Date.now();
+        if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now) {
+            return null;
+        }
         return {
             status,
             url,
-            expiresAt: null,
+            expiresAt: Number.isFinite(expiresAt) && expiresAt > 0 ? expiresAt : now + FOUND_TTL_MS,
         };
     }
     if (status === translationCache.CACHE_STATUS.PARTIAL_FOUND && url && Number.isFinite(expiresAt) && expiresAt > Date.now()) {
@@ -323,19 +389,23 @@ function normalizeEntryMap(cache, normalizeEntry) {
     );
 }
 
-function getHashedFieldTranslation(cache, id, field, sourceText) {
-    const cacheKey = buildFieldTranslationCacheKey(id);
+function getHashedFieldTranslation(cache, id, field, sourceText, namespace) {
+    const cacheKey = buildFieldTranslationCacheKey(id, namespace);
     if (!cacheKey) {
         return "";
     }
 
     const entry = cache?.[cacheKey];
+    const expiresAt = Number(entry?.expiresAt);
+    if (Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= Date.now()) {
+        return "";
+    }
     const fieldEntry = commonUtils.isPlainObject(entry?.[field]) ? entry[field] : null;
     return fieldEntry && String(fieldEntry.sourceTextHash ?? "") === commonUtils.computeStringHash(sourceText) ? String(fieldEntry.translatedText ?? "").trim() : "";
 }
 
-function setHashedFieldTranslation(cache, id, field, sourceText, translatedText) {
-    const cacheKey = buildFieldTranslationCacheKey(id);
+function setHashedFieldTranslation(cache, id, field, sourceText, translatedText, namespace, expiresAt) {
+    const cacheKey = buildFieldTranslationCacheKey(id, namespace);
     const normalizedTranslation = String(translatedText ?? "").trim();
     if (!cacheKey || !normalizedTranslation) {
         return false;
@@ -347,13 +417,23 @@ function setHashedFieldTranslation(cache, id, field, sourceText, translatedText)
         translatedText: normalizedTranslation,
     };
     const currentFieldEntry = commonUtils.isPlainObject(currentEntry[field]) ? currentEntry[field] : null;
-    if (currentFieldEntry && currentFieldEntry.sourceTextHash === nextFieldEntry.sourceTextHash && currentFieldEntry.translatedText === nextFieldEntry.translatedText) {
+    const normalizedExpiresAt = Number(expiresAt);
+    const currentExpiresAt = Number(currentEntry.expiresAt);
+    const nextExpiresAt =
+        Number.isFinite(normalizedExpiresAt) && normalizedExpiresAt > 0 ? normalizedExpiresAt : Number.isFinite(currentExpiresAt) && currentExpiresAt > 0 ? currentExpiresAt : null;
+    if (
+        currentFieldEntry &&
+        currentFieldEntry.sourceTextHash === nextFieldEntry.sourceTextHash &&
+        currentFieldEntry.translatedText === nextFieldEntry.translatedText &&
+        currentExpiresAt === nextExpiresAt
+    ) {
         return false;
     }
 
     const nextEntry = {
         ...currentEntry,
         [field]: nextFieldEntry,
+        expiresAt: nextExpiresAt,
     };
     cache[cacheKey] = nextEntry;
     return true;
@@ -391,9 +471,9 @@ function createEmptyUnifiedCache(schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, m
     };
 }
 
-// 覆盖条目按地区存放：cn/tw/hk 各有一份 translation；旧文档的根字段 translation 等价 cn，一并保留
+// 覆盖条目按地区存放：cn/tw/hk 各有一份 translation
 function hasTranslationOverrideContent(entry) {
-    return ["cn", "tw", "hk"].some((locale) => commonUtils.isPlainObject(entry?.[locale]?.translation)) || commonUtils.isPlainObject(entry?.translation);
+    return ["cn", "tw", "hk"].some((locale) => commonUtils.isPlainObject(entry?.[locale]?.translation));
 }
 
 function normalizeTranslationOverrides(cache) {
@@ -465,10 +545,6 @@ function normalizeTamperAppAuthorization(value) {
     };
 }
 
-function isTamperAuthorizationEmpty(store) {
-    return store.records.length === 0 && store.tokens.length === 0 && store.pending.length === 0;
-}
-
 // 篡改应用授权（流程状态、签发的 token、待回写标记）与 authTokens 一样属于鉴权关键数据：
 // 放在独立持久化 key 里，既不受 unified cache 版本升级清空影响，也不受 debugMode 本地缓存开关影响
 function loadTamperAuthorization(env) {
@@ -477,31 +553,6 @@ function loadTamperAuthorization(env) {
 
 function saveTamperAuthorization(env, store) {
     env.setjson(normalizeTamperAppAuthorization(store), TAMPER_AUTHORIZATION_KEY);
-}
-
-// 旧版本把篡改授权数据放在 unified cache 的 persistent.tamperAppAuthorization 里：
-// 版本升级清空 unified cache 之前先搬到独立 key，并按各自的去重键与已有数据合并（新数据优先）
-function adoptLegacyTamperAuthorization(env, rawCache) {
-    const legacy = normalizeTamperAppAuthorization(rawCache?.persistent?.tamperAppAuthorization);
-    if (isTamperAuthorizationEmpty(legacy)) {
-        return false;
-    }
-
-    const current = normalizeTamperAppAuthorization(env.getjson(TAMPER_AUTHORIZATION_KEY, null));
-    const mergeEntries = (currentEntries, legacyEntries, buildKey) => {
-        const seen = new Set(currentEntries.map(buildKey));
-        return currentEntries.concat(legacyEntries.filter((entry) => !seen.has(buildKey(entry))));
-    };
-    const next = normalizeTamperAppAuthorization({
-        records: mergeEntries(current.records, legacy.records, (record) => String(record?.id ?? "").trim()),
-        tokens: mergeEntries(current.tokens, legacy.tokens, (record) => String(record?.accessToken ?? "").trim()),
-        pending: mergeEntries(current.pending, legacy.pending, (record) => `${String(record?.kind ?? "").trim()}:${String(record?.id ?? "").trim()}`),
-    });
-    if (JSON.stringify(next) === JSON.stringify(current)) {
-        return false;
-    }
-    env.setjson(next, TAMPER_AUTHORIZATION_KEY);
-    return true;
 }
 
 function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VERSION, maxBytes = UNIFIED_CACHE_MAX_BYTES) {
@@ -517,28 +568,10 @@ function normalizeUnifiedCache(rawCache, schemaVersion = UNIFIED_CACHE_SCHEMA_VE
     nextCache.trakt.image = normalizeEntryMap(traktCache.image, normalizeImageEntry);
 
     const googleCache = commonUtils.ensureObject(cache.google);
-    nextCache.google.comments = normalizeEntryMap(googleCache.comments, (entry) => {
-        const normalized = {};
-        Object.entries(commonUtils.ensureObject(entry)).forEach(([field, value]) => {
-            const normalizedField = normalizeHashedTranslationEntry(value);
-            if (normalizedField) {
-                normalized[field] = normalizedField;
-            }
-        });
-        return Object.keys(normalized).length > 0 ? normalized : null;
-    });
+    nextCache.google.comments = normalizeEntryMap(googleCache.comments, (entry) => normalizeExpiringFieldTranslationEntry(entry, COMMENT_TRANSLATION_TTL_MS));
     nextCache.google.sentiments = normalizeEntryMap(googleCache.sentiments, normalizeSentimentTranslationEntry);
     nextCache.google.people = normalizeEntryMap(googleCache.people, normalizePersonTranslationEntry);
-    nextCache.google.list = normalizeEntryMap(googleCache.list, (entry) => {
-        const normalized = {};
-        Object.entries(commonUtils.ensureObject(entry)).forEach(([field, value]) => {
-            const normalizedField = normalizeHashedTranslationEntry(value);
-            if (normalizedField) {
-                normalized[field] = normalizedField;
-            }
-        });
-        return Object.keys(normalized).length > 0 ? normalized : null;
-    });
+    nextCache.google.list = normalizeEntryMap(googleCache.list, (entry) => normalizeExpiringFieldTranslationEntry(entry, LIST_TRANSLATION_TTL_MS));
 
     nextCache.douban = normalizeDoubanCache(cache.douban);
 
@@ -653,9 +686,6 @@ function loadUnifiedCacheSnapshot(
             snapshotConsistent: false,
         };
     }
-
-    // 旧字段可能在版本号已升级后才留下（例如中间构建先升了版本）；只要还存在就补迁移一次
-    adoptLegacyTamperAuthorization(env, rawCache);
 
     if (Number(rawCache.version) !== unifiedCacheSchemaVersion) {
         const resetCache = createEmptyUnifiedCache(unifiedCacheSchemaVersion, unifiedCacheMaxBytes);
@@ -1349,15 +1379,18 @@ function saveAuthToken(env, apiKey, authorization) {
 export {
     buildFieldTranslationCacheKey,
     buildLocaleCacheKey,
+    COMMENT_TRANSLATION_TTL_MS,
     clearCurrentSeason,
     createEmptyUnifiedCache,
     DOUBAN_CACHE_TTL_MS,
+    FOUND_TTL_MS,
     GOOGLE_PEOPLE_CACHE_MAX_BYTES,
     getAuthToken,
     getCurrentSeason,
     getHashedFieldTranslation,
     getTamperTokenByAccessToken,
     isLocalCacheDisabled,
+    LIST_TRANSLATION_TTL_MS,
     loadCache,
     loadCommentTranslationCache,
     loadDoubanCache,
@@ -1374,6 +1407,10 @@ export {
     normalizeRevlessEntryMap,
     normalizeTranslationOverrides,
     normalizeUnifiedCache,
+    PERSON_NAME_GOOGLE_TTL_MS,
+    PERSON_NAME_STATUS,
+    PERSON_NAME_TMDB_MISSING_TTL_MS,
+    PERSON_NAME_TMDB_TTL_MS,
     pruneUnifiedCacheToLimit,
     saveAuthToken,
     saveCache,
@@ -1394,6 +1431,7 @@ export {
     TAMPER_AUTHORIZATION_KEY,
     TAMPER_AUTHORIZATION_RECORD_LIMIT,
     TAMPER_AUTHORIZATION_TOKEN_LIMIT,
+    TRANSLATION_PARTIAL_FOUND_TTL_MS,
     UNIFIED_CACHE_KEY,
     UNIFIED_CACHE_MAX_BYTES,
     UNIFIED_CACHE_REV_KEY,

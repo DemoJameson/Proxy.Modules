@@ -294,11 +294,14 @@ async function handlePeopleDetail() {
 
     if (cachedName) {
         data.name = buildPersonNameDisplay(originalName, cachedName);
-        nextCacheEntry.name = {
-            sourceTextHash: commonUtils.computeStringHash(originalName),
-            translatedText: cachedName,
-            source: cachedNameEntry?.source,
-        };
+        nextCacheEntry.status = cacheUtils.PERSON_NAME_STATUS.FOUND;
+        nextCacheEntry.name = cachedName;
+        nextCacheEntry.sourceTextHash = commonUtils.computeStringHash(originalName);
+        nextCacheEntry.source = cachedNameEntry?.source;
+        nextCacheEntry.expiresAt = cacheEntry?.expiresAt;
+        if (cacheEntry?.tmdbMissing === true) {
+            nextCacheEntry.tmdbMissing = true;
+        }
     }
 
     if (cachedBiography) {
@@ -318,11 +321,11 @@ async function handlePeopleDetail() {
             const translatedName = String((await namePromise)?.name ?? "").trim();
             if (translatedName && commonUtils.containsChineseCharacter(translatedName)) {
                 data.name = buildPersonNameDisplay(originalName, translatedName);
-                nextCacheEntry.name = {
-                    sourceTextHash: commonUtils.computeStringHash(originalName),
-                    translatedText: translatedName,
-                    source: PEOPLE_NAME_SOURCE.TMDB,
-                };
+                nextCacheEntry.status = cacheUtils.PERSON_NAME_STATUS.FOUND;
+                nextCacheEntry.name = translatedName;
+                nextCacheEntry.sourceTextHash = commonUtils.computeStringHash(originalName);
+                nextCacheEntry.source = PEOPLE_NAME_SOURCE.TMDB;
+                delete nextCacheEntry.tmdbMissing;
                 biographyContextName = translatedName;
                 hasTranslatedName = true;
             } else {
@@ -364,11 +367,13 @@ async function handlePeopleDetail() {
                     const translatedName = String(googleTranslations[index] ?? "").trim();
                     if (!cachedName && !hasTranslatedName && translatedName && commonUtils.containsChineseCharacter(translatedName)) {
                         data.name = buildPersonNameDisplay(originalName, translatedName);
-                        nextCacheEntry.name = {
-                            sourceTextHash: commonUtils.computeStringHash(originalName),
-                            translatedText: translatedName,
-                            source: PEOPLE_NAME_SOURCE.GOOGLE,
-                        };
+                        nextCacheEntry.status = cacheUtils.PERSON_NAME_STATUS.FOUND;
+                        nextCacheEntry.name = translatedName;
+                        nextCacheEntry.sourceTextHash = commonUtils.computeStringHash(originalName);
+                        nextCacheEntry.source = PEOPLE_NAME_SOURCE.GOOGLE;
+                        if (getValidPersonNameNotFoundEntry(getPeopleTranslationCacheEntry(cache, personId))) {
+                            nextCacheEntry.tmdbMissing = true;
+                        }
                     }
                     return;
                 }

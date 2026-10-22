@@ -6,15 +6,45 @@ const PEOPLE_NAME_SOURCE = {
     TMDB: "tmdb",
     GOOGLE: "google",
 };
-// TMDB 命中中文名 90 天、Google 姓名 30 天、无中文名负缓存 7 天（本地与远端一致）
-const TMDB_PERSON_NAME_TTL_MS = 90 * 24 * 60 * 60 * 1000;
-const GOOGLE_PERSON_NAME_TTL_MS = 30 * 24 * 60 * 60 * 1000;
-const TMDB_PERSON_NAME_NOT_FOUND_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const TMDB_PERSON_NAME_TTL_MS = cacheUtils.PERSON_NAME_TMDB_TTL_MS;
+const GOOGLE_PERSON_NAME_TTL_MS = cacheUtils.PERSON_NAME_GOOGLE_TTL_MS;
+const TMDB_PERSON_NAME_NOT_FOUND_TTL_MS = cacheUtils.PERSON_NAME_TMDB_MISSING_TTL_MS;
 const PEOPLE_LIST_ORIGINAL_NAME_KEY = "__traktOriginalName";
 
 const peopleNameBackendWriteQueue = {};
-// 后端读取时回带的 cn 数据：写回时一并折叠根字段
+// 后端读取时回带的 cn 数据：写回时一并合并到当前 locale 条目
 const peopleNameCnHints = {};
+
+function isSupportedPersonNameSource(source) {
+    return source === PEOPLE_NAME_SOURCE.TMDB || source === PEOPLE_NAME_SOURCE.GOOGLE;
+}
+
+function buildPersonNameCacheEntry(payload) {
+    const name = String(payload?.name ?? "").trim();
+    const sourceTextHash = String(payload?.sourceTextHash ?? "").trim();
+    const source = String(payload?.source ?? "").trim();
+    if (!name || !sourceTextHash || !isSupportedPersonNameSource(source)) {
+        return null;
+    }
+    return {
+        name,
+        sourceTextHash,
+        source,
+        ...(payload?.tmdbMissing === true ? { tmdbMissing: true } : {}),
+    };
+}
+
+function getDefaultExpiresAt(source, tmdbMissing, now = Date.now()) {
+    if (tmdbMissing) {
+        return now + TMDB_PERSON_NAME_NOT_FOUND_TTL_MS;
+    }
+    return now + (source === PEOPLE_NAME_SOURCE.GOOGLE ? GOOGLE_PERSON_NAME_TTL_MS : TMDB_PERSON_NAME_TTL_MS);
+}
+
+function isEntryFresh(entry, now = Date.now()) {
+    const expiresAt = Number(entry?.expiresAt);
+    return Number.isFinite(expiresAt) && expiresAt > now;
+}
 
 function queuePeopleNameBackendWrite(personId, nameEntry) {
     const normalizedPersonId = String(personId ?? "").trim();
@@ -22,19 +52,46 @@ function queuePeopleNameBackendWrite(personId, nameEntry) {
     if (!normalizedPersonId || !entry) {
         return;
     }
-    // tmdb 优先：已排队的 tmdb 条目不被 google 覆盖；正向条目覆盖同 id 的负缓存条目
-    if (entry.source === PEOPLE_NAME_SOURCE.GOOGLE && peopleNameBackendWriteQueue[normalizedPersonId]?.name?.source === PEOPLE_NAME_SOURCE.TMDB) {
+    const current = peopleNameBackendWriteQueue[normalizedPersonId];
+    // tmdb 优先：已排队的 tmdb 条目不被 google 覆盖；tmdb 缺失标记继续保留
+    if (entry.source === PEOPLE_NAME_SOURCE.GOOGLE && current?.source === PEOPLE_NAME_SOURCE.TMDB) {
         return;
     }
-    peopleNameBackendWriteQueue[normalizedPersonId] = { name: entry };
+    const tmdbMissing = entry.source !== PEOPLE_NAME_SOURCE.TMDB && (entry.tmdbMissing === true || current?.tmdbMissing === true);
+    peopleNameBackendWriteQueue[normalizedPersonId] = {
+        status: cacheUtils.PERSON_NAME_STATUS.FOUND,
+        name: entry.name,
+        sourceTextHash: entry.sourceTextHash,
+        source: entry.source,
+        expiresAt: getDefaultExpiresAt(entry.source, tmdbMissing),
+        ...(tmdbMissing ? { tmdbMissing: true } : {}),
+    };
 }
 
 function queuePeopleNameNotFoundBackendWrite(personId) {
     const normalizedPersonId = String(personId ?? "").trim();
-    if (!normalizedPersonId || commonUtils.isPlainObject(peopleNameBackendWriteQueue[normalizedPersonId]?.name)) {
+    if (!normalizedPersonId) {
         return;
     }
-    peopleNameBackendWriteQueue[normalizedPersonId] = { notFound: true };
+    const current = peopleNameBackendWriteQueue[normalizedPersonId];
+    if (current?.source === PEOPLE_NAME_SOURCE.TMDB) {
+        return;
+    }
+    const hasName = current?.status === cacheUtils.PERSON_NAME_STATUS.FOUND && !!current?.name;
+    const currentExpiresAt = Number(current?.expiresAt);
+    const missingExpiresAt = Date.now() + TMDB_PERSON_NAME_NOT_FOUND_TTL_MS;
+    peopleNameBackendWriteQueue[normalizedPersonId] = {
+        status: hasName ? cacheUtils.PERSON_NAME_STATUS.FOUND : cacheUtils.PERSON_NAME_STATUS.NOT_FOUND,
+        ...(hasName
+            ? {
+                  name: current.name,
+                  sourceTextHash: current.sourceTextHash,
+                  source: current.source,
+              }
+            : {}),
+        expiresAt: Number.isFinite(currentExpiresAt) && currentExpiresAt > Date.now() ? Math.min(currentExpiresAt, missingExpiresAt) : missingExpiresAt,
+        tmdbMissing: true,
+    };
 }
 
 function flushPeopleNameBackendWrites() {
@@ -99,9 +156,9 @@ async function hydratePeopleNamesFromBackend(cache, personIds) {
     }
 }
 
-// 本地人物名缓存按地区分键：统一 `<personId>:<locale>`，cn 也显式带后缀，切换地区不会命中旧字形
+// 本地人物名缓存与 Redis V2 对齐：person:name:<personId>:<locale>
 function buildPeopleTranslationCacheKey(personId) {
-    return commonUtils.isNullish(personId) ? "" : cacheUtils.buildLocaleCacheKey(String(personId));
+    return commonUtils.isNullish(personId) ? "" : cacheUtils.buildLocaleCacheKey(`person:name:${String(personId)}`);
 }
 
 function getPeopleTranslationCacheEntryByKey(cache, cacheKey) {
@@ -113,59 +170,21 @@ function getPeopleTranslationCacheEntry(cache, personId) {
     if (!cache || commonUtils.isNullish(personId)) {
         return null;
     }
-
     return getPeopleTranslationCacheEntryByKey(cache, buildPeopleTranslationCacheKey(personId));
 }
 
-function isSupportedPersonNameSource(source) {
-    return source === PEOPLE_NAME_SOURCE.TMDB || source === PEOPLE_NAME_SOURCE.GOOGLE;
-}
-
-function buildPersonNameCacheEntry(payload) {
-    const sourceTextHash = String(payload?.sourceTextHash ?? "").trim();
-    const translatedText = String(payload?.translatedText ?? "").trim();
-    const source = String(payload?.source ?? "").trim();
-    if (!sourceTextHash || !translatedText || !isSupportedPersonNameSource(source)) {
-        return null;
-    }
-
-    return {
-        sourceTextHash,
-        translatedText,
-        source,
-    };
-}
-
 function getValidPersonNameCacheEntry(entry) {
-    const nameEntry = buildPersonNameCacheEntry(entry?.name);
-    if (!nameEntry) {
+    if (entry?.status !== cacheUtils.PERSON_NAME_STATUS.FOUND || !isEntryFresh(entry)) {
         return null;
     }
-
-    // tmdb 姓名 90 天 TTL、google 姓名 30 天 TTL；缺失或过期的 expiresAt 视为失效
-    const expiresAt = Number(commonUtils.ensureObject(entry?.name).expiresAt);
-    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) {
-        return null;
-    }
-
-    return nameEntry;
+    return buildPersonNameCacheEntry(entry);
 }
 
 function getValidPersonNameNotFoundEntry(entry) {
-    const notFound = commonUtils.ensureObject(entry?.notFound);
-    const expiresAt = Number(notFound.expiresAt);
-    return Number.isFinite(expiresAt) && expiresAt > Date.now() ? notFound : null;
-}
-
-function applyPersonNameNotFoundCache(cache, personId) {
-    const currentEntry = getPeopleTranslationCacheEntry(cache, personId);
-    if (getValidPersonNameCacheEntry(currentEntry)?.source === PEOPLE_NAME_SOURCE.TMDB) {
-        return false;
-    }
-
-    const changed = setPeopleTranslationCacheEntry(cache, personId, { notFound: true });
-    queuePeopleNameNotFoundBackendWrite(personId);
-    return changed;
+    const hasTmdbMissingStatus =
+        entry?.status === cacheUtils.PERSON_NAME_STATUS.NOT_FOUND ||
+        (entry?.status === cacheUtils.PERSON_NAME_STATUS.FOUND && entry?.source !== PEOPLE_NAME_SOURCE.TMDB && entry?.tmdbMissing === true);
+    return hasTmdbMissingStatus && entry?.tmdbMissing === true && isEntryFresh(entry) ? entry : null;
 }
 
 function shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry) {
@@ -181,12 +200,26 @@ function shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry) {
     if (currentNameEntry.source === PEOPLE_NAME_SOURCE.TMDB && nextNameEntry.source === PEOPLE_NAME_SOURCE.GOOGLE) {
         return false;
     }
+    return currentNameEntry.sourceTextHash !== nextNameEntry.sourceTextHash || currentNameEntry.name !== nextNameEntry.name || currentNameEntry.source !== nextNameEntry.source;
+}
 
-    return (
-        currentNameEntry.sourceTextHash !== nextNameEntry.sourceTextHash ||
-        currentNameEntry.translatedText !== nextNameEntry.translatedText ||
-        currentNameEntry.source !== nextNameEntry.source
-    );
+function applyPersonNameNotFoundCache(cache, personId) {
+    const currentEntry = getPeopleTranslationCacheEntry(cache, personId);
+    if (getValidPersonNameCacheEntry(currentEntry)?.source === PEOPLE_NAME_SOURCE.TMDB) {
+        return false;
+    }
+
+    const changed = setPeopleTranslationCacheEntry(cache, personId, {
+        status: cacheUtils.PERSON_NAME_STATUS.NOT_FOUND,
+        expiresAt: Date.now() + TMDB_PERSON_NAME_NOT_FOUND_TTL_MS,
+        tmdbMissing: true,
+    });
+    const currentNameEntry = getValidPersonNameCacheEntry(getPeopleTranslationCacheEntry(cache, personId));
+    if (currentNameEntry) {
+        queuePeopleNameBackendWrite(personId, currentNameEntry);
+    }
+    queuePeopleNameNotFoundBackendWrite(personId);
+    return changed;
 }
 
 function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendName = false) {
@@ -200,33 +233,63 @@ function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendNa
     }
     const currentEntry = getPeopleTranslationCacheEntryByKey(cache, key);
     const nextEntry = commonUtils.isPlainObject(currentEntry) ? { ...currentEntry } : {};
+    const currentNameEntry = getValidPersonNameCacheEntry(currentEntry);
+    const incomingStatus =
+        payload.status === cacheUtils.PERSON_NAME_STATUS.FOUND
+            ? cacheUtils.PERSON_NAME_STATUS.FOUND
+            : payload.status === cacheUtils.PERSON_NAME_STATUS.NOT_FOUND
+              ? cacheUtils.PERSON_NAME_STATUS.NOT_FOUND
+              : null;
+    const now = Date.now();
 
-    // TMDB 查询无中文名：写 7 天负缓存；已有有效 tmdb 姓名或未过期负缓存时跳过
-    if (payload.notFound === true) {
-        const hasValidTmdbName = getValidPersonNameCacheEntry(currentEntry)?.source === PEOPLE_NAME_SOURCE.TMDB;
-        if (!hasValidTmdbName && !getValidPersonNameNotFoundEntry(currentEntry)) {
-            nextEntry.notFound = { expiresAt: Date.now() + TMDB_PERSON_NAME_NOT_FOUND_TTL_MS };
-        }
-    }
-
-    if (commonUtils.isPlainObject(payload.name)) {
-        const nextNameEntry = buildPersonNameCacheEntry(payload.name);
-        const currentNameEntry = getValidPersonNameCacheEntry(currentEntry);
-        if (nextNameEntry && shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry)) {
-            const storedNameEntry = { ...nextNameEntry };
-            if (storedNameEntry.source === PEOPLE_NAME_SOURCE.TMDB) {
-                storedNameEntry.expiresAt = Date.now() + TMDB_PERSON_NAME_TTL_MS;
-                if (commonUtils.isPlainObject(nextEntry.notFound)) {
-                    delete nextEntry.notFound;
+    if (incomingStatus === cacheUtils.PERSON_NAME_STATUS.FOUND) {
+        const nextNameEntry = buildPersonNameCacheEntry(payload);
+        const providedExpiresAt = Number(payload.expiresAt);
+        if (nextNameEntry) {
+            const tmdbMissing = nextNameEntry.source !== PEOPLE_NAME_SOURCE.TMDB && (payload.tmdbMissing === true || currentEntry?.tmdbMissing === true);
+            const defaultExpiresAt = getDefaultExpiresAt(nextNameEntry.source, tmdbMissing, now);
+            const nextExpiresAt = Number.isFinite(providedExpiresAt) && providedExpiresAt > now ? Math.min(providedExpiresAt, defaultExpiresAt) : defaultExpiresAt;
+            const shouldUpdate =
+                shouldUpdatePersonNameCache(currentNameEntry, nextNameEntry) || (Number.isFinite(providedExpiresAt) && providedExpiresAt !== Number(currentEntry?.expiresAt));
+            if (shouldUpdate) {
+                nextEntry.status = cacheUtils.PERSON_NAME_STATUS.FOUND;
+                nextEntry.name = nextNameEntry.name;
+                nextEntry.sourceTextHash = nextNameEntry.sourceTextHash;
+                nextEntry.source = nextNameEntry.source;
+                nextEntry.expiresAt = nextExpiresAt;
+                if (tmdbMissing) {
+                    nextEntry.tmdbMissing = true;
+                } else {
+                    delete nextEntry.tmdbMissing;
                 }
-            } else if (storedNameEntry.source === PEOPLE_NAME_SOURCE.GOOGLE) {
-                storedNameEntry.expiresAt = Date.now() + GOOGLE_PERSON_NAME_TTL_MS;
+                if (queueBackendName) {
+                    queuePeopleNameBackendWrite(personId, { ...nextNameEntry, ...(tmdbMissing ? { tmdbMissing: true } : {}) });
+                }
             }
-            nextEntry.name = storedNameEntry;
-            if (queueBackendName) {
-                // 后端写入队列按原始 personId 分键，不能带本地缓存地区后缀
-                queuePeopleNameBackendWrite(personId, storedNameEntry);
-            }
+        }
+    } else if (incomingStatus === cacheUtils.PERSON_NAME_STATUS.NOT_FOUND) {
+        const providedExpiresAt = Number(payload.expiresAt);
+        const defaultExpiresAt = now + TMDB_PERSON_NAME_NOT_FOUND_TTL_MS;
+        const nextExpiresAt = Number.isFinite(providedExpiresAt) && providedExpiresAt > now ? providedExpiresAt : defaultExpiresAt;
+        if (currentNameEntry?.source === PEOPLE_NAME_SOURCE.TMDB) {
+            // TMDB 已经命中中文名时，后到的 TMDB miss 不能覆盖它
+        } else if (currentNameEntry) {
+            nextEntry.status = cacheUtils.PERSON_NAME_STATUS.FOUND;
+            nextEntry.name = currentNameEntry.name;
+            nextEntry.sourceTextHash = currentNameEntry.sourceTextHash;
+            nextEntry.source = currentNameEntry.source;
+            nextEntry.expiresAt = Math.min(nextExpiresAt, Number(currentEntry.expiresAt) || nextExpiresAt);
+            nextEntry.tmdbMissing = true;
+        } else {
+            nextEntry.status = cacheUtils.PERSON_NAME_STATUS.NOT_FOUND;
+            delete nextEntry.name;
+            delete nextEntry.sourceTextHash;
+            delete nextEntry.source;
+            nextEntry.expiresAt = nextExpiresAt;
+            nextEntry.tmdbMissing = true;
+        }
+        if (queueBackendName) {
+            queuePeopleNameNotFoundBackendWrite(personId);
         }
     }
 
@@ -235,6 +298,10 @@ function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendNa
             sourceTextHash: String(payload.biography.sourceTextHash ?? ""),
             translatedText: String(payload.biography.translatedText ?? ""),
         };
+        if (!nextEntry.status) {
+            nextEntry.status = cacheUtils.PERSON_NAME_STATUS.NOT_FOUND;
+            nextEntry.expiresAt = now + GOOGLE_PERSON_NAME_TTL_MS;
+        }
         if (JSON.stringify(commonUtils.ensureObject(currentEntry?.biography)) !== JSON.stringify(nextBiographyEntry)) {
             nextEntry.biography = nextBiographyEntry;
         }
@@ -243,7 +310,6 @@ function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendNa
     if (currentEntry && JSON.stringify(currentEntry) === JSON.stringify(nextEntry)) {
         return false;
     }
-
     cache[key] = nextEntry;
     return true;
 }
@@ -251,11 +317,9 @@ function setPeopleTranslationCacheEntry(cache, personId, payload, queueBackendNa
 function getPersonTranslationCacheKeys(person) {
     const ids = commonUtils.ensureObject(person?.ids);
     const keys = [];
-
     if (commonUtils.isNonNullish(ids.trakt)) {
         keys.push(String(ids.trakt));
     }
-
     return keys;
 }
 
@@ -264,8 +328,7 @@ function getCachedPersonNameTranslation(entry, sourceText) {
     if (!cachedName) {
         return "";
     }
-
-    return String(cachedName.sourceTextHash ?? "") === commonUtils.computeStringHash(sourceText) ? String(cachedName.translatedText) : "";
+    return String(cachedName.sourceTextHash ?? "") === commonUtils.computeStringHash(sourceText) ? String(cachedName.name) : "";
 }
 
 function getCachedTmdbPersonNameTranslation(entry, sourceText) {
@@ -273,21 +336,18 @@ function getCachedTmdbPersonNameTranslation(entry, sourceText) {
     if (cachedName?.source !== PEOPLE_NAME_SOURCE.TMDB) {
         return "";
     }
-
     return getCachedPersonNameTranslation(entry, sourceText);
 }
 
 function buildPersonNameDisplay(sourceText, translatedText) {
     const original = String(sourceText ?? "").trim();
     const translated = String(translatedText ?? "").trim();
-
     if (!original) {
         return translated;
     }
     if (!translated || translated === original) {
         return original;
     }
-
     return `${translated}\n${original}`;
 }
 
@@ -295,7 +355,6 @@ function rememberPeopleListOriginalName(person, originalName) {
     if (!commonUtils.isPlainObject(person) || !originalName) {
         return;
     }
-
     Object.defineProperty(person, PEOPLE_LIST_ORIGINAL_NAME_KEY, {
         value: originalName,
         configurable: true,
@@ -314,7 +373,6 @@ function getCachedPersonBiographyTranslation(entry, sourceText) {
     if (!cachedBiography.translatedText) {
         return "";
     }
-
     return String(cachedBiography.sourceTextHash ?? "") === commonUtils.computeStringHash(sourceText) ? String(cachedBiography.translatedText) : "";
 }
 

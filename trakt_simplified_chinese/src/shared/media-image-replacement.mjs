@@ -70,7 +70,7 @@ const IMAGE_FIELD_SIZE = {
     [IMAGE_FIELD.LOGO]: "w500",
 };
 
-// 后端在 tw/hk 命中旧结构文档时回带的 cn 数据：写回时一并折叠根字段
+// 后端在 tw/hk 目标缺失时回带的 cn 数据：写回时一并合并到中文 provider 桶
 const imageCnHints = {};
 
 function buildImageCnHintKey(backendMode, group, lookupKey) {
@@ -132,7 +132,7 @@ function getTmdbDetailCountry(detail) {
     return normalizeImageCountry(commonUtils.ensureArray(detail?.origin_country)[0]) || normalizeImageCountry(commonUtils.ensureArray(detail?.production_countries)[0]?.iso_3166_1);
 }
 
-// 本地图片缓存键统一为 `<档位>:<group>:<lookupKey>`：中文三档直接用 cn/tw/hk，原图档与地区无关
+// 本地图片缓存键与后端 V2 对齐：image:<mode>:<group>:<lookupKey>:<locale>
 function buildImageCacheKey(mediaType, ref) {
     const mode = ref?.imageMode ?? getPosterImageMode();
     if (!isChinesePosterMode(mode) && mode !== POSTER_IMAGE_MODE.ORIGINAL) {
@@ -143,12 +143,12 @@ function buildImageCacheKey(mediaType, ref) {
     if (!group || !lookupKey) {
         return "";
     }
-    return `${mode}:${group}:${lookupKey}`;
+    return `image:${getImageBackendMode(mode)}:${group}:${lookupKey}:${getImageBackendLocale(mode)}`;
 }
 
 function getImageCacheEntry(cache, mediaType, ref) {
     const cacheKey = buildImageCacheKey(mediaType, ref);
-    return cacheKey ? cache[cacheKey] : null;
+    return cacheKey && cache[cacheKey] ? normalizeImageEntry(cache[cacheKey]) : null;
 }
 
 function normalizeImageFieldEntry(entry) {
@@ -161,14 +161,29 @@ function normalizeImageFieldEntry(entry) {
               : translationCache.CACHE_STATUS.NOT_FOUND;
     const expiresAt =
         status === translationCache.CACHE_STATUS.FOUND
-            ? null
+            ? Number.isFinite(Number(entry?.expiresAt)) && Number(entry.expiresAt) > 0
+                ? Number(entry.expiresAt)
+                : Date.now() + cacheUtils.FOUND_TTL_MS
             : Number.isFinite(Number(entry?.expiresAt))
               ? Number(entry.expiresAt)
               : Date.now() + (status === translationCache.CACHE_STATUS.PARTIAL_FOUND ? IMAGE_PARTIAL_FOUND_TTL_MS : IMAGE_NOT_FOUND_TTL_MS);
-    if (status !== translationCache.CACHE_STATUS.FOUND && expiresAt <= Date.now()) {
+    if (expiresAt <= Date.now()) {
         return null;
     }
     return status === translationCache.CACHE_STATUS.FOUND || status === translationCache.CACHE_STATUS.PARTIAL_FOUND ? { status, url, expiresAt } : { status, expiresAt };
+}
+
+function normalizeImageEntry(entry) {
+    const normalized = {};
+    [IMAGE_FIELD.POSTER, IMAGE_FIELD.LOGO].forEach((field) => {
+        if (commonUtils.isPlainObject(entry?.[field])) {
+            const normalizedField = normalizeImageFieldEntry(entry[field]);
+            if (normalizedField) {
+                normalized[field] = normalizedField;
+            }
+        }
+    });
+    return Object.keys(normalized).length > 0 ? normalized : null;
 }
 
 function storeImageCacheEntry(cache, mediaType, ref, entry) {
@@ -295,7 +310,7 @@ function buildImageFieldEntry(image, preference) {
     return {
         status,
         url,
-        expiresAt: status === translationCache.CACHE_STATUS.FOUND ? null : Date.now() + IMAGE_PARTIAL_FOUND_TTL_MS,
+        expiresAt: status === translationCache.CACHE_STATUS.FOUND ? Date.now() + cacheUtils.FOUND_TTL_MS : Date.now() + IMAGE_PARTIAL_FOUND_TTL_MS,
     };
 }
 

@@ -37,7 +37,7 @@ async function handleGet(req, res, kvConfig) {
         { locale },
     );
 
-    setResponseCacheHeaders(res, getResponseCacheStatus(shows, movies, episodes));
+    setResponseCacheHeaders(res, getResponseCacheStatus({ shows, movies, episodes }, { shows: showIds.length, movies: movieIds.length, episodes: episodeKeys.length }));
     const response = { shows, movies, episodes };
     if (cn && Object.keys(cn.shows).length + Object.keys(cn.movies).length + Object.keys(cn.episodes).length > 0) {
         response.cn = cn;
