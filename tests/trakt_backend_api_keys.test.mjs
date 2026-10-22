@@ -2,12 +2,12 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import test from "node:test";
 
+import { SCRIPT_USER_AGENT } from "./helpers/backend-v2.mjs";
+
 const require = createRequire(import.meta.url);
 const apiKeysHandler = require("../api/trakt/apikeys.js");
 
 const TEST_TMDB_API_KEY = "server-tmdb-api-key";
-const SCRIPT_USER_AGENT = "Trakt/1.0 TraktSimplifiedChinese/2609242020";
-
 function createResponse() {
     return {
         headers: {},
@@ -62,6 +62,7 @@ test("GET 携带脚本 UA 时下发已配置的 TMDb key，并禁用中间层缓
         await promise;
 
         assert.equal(res.statusCode, 200);
+        assert.equal(res.headers.Vary, undefined);
         assert.equal(res.headers["Cache-Control"], "no-store");
         assert.deepEqual(res.jsonBody, { keys: { tmdb: TEST_TMDB_API_KEY } });
     });
@@ -72,6 +73,7 @@ test("未携带脚本 UA 时返回 403，不下发 key", async () => {
         const browser = runRequest("GET", "Mozilla/5.0 (Macintosh)");
         await browser.promise;
         assert.equal(browser.res.statusCode, 403);
+        assert.equal(browser.res.headers["Cache-Control"], "no-store");
         assert.equal(browser.res.jsonBody.keys, undefined);
 
         const empty = runRequest("GET", "");

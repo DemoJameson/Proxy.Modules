@@ -42,5 +42,18 @@
             "main": true
         }
     },
-    "ignoreCommand": "node scripts/vercel-ignore-build.mjs"
+    "ignoreCommand": "node scripts/vercel-ignore-build.mjs",
+    "proxy": {
+        "entrypoint": "middleware.js",
+        "matcher": [
+            "/api/trakt/translations",
+            "/api/trakt/images",
+            "/api/trakt/credits",
+            "/api/trakt/people-names",
+            "/api/trakt/comment-translations",
+            "/api/trakt/list-translations",
+            "/api/trakt/translation-overrides",
+            "/api/trakt/apikeys"
+        ]
+    }
 }

@@ -7,8 +7,9 @@
 // 注意：本接口不是安全边界——脚本本身公开，能读脚本的人也能拼出这个 URL。
 // 这里只用脚本 UA 做一道软门槛，拦掉 curl / 扫描器的顺手采集。
 
+const { authorizeScriptRequest } = require("../../lib/trakt-cache/script-auth");
+
 const TMDB_API_KEY_ENV = "TMDB_API_KEY";
-const SCRIPT_USER_AGENT_PATTERN = /TraktSimplifiedChinese\/\d+/i;
 
 function readEnvTrimmed(name) {
     return String(process.env[name] || "").trim();
@@ -31,9 +32,7 @@ module.exports = async (req, res) => {
         return;
     }
 
-    const userAgent = String(req.headers?.["user-agent"] ?? "");
-    if (!SCRIPT_USER_AGENT_PATTERN.test(userAgent)) {
-        res.status(403).json({ error: "Forbidden" });
+    if (!authorizeScriptRequest(req, res)) {
         return;
     }
 

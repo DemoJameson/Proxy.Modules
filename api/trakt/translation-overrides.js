@@ -1,6 +1,11 @@
+const { authorizeScriptRequest } = require("../../lib/trakt-cache/script-auth");
 const { getKvConfig, readAllTranslationOverridesFromKv, sendKvNotConfigured } = require("./translation-cache");
 
 module.exports = async (req, res) => {
+    if (!authorizeScriptRequest(req, res)) {
+        return;
+    }
+
     try {
         if (req.method !== "GET") {
             res.setHeader("Allow", "GET");

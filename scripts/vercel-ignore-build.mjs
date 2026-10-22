@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 
 const previousSha = String(process.env.VERCEL_GIT_PREVIOUS_SHA || "").trim();
 const base = previousSha || "HEAD^";
-const deployPaths = ["api", "lib", "public", "vercel.json", "package.json", "package-lock.json", "scripts/vercel-ignore-build.mjs"];
+const deployPaths = ["api", "lib", "public", "middleware.js", "vercel.json", "package.json", "package-lock.json", "scripts/vercel-ignore-build.mjs"];
 
 try {
     execFileSync("git", ["diff", "--quiet", base, "HEAD", "--", ...deployPaths], { stdio: "ignore" });
