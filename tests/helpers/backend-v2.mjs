@@ -1,5 +1,7 @@
 import { createPipelineResponse, getHashValue, hashValue } from "./kv-rest-mock.mjs";
 
+const SCRIPT_USER_AGENT = "TraktSimplifiedChinese/2610220000";
+
 function createResponse() {
     return {
         headers: {},
@@ -14,6 +16,9 @@ function createResponse() {
         },
         json(body) {
             this.jsonBody = body;
+            return this;
+        },
+        end() {
             return this;
         },
     };
@@ -114,7 +119,7 @@ async function invoke(handler, req) {
         {
             method: "GET",
             query: {},
-            headers: {},
+            headers: { "user-agent": SCRIPT_USER_AGENT },
             ...req,
         },
         res,
@@ -142,4 +147,4 @@ function seedHash(store, key, fields) {
     store.set(key, hashValue({ ...fields }));
 }
 
-export { createKvFetch, createResponse, getHashValue, getString, invoke, seedHash, seedString, withBackend };
+export { createKvFetch, createResponse, getHashValue, getString, invoke, SCRIPT_USER_AGENT, seedHash, seedString, withBackend };

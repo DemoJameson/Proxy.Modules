@@ -1,3 +1,4 @@
+const { authorizeScriptRequest } = require("../../lib/trakt-cache/script-auth");
 const {
     CACHE_STATUS,
     getKvConfig,
@@ -73,6 +74,10 @@ async function handlePost(req, res, kvConfig) {
 }
 
 module.exports = async (req, res) => {
+    if (!authorizeScriptRequest(req, res)) {
+        return;
+    }
+
     const kvConfig = getKvConfig();
 
     try {

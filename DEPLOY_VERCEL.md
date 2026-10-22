@@ -23,6 +23,7 @@ translation:movies:123:hk
 - 所有 key 去掉 `trakt:` 前缀，连字符改为冒号。
 - CDN 响应缓存：全部请求条目命中且状态均为 `FOUND` 时使用 `FOUND`，缓存 7 天；全部条目命中但含 `PARTIAL_FOUND` 时使用 `PARTIAL_FOUND`，缓存时长与 `NOT_FOUND` 相同；任意条目缺失或为 `NOT_FOUND` 时使用 `NOT_FOUND`。浏览器缓存分别为 300/120 秒，CDN 同时带 `stale-while-revalidate`。
 - `translation-overrides` 的 CDN 基础缓存为 5 分钟，并允许 5 分钟 `stale-while-revalidate`；管理端修改最坏约 10 分钟生效。
+- 所有面向脚本的接口（`translations`、`images`、`credits`、`people-names`、`comment-translations`、`list-translations`、`translation-overrides`、`apikeys`）都由根目录 `middleware.js` 在 CDN 缓存前校验 `User-Agent` 需含 `TraktSimplifiedChinese/<数字版本>`，否则直接返回带 `Cache-Control: no-store` 的 `403`。合法请求不按 UA 分区，继续共享 CDN 缓存，避免每次构建版本更新产生新的缓存变体；接口函数内保留同规则作为兜底。管理后台仍只使用 `ADMIN_TOKEN` Bearer 鉴权，`/api/redirect` 保持公开。
 - 所有缓存响应条目都会返回 `expiresAt`（毫秒时间戳）：翻译和图片 `FOUND` 365 天、翻译 `PARTIAL_FOUND` 30 天、`NOT_FOUND` 1 天；图片 partial 30 天、not found 3 天；评论/片单 90 天；credits 30 天；人名按来源 90/30 天、TMDB 未命中 7 天。后端**不再发送 `EXPIRE`/`PTTL`**，读取时过滤已过期条目，脚本使用同一个 `expiresAt` 设置本地缓存有效期。
 
 ### V2 缓存结构迁移
@@ -206,8 +207,8 @@ POST 请求体为 `{ "comments": { "9001": { "comment": { "sourceTextHash": "...
 - 作用：把脚本需要的第三方 API key（当前只有 TMDb）收敛到部署环境变量，避免硬编码进公开的脚本产物
 - 响应：`{ "keys": { "tmdb": "<TMDb v3 key>" } }`（`keys` 下按服务名平铺，未配置的服务不出现）；未配置 `TMDB_API_KEY` 时返回 `500`
 - 缓存：响应头 `Cache-Control: no-store`，由脚本侧自行做 24 小时本地缓存
-- 门槛：请求需携带脚本 UA（`TraktSimplifiedChinese/<版本号>`），否则返回 `403`
-    - 注意这不是安全边界——脚本本身公开，任何人都能拼出这个 URL 并伪造 UA。
+- 门槛：请求需携带脚本 UA（`TraktSimplifiedChinese/<数字版本>`），否则由 `middleware.js` 在 CDN 缓存前返回带 `Cache-Control: no-store` 的 `403`
+    - 与其他脚本接口共用 `lib/trakt-cache/script-auth.js`。这不是安全边界——脚本本身公开，任何人都能拼出这个 URL 并伪造 UA，它只用于拦掉浏览器、curl 和扫描器的顺手采集。
       它的价值在于轮换 key 不必等用户重新拉取脚本，而不在于阻止恶意获取。
 - 脚本取值顺序：本次运行内单例 → 本地持久化缓存（24 小时 TTL）→ 本接口
     - key 被判失效（TMDb `401`/`403`）时会**立刻拉黑**该 key 并向后端要新 key，不必等 TTL 过期：
