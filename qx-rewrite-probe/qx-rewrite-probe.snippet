@@ -5,16 +5,16 @@
 #!updatedTime=2026-10-24 19:40:00
 
 # [P1] script-response-body 是否支持改响应体（192.168.50.3:18765/status）
-^https?:\/\/192\.168\.50\.3:18765\/status(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js?mode=status
+^https?:\/\/192\.168\.50\.3:18765\/status(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [P2] script-request-header 返回 { url }（跨域改写是否被支持/半套用；目标 httpbin.org 仅在启用的瞬间被访问）
-^https?:\/\/192\.168\.50\.3:18765\/url(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js?mode=url&target=https%3A%2F%2Fhttpbin.org%2Fget%3Fprobe%3Durl
+^https?:\/\/192\.168\.50\.3:18765\/url(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [P3] script-request-header 返回 { path }（官方支持的形态是否生效）
-^https?:\/\/192\.168\.50\.3:18765\/path(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js?mode=path&target=%2Fecho%3Fprobe%3Dpath
+^https?:\/\/192\.168\.50\.3:18765\/path(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [P4] 请求阶段记录 $request 真实内容
-^https?:\/\/192\.168\.50\.3:18765\/echo(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js?mode=url-echo
+^https?:\/\/192\.168\.50\.3:18765\/echo(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [P4] 响应阶段回读请求阶段记录并输出 JSON
-^https?:\/\/192\.168\.50\.3:18765\/echo(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js?mode=sync
+^https?:\/\/192\.168\.50\.3:18765\/echo(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
