@@ -178,7 +178,7 @@ function runScriptLive({
             url,
             headers,
         };
-        // 与离线 harness 一致：QX 的 script-response-body / script-request-header 拿不到 $request.body
+        // 与离线 harness 一致：响应脚本与无 body 能力的请求脚本拿不到 $request.body
         if (!omitRequestBody) {
             requestContext.body = requestBody;
         }

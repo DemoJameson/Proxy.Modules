@@ -174,7 +174,7 @@ function runScript({
             url,
             headers,
         };
-        // QX 的 script-response-body / script-request-header 拿不到 $request.body，用 omitRequestBody 复现该行为
+        // 响应脚本与无 body 能力的请求脚本拿不到 $request.body，用 omitRequestBody 复现该行为
         if (!omitRequestBody) {
             requestContext.body = requestBody;
         }

@@ -13,7 +13,6 @@ import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
 
 const TRAKT_TAMPER_REDIRECT_URI = "trakt://auth";
-const TRAKT_TAMPER_AUTHORIZE_URL = "https://auth.trakt.tv/oauth/authorize";
 const TRAKT_TAMPER_CALLBACK_HOST = "auth.trakt.tv";
 const TRAKT_TAMPER_CALLBACK_PATH = "/api/auth/oauth2/authorize";
 const TRAKT_TAMPER_STATE_TTL_MS = 5 * 60 * 1000;
@@ -601,7 +600,7 @@ function removeTamperPending(env, predicate) {
     updateTamperStore(env, (store) => ({ ...store, pending: store.pending.filter((entry) => !predicate(entry)) }));
 }
 
-// QX 的请求头脚本拿不到请求体，只能靠「该 client 已经由篡改流程签发过 token」或「存在进行中的授权流程」判断
+// 无请求体时拿不到 client_secret/redirect_uri，只能靠「该 client 已经由篡改流程签发过 token」或「存在进行中的授权流程」判断
 function hasTamperTokenForClient(env, clientId) {
     const normalizedClientId = String(clientId ?? "").trim();
     if (!normalizedClientId) {
@@ -772,9 +771,10 @@ async function handleOAuthRequest() {
     }
 
     const pathname = commonUtils.normalizePathname(context.url.pathname);
-    // QX 的 script-request-body 只能返回 body，trakt-api-key 需要并行的 script-request-header 规则补写；
-    // 那次调用拿不到请求体，只回 url/headers，绝不回 body，避免把真实请求体覆盖成残缺内容
-    if (context.env.request.body === undefined || context.env.request.body === null) {
+    // QX build 954 实测：script-request-body 在空 body/GET 也会执行，且 {body}/{headers}/{path} 均生效、
+    // {body} 可注入新 body、Content-Length 自动重算（官方 sample.conf 第 290 行「body 为空不执行」已过时）。
+    // 空 body 时仍只改 query/headers、不合成 body，避免改变 query 形式 token 请求的语义。
+    if (context.env.request.body === undefined || context.env.request.body === null || context.env.request.body === "") {
         return handleOAuthHeaderOnlyRequest(pathname);
     }
     if (pathname === "oauth/token") {
@@ -804,7 +804,7 @@ function handleOAuthHeaderOnlyRequest(pathname) {
             return { type: "passThrough" };
         }
     }
-    // QX 的 script-request-body 会丢弃返回的 url，把参数放在 query 里的 App 只能在这次调用里改写
+    // 这里只返回改写后的 url/headers；QX 下由 main.mjs 统一转成 path（跨域 url 会被半套用）
     const url = rewriteUrlSearchParams(context.env.request.url, (searchParams) => {
         if (searchParams.has("client_id")) {
             searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
@@ -816,6 +816,14 @@ function handleOAuthHeaderOnlyRequest(pathname) {
             searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);
         }
     });
+    if (pathname === "oauth/device/code") {
+        saveTamperPending(context.env, {
+            kind: "device_flow",
+            id: "device-flow",
+            clientId: originalClientId,
+            expiresAt: Date.now() + TRAKT_TAMPER_DEVICE_FLOW_TTL_MS,
+        });
+    }
     return {
         type: "rewriteRequest",
         url,
@@ -863,7 +871,11 @@ async function handleAuthorizeRequest() {
         codeChallenge: pkce.challenge,
     });
 
-    const targetUrl = new URL(TRAKT_TAMPER_AUTHORIZE_URL);
+    // 授权页改写始终保留原域名（trakt.tv 或 auth.trakt.tv），只替换 query。
+    // QX 实机实测：两种请求脚本的跨域 url 都会被半套用（Host 换掉、path/query 保持原样），Trakt 因此回 403；
+    // 同域改写则稳定生效。三平台统一同域后既不需要跨域能力，Loon/Surge/Stash 也少一次跨域跳转。
+    // 授权完成后 Trakt 会在同域返回 /api/auth/oauth2/authorize，回调改写规则已覆盖。
+    const targetUrl = new URL(originalUrl);
     targetUrl.searchParams.set("response_type", responseType);
     targetUrl.searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
     targetUrl.searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);
@@ -1099,7 +1111,6 @@ export {
     handleOAuthRequest,
     handleOAuthResponse,
     TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
-    TRAKT_TAMPER_AUTHORIZE_URL,
     TRAKT_TAMPER_CALLBACK_HOST,
     TRAKT_TAMPER_CALLBACK_PATH,
     TRAKT_TAMPER_CLIENT_ID,

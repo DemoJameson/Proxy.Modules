@@ -4,8 +4,17 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { formatBuildDateTimeText, formatBuildVersion, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSnippet } from "../scripts/build-trakt.mjs";
-import { argumentFields, BOXJS_CONFIG_KEY, metadata, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
+import {
+    extractHostsFromPattern,
+    formatBuildDateTimeText,
+    formatBuildVersion,
+    renderGeneratedTargets,
+    renderPlugin,
+    renderScriptBanner,
+    renderSnippet,
+} from "../scripts/build-trakt.mjs";
+import { WATCHNOW_REDIRECT_URL } from "../trakt_simplified_chinese/src/features/player-injection-trakt.mjs";
+import { argumentFields, BOXJS_CONFIG_KEY, metadata, mitmHosts, scriptRules } from "../trakt_simplified_chinese/src/module-manifest.mjs";
 import { createRequestPhaseRoutes } from "../trakt_simplified_chinese/src/request.mjs";
 import { createResponsePhaseRoutes } from "../trakt_simplified_chinese/src/response.mjs";
 import { PLAYER_DEFINITIONS } from "../trakt_simplified_chinese/src/shared/player-definitions.mjs";
@@ -86,50 +95,84 @@ test("Surge 模块的 argument 必须整体加双引号，避免逗号被 Surge 
 
 test("Quantumult X snippet 会按 requiresBody 选择请求体或响应头脚本类型", () => {
     const snippet = normalizeLineEndings(renderSnippet());
+    const snippetLines = snippet.split("\n");
 
     assert.ok(
-        snippet.split("\n").some((line) => line.includes("device\\/code") && line.includes("script-request-body")),
+        snippetLines.some((line) => line.includes("device\\/code") && line.includes("script-request-body")),
         "device/code 请求体规则应使用 script-request-body",
     );
     assert.ok(
-        snippet.split("\n").some((line) => line.includes("auth\\.trakt\\.tv\\/oauth\\/token") && line.includes("script-request-body")),
-        "auth token 请求体规则应使用 script-request-body",
+        snippetLines.some((line) => line.includes("oauth\\/(?:device\\/code|device\\/token|token)") && line.includes("script-request-body")),
+        "token 请求体规则应使用 script-request-body",
     );
     assert.ok(
-        snippet.split("\n").some((line) => line.startsWith(String.raw`^https:\/\/trakt\.tv\/oauth\/token`) && line.includes("script-request-body")),
-        "trakt.tv token 请求体规则应使用 script-request-body",
-    );
-    assert.ok(
-        snippet.split("\n").some((line) => line.includes("api\\/auth\\/oauth2\\/authorize") && line.includes("script-response-header")),
+        snippetLines.some((line) => line.includes("api\\/auth\\/oauth2\\/authorize") && line.includes("script-response-header")),
         "OAuth 回调响应头规则应使用 script-response-header",
     );
 });
 
-// QX 的 script-request-body 改不了 headers，需要并行的 script-request-header 规则；
-// 该规则只进 QX 片段，否则 Loon/Surge 会对同一请求跑两遍脚本
-test("QX 的 OAuth 请求头规则只进 snippet 且与请求体规则成对", () => {
-    const qxHeaderRules = scriptRules.filter((rule) => Array.isArray(rule.targets) && rule.targets.includes("snippet"));
-    assert.equal(qxHeaderRules.length, 3, "应有三条 QX 专用的 OAuth 请求头规则");
-
+// OAuth 相关域名在规则层合并成同一条 pattern。
+// QX build 954 实测 script-request-body 在空 body/GET 也会执行，因此不再需要并行 header 兜底；
+// 该规则若回流，QX 会对同一请求重复执行改写，Loon/Surge 也会多跑一遍脚本。
+test("QX 片段不再生成并行的 OAuth 请求头兜底规则", () => {
     const snippet = normalizeLineEndings(renderSnippet());
-    const snippetLines = snippet.split("\n");
-    const otherTargets = renderGeneratedTargets().filter((target) => target.outputFile !== "trakt_simplified_chinese/trakt_simplified_chinese.snippet");
-    for (const rule of qxHeaderRules) {
-        assert.deepEqual(rule.targets, ["snippet"]);
-        assert.ok(
-            snippetLines.some((line) => line.startsWith(rule.pattern) && line.includes("script-request-header")),
-            `QX 片段应包含请求头规则：${rule.title}`,
-        );
-        for (const target of otherTargets) {
-            // 同一 pattern 会被 Loon/Surge 的请求体规则复用，因此用 QX 专用注释判断该规则是否泄漏到其它产物
-            assert.equal(normalizeLineEndings(target.content).includes(rule.comment), false, `${target.outputFile} 不应包含 QX 专用规则：${rule.title}`);
-        }
+    const oauthTokenPattern = String.raw`^https:\/\/(?:apiz?\.trakt\.tv|auth\.trakt\.tv|trakt\.tv)\/oauth\/(?:device\/code|device\/token|token)(?:\?.*)?$`;
+    const matchingLines = snippet.split("\n").filter((line) => line.startsWith(oauthTokenPattern));
+
+    assert.equal(matchingLines.length, 1, "OAuth token/设备码请求在 QX 片段里应只有一条 rewrite");
+    assert.ok(matchingLines[0].includes("script-request-body"), "QX OAuth 请求改写应使用 script-request-body");
+    assert.equal(
+        scriptRules.filter((rule) => rule.title.startsWith("Trakt OAuth")).some((rule) => Array.isArray(rule.targets)),
+        false,
+        "OAuth 规则不应存在平台专用兜底项",
+    );
+});
+
+// 合并后的 pattern 用 alternation 表达多个域名，构建器的 MITM 校验必须能把它展开成独立 host，
+// 否则漏配 hostname 会在真机上表现为「规则存在但 MITM 不解密、脚本从不触发」
+test("MITM host 校验能展开合并 pattern 中的域名 alternation 与可选分组", () => {
+    assert.deepEqual(extractHostsFromPattern(String.raw`^https:\/\/(?:apiz?\.trakt\.tv|auth\.trakt\.tv|trakt\.tv)\/oauth\/token$`).sort(), [
+        "api.trakt.tv",
+        "apiz.trakt.tv",
+        "auth.trakt.tv",
+        "trakt.tv",
+    ]);
+    assert.deepEqual(extractHostsFromPattern(String.raw`^https:\/\/(?:auth\.)?trakt\.tv\/oauth\/authorize$`).sort(), ["auth.trakt.tv", "trakt.tv"]);
+});
+
+// api/apiz 的 OAuth 响应已经由 Trakt Response Router 统一处理，
+// 专用 token 响应规则必须排除它们，否则同一响应会被执行两次（重复消费 pending、重复写 token）
+test("OAuth token 响应规则不与 Trakt Response Router 重复命中 api 域名", () => {
+    const apiOAuthUrls = ["https://api.trakt.tv/oauth/token", "https://apiz.trakt.tv/oauth/device/code", "https://api.trakt.tv/oauth/device/token"];
+    const responseRules = scriptRules.filter((rule) => rule.phase === "http-response");
+
+    for (const url of apiOAuthUrls) {
+        const matched = responseRules.filter((rule) => new RegExp(rule.pattern, "i").test(url)).map((rule) => rule.title);
+        assert.deepEqual(matched, ["Trakt Response Router"], `${url} 只应由响应路由器处理，实际命中：${matched.join(" / ")}`);
     }
 
-    // 同一条 URL 在 QX 上必须同时挂 script-request-body 与 script-request-header 两条规则
-    const oauthBodyPattern = String.raw`^https:\/\/apiz?\.trakt\.tv\/oauth\/(?:device\/code|device\/token|token)(?:\?.*)?$`;
-    assert.ok(snippetLines.some((line) => line.startsWith(oauthBodyPattern) && line.includes("script-request-body")));
-    assert.ok(snippetLines.some((line) => line.startsWith(oauthBodyPattern) && line.includes("script-request-header")));
+    for (const url of [
+        "https://auth.trakt.tv/oauth/token",
+        "https://trakt.tv/oauth/token",
+        "https://auth.trakt.tv/oauth/device/code",
+        "https://auth.trakt.tv/oauth/device/token",
+        "https://trakt.tv/oauth/device/code",
+        "https://trakt.tv/oauth/device/token",
+    ]) {
+        const matched = responseRules.filter((rule) => new RegExp(rule.pattern, "i").test(url)).map((rule) => rule.title);
+        assert.deepEqual(matched, ["Trakt OAuth Token Response Rewrite"], `${url} 应只由专用响应规则处理，实际命中：${matched.join(" / ")}`);
+    }
+});
+
+// 授权相关规则按「域名 × 阶段」合并：token/设备码请求、token/设备码响应、authorize、callback 各一条。
+test("授权相关规则已按域名合并，不再逐域名重复", () => {
+    const oauthRules = scriptRules.filter((rule) => rule.title.startsWith("Trakt OAuth"));
+    assert.equal(oauthRules.length, 4, "授权规则应为 4 条共享规则");
+
+    for (const rule of oauthRules) {
+        // token 请求用三域名 alternation；authorize/callback/token 响应用可选分组 (?:auth\.)? 或双域名 alternation 合并
+        assert.ok(rule.pattern.includes("(?:") && (rule.pattern.includes("|") || rule.pattern.includes("(?:auth")), `授权规则应合并多个域名：「${rule.title}」`);
+    }
 });
 
 // OAuth 相关端点需要模块清单规则和脚本路由同时覆盖，任一侧漏配都会导致请求未被改写。
@@ -139,7 +182,11 @@ const OAUTH_INTERCEPT_TARGETS = [
     { phase: "http-request", url: "https://api.trakt.tv/oauth/device/code" },
     { phase: "http-request", url: "https://api.trakt.tv/oauth/device/token" },
     { phase: "http-request", url: "https://auth.trakt.tv/oauth/token" },
+    { phase: "http-request", url: "https://auth.trakt.tv/oauth/device/code" },
+    { phase: "http-request", url: "https://auth.trakt.tv/oauth/device/token" },
     { phase: "http-request", url: "https://trakt.tv/oauth/token" },
+    { phase: "http-request", url: "https://trakt.tv/oauth/device/code" },
+    { phase: "http-request", url: "https://trakt.tv/oauth/device/token" },
     { phase: "http-request", url: "https://trakt.tv/oauth/authorize" },
     { phase: "http-request", url: "https://auth.trakt.tv/oauth/authorize" },
     { phase: "http-response", url: "https://auth.trakt.tv/api/auth/oauth2/authorize" },
@@ -148,7 +195,11 @@ const OAUTH_INTERCEPT_TARGETS = [
     { phase: "http-response", url: "https://api.trakt.tv/oauth/device/code" },
     { phase: "http-response", url: "https://api.trakt.tv/oauth/device/token" },
     { phase: "http-response", url: "https://auth.trakt.tv/oauth/token" },
+    { phase: "http-response", url: "https://auth.trakt.tv/oauth/device/code" },
+    { phase: "http-response", url: "https://auth.trakt.tv/oauth/device/token" },
     { phase: "http-response", url: "https://trakt.tv/oauth/token" },
+    { phase: "http-response", url: "https://trakt.tv/oauth/device/code" },
+    { phase: "http-response", url: "https://trakt.tv/oauth/device/token" },
 ];
 
 function createRouteContext(url) {
@@ -198,6 +249,18 @@ const NON_OAUTH_REQUEST_TARGETS = [
     "https://api.trakt.tv/users/me/watchlist",
     "https://api.trakt.tv/shows/1/seasons",
 ];
+
+// Direct Redirect 规则必须与脚本实际生成的跳转链接同域名：
+// 后端域名从 loon-plugins 迁到 proxy-modules 后，规则若仍指向旧域名，
+// 生成的链接既不会命中规则也不会被 MITM，DeepLink 跳转会静默失效。
+test("Direct Redirect 规则与 MITM host 使用脚本实际生成的域名", () => {
+    const redirectHost = new URL(WATCHNOW_REDIRECT_URL).hostname;
+    const redirectRule = scriptRules.find((rule) => rule.title === "Direct Redirect");
+    assert.ok(redirectRule, "应存在 Direct Redirect 规则");
+    assert.ok(redirectRule.pattern.includes(redirectHost.replaceAll(".", "\\.")), `Direct Redirect 规则应匹配 ${redirectHost}，实际：${redirectRule.pattern}`);
+    assert.ok(mitmHosts.includes(redirectHost), `MITM host 应包含 ${redirectHost}`);
+    assert.equal(mitmHosts.includes("loon-plugins.demojameson.de5.net"), false, "不应再保留已下线的旧域名");
+});
 
 test("非 OAuth 的 Trakt API 请求会被请求阶段规则覆盖", () => {
     const requestRules = scriptRules.filter((rule) => rule.phase === "http-request");

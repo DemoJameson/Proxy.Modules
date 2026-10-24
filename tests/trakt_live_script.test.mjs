@@ -2230,12 +2230,12 @@ test("live script: request route coverage matrix covers all request phase routes
             },
         },
         {
-            // 篡改应用授权：trakt.tv 授权页会被改写到 auth.trakt.tv 并带上 PKCE
+            // 篡改应用授权：trakt.tv 授权页保留原域名，只替换 query 并带上 PKCE
             url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&state=original-state",
             argument: { tamperAppAuthorizationEnabled: true },
             assertResult(result) {
                 const target = new URL(result.url);
-                assert.equal(`${target.origin}${target.pathname}`, "https://auth.trakt.tv/oauth/authorize");
+                assert.equal(`${target.origin}${target.pathname}`, "https://trakt.tv/oauth/authorize");
                 assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
                 assert.equal(target.searchParams.get("redirect_uri"), "trakt://auth");
                 assert.ok(target.searchParams.get("code_challenge"), "应带上 PKCE challenge");

@@ -2455,7 +2455,8 @@ test("篡改应用授权会改写授权地址并保留 scope，同时记录第�
     });
 
     const targetUrl = new URL(result.url);
-    assert.equal(`${targetUrl.origin}${targetUrl.pathname}`, "https://auth.trakt.tv/oauth/authorize");
+    // 授权页改写保留原域名、只替换 query：QX 实机实测跨域 url 会被半套用（Host 换掉、path/query 不换），Trakt 回 403
+    assert.equal(`${targetUrl.origin}${targetUrl.pathname}`, "https://trakt.tv/oauth/authorize");
     assert.equal(targetUrl.searchParams.get("response_type"), "code");
     assert.equal(targetUrl.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
     assert.equal(targetUrl.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
@@ -2470,6 +2471,25 @@ test("篡改应用授权会改写授权地址并保留 scope，同时记录第�
     assert.match(state.codeVerifier, /^[A-Za-z0-9\-._~]{43,128}$/);
     assert.equal(targetUrl.searchParams.get("code_challenge"), state.codeChallenge);
     assert.equal(createHash("sha256").update(state.codeVerifier).digest("base64url"), state.codeChallenge);
+});
+
+// 授权页改写必须保留原域名：QX 实测跨域 url 会被半套用（Host 换掉、path/query 不换 → Trakt 403），
+// 三平台统一同域改写后行为一致，也少一次跨域跳转。
+test("篡改应用授权改写授权地址时保留原域名", async () => {
+    for (const host of ["trakt.tv", "auth.trakt.tv"]) {
+        const { result } = await runRequestCase({
+            url: `https://${host}/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("thirdparty://oauth/callback")}`,
+            argument: {
+                tamperAppAuthorizationEnabled: true,
+            },
+        });
+
+        const targetUrl = new URL(result.url);
+        assert.equal(targetUrl.hostname, host, `${host} 的授权地址不应跨域`);
+        assert.equal(targetUrl.pathname, "/oauth/authorize");
+        assert.equal(targetUrl.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+        assert.equal(targetUrl.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+    }
 });
 
 test("篡改应用授权每次授权生成不同的 PKCE verifier，并保留多条流程状态", async () => {
@@ -3238,8 +3258,8 @@ test("篡改应用授权会把带 access token 的非认证请求 trakt-api-key 
     assert.equal(Object.hasOwn(result, "body"), false);
 });
 
-// QX 的 script-request-header 只回 headers：丢了 content-length 会让带 body 的 POST 变成没有请求体
-test("篡改应用授权在 QX 请求头脚本里改写 trakt-api-key 时保留 content-length", async () => {
+// QX 的 header-only 重写不会自动重算长度头：丢了 content-length 会让带 body 的 POST 变成没有请求体
+test("篡改应用授权在无请求体时改写 trakt-api-key 会保留 content-length", async () => {
     const accessToken = "qx-watchlist-access";
     const persistentData = createTamperPersistentData({
         tokens: [createTamperTokenRecord(accessToken, "refresh-token")],
@@ -3264,7 +3284,7 @@ test("篡改应用授权在 QX 请求头脚本里改写 trakt-api-key 时保留 
 
     assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
     assert.equal(result.headers["content-length"], "42");
-    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
+    assert.equal(Object.hasOwn(result, "body"), false, "无请求体分支不能回写 body");
 });
 
 test("篡改应用授权非认证请求未带 access token 时不改写 trakt-api-key", async () => {
@@ -3762,33 +3782,197 @@ test("篡改应用授权 token 记录超限时优先淘汰无 refresh_token 的�
     assert.ok(tokens.some((token) => token.accessToken === "new-access"));
 });
 
-// QX 的 script-request-body 只能返回 body，trakt-api-key 由并行的 script-request-header 规则补写：
-// 这些用例固定住「只回 headers、绝不回 body」的行为，避免请求体被覆盖成残缺内容
-test("篡改应用授权在 QX 请求头脚本里只补写 trakt-api-key", async () => {
+// QX 实机实测：script-request-body 可同时返回 {body, headers, path}，
+// 因此不再需要并行的 script-request-header 规则；跨域 url 会被半套用，统一改用 path。
+// QX 实机结论：request-body 可同时返回 {body, headers, path}，但不支持跨域 url；
+// 这条用例把「一次调用改完三样」与「不返回跨域 url」两个能力边界固定下来。
+test("QX 请求体脚本不返回跨域 url，只返回同域 path", async () => {
+    const { result } = await runRequestCase({
+        url: "https://auth.trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client", refresh_token: "refresh-1", grant_type: "refresh_token" }),
+        environment: "qx",
+        persistentData: createTamperPersistentData({
+            tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
+        }),
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.hasOwn(result, "url"), false, "QX 下不得返回 url（跨域会被半套用）");
+    assert.equal(result.path, "/oauth/token", "应返回同域 path");
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID, "headers 应同时生效");
+    assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID, "body 应同时生效");
+});
+
+test("QX 请求体脚本一次返回 body、headers 与 path", async () => {
     const { result } = await runRequestCase({
         url: "https://api.trakt.tv/oauth/device/code",
         headers: {
             "content-type": "application/json",
             "trakt-api-key": "old-client",
         },
+        body: JSON.stringify({ client_id: "old-client" }),
         environment: "qx",
-        omitRequestBody: true,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID, "body 应被改写");
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID, "headers 应与 body 在同一次调用里改写");
+    assert.equal(result.path, "/oauth/device/code", "QX 下应返回 path 而不是 url");
+    assert.equal(Object.hasOwn(result, "url"), false, "QX 下不应返回 url");
+});
+
+test("QX 下 token 请求的 body、headers、query 一次改写完成", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token?client_id=old-client&client_secret=secret&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client", refresh_token: "refresh-1", grant_type: "refresh_token" }),
+        environment: "qx",
+        persistentData,
         argument: {
             tamperAppAuthorizationEnabled: true,
         },
     });
 
     assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
-    assert.equal(result.url, "https://api.trakt.tv/oauth/device/code");
-    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
+    assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID);
+
+    const target = new URL(result.path, "https://trakt.tv");
+    assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(target.searchParams.get("client_secret"), null);
+    assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
 });
 
-test("篡改应用授权在 QX 请求头脚本里改写 query 形式的 client_id", async () => {
+// QX 的跨域 url 会被半套用（Host 换掉但 path/query 不换），授权页必须同域改写
+test("QX 下授权页保持原域名只改写 query", async () => {
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback",
+        environment: "qx",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.hasOwn(result, "url"), false, "QX 下不应返回跨域 url");
+    assert.ok(result.path.startsWith("/oauth/authorize?"), "应返回同域 path");
+    const target = new URL(result.path, "https://trakt.tv");
+    assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+});
+
+test("QX 下没有篡改痕迹的 token 请求会放行", async () => {
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client", refresh_token: "unknown-refresh", grant_type: "refresh_token" }),
+        environment: "qx",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0, "refresh_token 未命中记录时不应改写");
+});
+
+test("QX 下按已签发 token 的 client 改写 refresh 请求", async () => {
     const persistentData = createTamperPersistentData({
-        records: [createTamperStateRecord(0, { id: "flow-id", clientId: "old-client" })],
+        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
     });
     const { result } = await runRequestCase({
-        url: "https://trakt.tv/oauth/token?client_id=old-client&client_secret=secret&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback",
+        url: "https://trakt.tv/oauth/token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: JSON.stringify({ client_id: "old-client", refresh_token: "refresh-1", grant_type: "refresh_token" }),
+        environment: "qx",
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(JSON.parse(result.body).client_id, TRAKT_TAMPER_CLIENT_ID);
+});
+
+// QX build 954 实测：script-request-body 在空 body/GET 也会执行；
+// 空 body 时仍只改 query/headers，不合成 body（官方 sample.conf 第 290 行已过时）。
+test("QX 空 body 的 token 请求由请求体脚本改写 query/headers 且不合成 body", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token?client_id=old-client&client_secret=secret&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&refresh_token=refresh-1&grant_type=refresh_token",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: "",
+        environment: "qx",
+        persistentData,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID, "应补写 trakt-api-key");
+    assert.equal(Object.hasOwn(result, "body"), false, "空 body 时不合成 body");
+    assert.equal(Object.hasOwn(result, "url"), false, "QX 下不应返回 url");
+
+    const target = new URL(result.path, "https://trakt.tv");
+    assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(target.searchParams.get("client_secret"), null);
+    assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+});
+
+test("QX 空 body 的 device/code 请求会改写 query 并写入 device_flow", async () => {
+    const { result, persistentData } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code?client_id=old-client",
+        headers: {
+            "content-type": "application/json",
+            "trakt-api-key": "old-client",
+        },
+        body: "",
+        environment: "qx",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.hasOwn(result, "body"), false, "空 body 时不合成 body");
+    assert.equal(result.path, `/oauth/device/code?client_id=${TRAKT_TAMPER_CLIENT_ID}`);
+    assert.ok(
+        readTamperStore(persistentData).pending.some((entry) => entry.kind === "device_flow" && entry.clientId === "old-client"),
+        "device_flow 应写入 pending",
+    );
+});
+
+test("$request.body 缺失时只改 query/headers、不合成 body", async () => {
+    const persistentData = createTamperPersistentData({
+        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
+    });
+    const { result } = await runRequestCase({
+        url: "https://trakt.tv/oauth/token?client_id=old-client&refresh_token=refresh-1&grant_type=refresh_token",
+        headers: {
+            "trakt-api-key": "old-client",
+        },
         environment: "qx",
         omitRequestBody: true,
         persistentData,
@@ -3797,20 +3981,34 @@ test("篡改应用授权在 QX 请求头脚本里改写 query 形式的 client_i
         },
     });
 
-    const target = new URL(result.url);
-    assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
-    assert.equal(target.searchParams.get("client_secret"), null);
-    assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(Object.hasOwn(result, "body"), false, "无请求体时不合成 body");
 });
 
-test("篡改应用授权在 QX 请求头脚本里遇到 query 形式的禁用 redirect_uri 会放行", async () => {
+test("QX 空 body 时识别不出第三方 client 则放行", async () => {
+    const { result } = await runRequestCase({
+        url: "https://api.trakt.tv/oauth/device/code",
+        headers: {
+            "content-type": "application/json",
+        },
+        body: "",
+        environment: "qx",
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.keys(result).length, 0, "无法识别 client 时不应改写");
+});
+
+test("QX 空 body 时 query 形式禁用 redirect_uri 的 token 请求放行", async () => {
     const persistentData = createTamperPersistentData({
         tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
     });
     const { result } = await runRequestCase({
         url: `https://trakt.tv/oauth/token?client_id=old-client&redirect_uri=${encodeURIComponent("rex://oauth/callback")}`,
+        body: "",
         environment: "qx",
-        omitRequestBody: true,
         persistentData,
         argument: {
             tamperAppAuthorizationEnabled: true,
@@ -3820,81 +4018,7 @@ test("篡改应用授权在 QX 请求头脚本里遇到 query 形式的禁用 re
     assert.equal(Object.keys(result).length, 0, "禁用篡改的 redirect_uri 应直接放行");
 });
 
-test("篡改应用授权在 QX 请求头脚本里识别不出第三方 client 时放行", async () => {
-    const { result } = await runRequestCase({
-        url: "https://api.trakt.tv/oauth/device/code",
-        headers: {
-            "content-type": "application/json",
-        },
-        environment: "qx",
-        omitRequestBody: true,
-        argument: {
-            tamperAppAuthorizationEnabled: true,
-        },
-    });
-
-    // 结果对象来自 vm 上下文，不能用 deepStrictEqual 跨 realm 比较
-    assert.equal(Object.keys(result).length, 0, "无法识别 client 时不应改写请求头");
-});
-
-test("篡改应用授权在 QX 请求头脚本里遇到没有篡改痕迹的 token 请求会放行", async () => {
-    const { result } = await runRequestCase({
-        url: "https://trakt.tv/oauth/token",
-        headers: {
-            "trakt-api-key": "old-client",
-        },
-        environment: "qx",
-        omitRequestBody: true,
-        argument: {
-            tamperAppAuthorizationEnabled: true,
-        },
-    });
-
-    assert.equal(Object.keys(result).length, 0, "没有授权流程状态或 token 记录时不应改写 trakt-api-key");
-});
-
-test("篡改应用授权在 QX 请求头脚本里按授权流程状态补写 token 请求的 trakt-api-key", async () => {
-    const persistentData = createTamperPersistentData({
-        records: [createTamperStateRecord(0, { id: "flow-id", clientId: "old-client" })],
-    });
-    const { result } = await runRequestCase({
-        url: "https://trakt.tv/oauth/token",
-        headers: {
-            "trakt-api-key": "old-client",
-        },
-        environment: "qx",
-        omitRequestBody: true,
-        persistentData,
-        argument: {
-            tamperAppAuthorizationEnabled: true,
-        },
-    });
-
-    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
-    assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
-});
-
-test("篡改应用授权在 QX 请求头脚本里按已签发 token 的 client 补写 refresh 请求", async () => {
-    const persistentData = createTamperPersistentData({
-        tokens: [createTamperTokenRecord("access-1", "refresh-1", { clientId: "old-client" })],
-    });
-    const { result } = await runRequestCase({
-        url: "https://trakt.tv/oauth/token",
-        headers: {
-            "trakt-api-key": "old-client",
-        },
-        environment: "qx",
-        omitRequestBody: true,
-        persistentData,
-        argument: {
-            tamperAppAuthorizationEnabled: true,
-        },
-    });
-
-    assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
-});
-
-test("篡改应用授权在 QX 请求头脚本里遇到禁用篡改的 redirect_uri 时不写流程状态", async () => {
+test("篡改应用授权在 QX 下遇到禁用篡改的 redirect_uri 时不写流程状态", async () => {
     const { persistentData, result } = await runRequestCase({
         url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=rex-client&redirect_uri=${encodeURIComponent("rex://oauth/callback")}&state=original-state`,
         argument: {
