@@ -18,7 +18,7 @@
 
 | 探测 | 访问 | 判读 |
 | --- | --- | --- |
-| P1 response-header 改状态码 | `http://<mac-ip>:18765/status` | 显示 233 页面 = 支持；仍 404 = 不支持 |
+| P1 response-body 改写 | `http://<mac-ip>:18765/status` | 显示 `{ "result": "ok" ... }` = 生效；仍是服务器原 JSON = 不生效 |
 | P2 request-header 返回 `{url}` | `http://<mac-ip>:18765/url` | 跳到 httpbin = 跨域 url 生效；本机 JSON 但 path 仍是 `/url` = url 被丢弃；QX 日志出现「Host httpbin + path /url」类错配 = 半套用 |
 | P3 request-header 返回 `{path}` | `http://<mac-ip>:18765/path` | 本机返回 JSON 且 `path` 字段为 `/echo?probe=path` = path 生效；`path` 仍是 `/path` = path 被丢弃 |
 | P4 请求/响应共享数据 | `http://<mac-ip>:18765/echo` | 响应头 `X-Probe-Echo-Url` 有内容 = `$prefs` 跨阶段共享可用 |
