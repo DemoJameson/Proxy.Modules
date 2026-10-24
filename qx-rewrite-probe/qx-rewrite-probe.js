@@ -53,7 +53,11 @@ function handleEchoRequest() {
     };
     console.log(`[probe] echo request: ${JSON.stringify(record)}`);
     $prefs.setValueForKey(JSON.stringify(record), ECHO_KEY);
-    $done({});
+    // 请求头改写是 QX 明确支持的能力；httpbin 会把这个头回显在 headers 里，
+    // 即使响应阶段脚本没跑，也能证明请求阶段脚本执行过。
+    const headers = { ...($request.headers ?? {}) };
+    headers['X-Probe-Request'] = 'yes';
+    $done({ headers });
 }
 
 // 响应阶段：把请求阶段记录的内容与服务器回显合并成 JSON，页面直接可见
