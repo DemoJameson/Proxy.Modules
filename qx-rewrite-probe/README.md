@@ -12,8 +12,8 @@
 ## 步骤
 
 1. 本机启动探测服务器：`node qx-rewrite-probe-server.mjs`
-2. 让 iPhone 与 Mac 同网段，`snippet/conf` 里的 `127.0.0.1` 全部替换成 Mac 局域网 IP（例如 `192.168.50.23`），`[mitm] hostname` 同步改。
-3. QX 里导入 snippet（或把 conf 内容贴进重写区域），开启 MitM 并确认 `hostname` 里有该 IP。
+2. 让 iPhone 与 Mac 同网段，`snippet/conf` 里的 `127.0.0.1` 全部替换成 Mac 局域网 IP（例如 `192.168.50.23`）。
+3. QX 里导入 snippet（或把 conf 内容贴进重写区域）（探测目标是 HTTP，无需 MitM）。
 4. Safari 逐条访问下列地址，对照判读：
 
 | 探测 | 访问 | 判读 |
