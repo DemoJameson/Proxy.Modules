@@ -863,7 +863,10 @@ async function handleAuthorizeRequest() {
         codeChallenge: pkce.challenge,
     });
 
-    const targetUrl = new URL(TRAKT_TAMPER_AUTHORIZE_URL);
+    // QX 的 script-request-header 官方只支持 path/headers 重写，无法像 Loon/Surge/Egern 一样跨域改写 URL；
+    // 跨域目标会被 QX 半套用（Host 换成 auth.trakt.tv、参数仍是原请求的），Trakt 对这种错配请求直接回 403。
+    // 因此 QX 下保留原域名 trakt.tv，只重写 query；授权完成后的 307 会落在同域的 /api/auth/oauth2/authorize，回调改写规则已覆盖。
+    const targetUrl = context.env.isQuanX() ? new URL("https://trakt.tv/oauth/authorize") : new URL(TRAKT_TAMPER_AUTHORIZE_URL);
     targetUrl.searchParams.set("response_type", responseType);
     targetUrl.searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
     targetUrl.searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);

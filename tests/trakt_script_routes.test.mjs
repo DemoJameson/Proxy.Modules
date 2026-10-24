@@ -2472,6 +2472,33 @@ test("篡改应用授权会改写授权地址并保留 scope，同时记录第�
     assert.equal(createHash("sha256").update(state.codeVerifier).digest("base64url"), state.codeChallenge);
 });
 
+// QX 的 script-request-header 官方只支持 path/headers，无法跨域改写；跨域目标会被 QX 半套用
+// （Host 换成 auth.trakt.tv、参数保持原样），Trakt 对这种错配请求直接回 403。
+// 因此 QX 下授权改写必须保留原域名 trakt.tv，只重写 query。
+test("篡改应用授权在 QX 请求头脚本里保留原域名只改写授权参数", async () => {
+    const { result, persistentData } = await runRequestCase({
+        url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent("vidora://trakt-auth")}&state=original-state`,
+        environment: "qx",
+        omitRequestBody: true,
+        argument: {
+            tamperAppAuthorizationEnabled: true,
+        },
+    });
+
+    assert.equal(Object.hasOwn(result, "url"), false);
+    const target = new URL(result.path, "https://trakt.tv");
+    assert.equal(`${target.origin}${target.pathname}`, "https://trakt.tv/oauth/authorize");
+    assert.equal(target.searchParams.get("response_type"), "code");
+    assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
+    assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);
+    assert.equal(target.searchParams.get("lang"), "zh-hans-cn");
+    assert.equal(target.searchParams.get("state"), target.searchParams.get("code_challenge"));
+
+    const state = readLatestTamperState(persistentData);
+    assert.equal(state.redirectUri, "vidora://trakt-auth");
+    assert.equal(state.originalState, "original-state");
+});
+
 test("篡改应用授权每次授权生成不同的 PKCE verifier，并保留多条流程状态", async () => {
     const firstRun = await runRequestCase({
         url: "https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=first%3A%2F%2Fcallback&state=first",
@@ -3779,7 +3806,9 @@ test("篡改应用授权在 QX 请求头脚本里只补写 trakt-api-key", async
     });
 
     assert.equal(result.headers["trakt-api-key"], TRAKT_TAMPER_CLIENT_ID);
-    assert.equal(result.url, "https://api.trakt.tv/oauth/device/code");
+    // QX 的 script-request-header 官方只支持 path：同域重写以 path（路径+query）返回，不带域名
+    assert.equal(result.path, "/oauth/device/code");
+    assert.equal(Object.hasOwn(result, "url"), false);
     assert.equal(Object.hasOwn(result, "body"), false, "请求头脚本不能回写 body");
 });
 
@@ -3797,7 +3826,9 @@ test("篡改应用授权在 QX 请求头脚本里改写 query 形式的 client_i
         },
     });
 
-    const target = new URL(result.url);
+    // QX 下返回 path（路径+query），原域名保持不变
+    assert.equal(result.url, undefined);
+    const target = new URL(result.path, "https://trakt.tv");
     assert.equal(target.searchParams.get("client_id"), TRAKT_TAMPER_CLIENT_ID);
     assert.equal(target.searchParams.get("client_secret"), null);
     assert.equal(target.searchParams.get("redirect_uri"), TRAKT_TAMPER_REDIRECT_URI);

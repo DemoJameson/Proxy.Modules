@@ -3,7 +3,7 @@
 #!icon=https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/main/trakt_simplified_chinese/images/trakt.webp
 #!homepage=https://github.com/DemoJameson/Proxy.Modules
 #!author=DemoJameson
-#!updatedTime=2026-10-22 15:44:46
+#!updatedTime=2026-10-24 19:00:47
 #!arguments=fakeVipEnabled:true,chineseLocale:简体中文,posterImageMode:原片语言,translationEngine:谷歌翻译,characterTranslationEnabled:true,historyEpisodesMergedByShow:true,forwardButtonOrder:1,infuseButtonOrder:2,rexButtonOrder:3,backendBaseUrl:https://proxy-modules.demojameson.de5.net,tamperAppAuthorizationEnabled:false,debugMode:关闭
 #!arguments-desc=fakeVipEnabled: 启用后伪装为 Trakt VIP 会员，移除 App 中的广告\nchineseLocale: 选择目标语言：简体中文、繁體中文（台灣）或繁體中文（香港）\nposterImageMode: 原片语言使用 TMDb 影片原始语言图片；中文按所选语言优先匹配海报；原图保留 Trakt 原图\ntranslationEngine: 选择翻译引擎：谷歌翻译（快，需翻墙）、DeepLX（慢，可直连）、关闭\ncharacterTranslationEnabled: 启用后会用豆瓣翻译角色名\nhistoryEpisodesMergedByShow: 启用后会将历史页面电视剧类别的观看记录按电视剧合并\nforwardButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 1\ninfuseButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 2\nrexButtonOrder: 序号代表在 Trakt 中的排序位置，0 不显示，默认 3\nbackendBaseUrl: 用于批量获取 Trakt 的中文翻译，一般留空即可\ntamperAppAuthorizationEnabled: 启用后将第三方 App 的 Trakt 授权篡改成 Trakt 官方 App，规避应用连接数的限制，请仅在需要时开启\ndebugMode: 禁用本地缓存：不读写持久化存储；禁用远端缓存：不请求后端缓存接口；禁用所有缓存：两者皆禁用
 

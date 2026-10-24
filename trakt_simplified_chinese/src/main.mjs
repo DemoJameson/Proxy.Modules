@@ -15,7 +15,16 @@ function applyResult(env, result) {
     const normalized = result && typeof result === "object" ? result : { type: "passThrough" };
 
     if (normalized.type === "rewriteRequest") {
-        const payload = { url: normalized.url };
+        // QX 的 script-request-header 官方只支持 $done({ path, headers })：传完整 url 时
+        // QX 会把 Host 换掉但保留原始参数，得到域名与参数错配的请求（Trakt 直接回 403）。
+        // 因此 QX 下转成 path（路径+query），域名只能保持请求原样，重写不得跨域。
+        const payload = {};
+        if (env.isQuanX()) {
+            const target = new URL(normalized.url);
+            payload.path = `${target.pathname}${target.search}${target.hash}`;
+        } else {
+            payload.url = normalized.url;
+        }
         if (Object.hasOwn(normalized, "headers")) {
             payload.headers = normalized.headers;
         }

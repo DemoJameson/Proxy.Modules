@@ -4,7 +4,7 @@
 #!homepage=https://github.com/DemoJameson/Proxy.Modules
 #!openUrl=https://apps.apple.com/app/id1514873602
 #!author=DemoJameson
-#!updatedTime=2026-10-22 15:44:46
+#!updatedTime=2026-10-24 19:00:47
 
 [Argument]
 fakeVipEnabled = switch, "true", tag=伪装成 VIP, desc=启用后伪装为 Trakt VIP 会员，移除 App 中的广告
