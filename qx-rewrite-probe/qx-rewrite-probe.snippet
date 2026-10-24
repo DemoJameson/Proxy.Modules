@@ -7,8 +7,11 @@
 # [P1] script-response-body 是否支持改响应体（原始响应为 404）
 ^https?:\/\/httpbin\.org\/status(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
-# [P2] script-request-header 返回 { url }（跨域同 host 改写；生效时 query 变为 probe=url-applied）
+# [P2] script-request-header 同时返回 { url, path }（跨域目标 www.httpbin.org；验证 host+path 组合改写）
 ^https?:\/\/httpbin\.org\/url(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
+
+# [P3b] script-request-header 分别改 host 与 path（url 换域名 + path 换路径）
+^https?:\/\/httpbin\.org\/hostpath(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [P3] script-request-header 返回 { path }（生效时路径变为 /anything/echo）
 ^https?:\/\/httpbin\.org\/path(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
@@ -20,4 +23,4 @@
 ^https?:\/\/httpbin\.org\/anything\/echo(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [mitm]
-hostname = httpbin.org
+hostname = httpbin.org, www.httpbin.org

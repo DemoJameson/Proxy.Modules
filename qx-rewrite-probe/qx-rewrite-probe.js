@@ -6,13 +6,13 @@
  *
  * 按 $request.url 的路径分流：
  * - /status:   响应体重写为 JSON result=ok（验证 script-response-body）
- * - /url:      script-request-header 返回 { url }（验证跨域 url 是否被支持/半套用）
+ * - /url:      script-request-header 返回 { url, path }（验证同时给 host 与 path 是否能完成完整跨域改写）
  * - /path:     script-request-header 返回 { path }（验证 path 是否生效）
  * - /anything/echo: 请求阶段记录 $request，响应阶段合并输出 JSON（验证 $prefs 跨阶段共享）
  */
 
 const ECHO_KEY = 'qx_probe_url_echo';
-const URL_TARGET = 'https://httpbin.org/get?probe=url-applied';
+const URL_TARGET = 'https://www.httpbin.org/get?probe=url-path-both';
 const PATH_TARGET = '/anything/echo?probe=path-applied';
 
 function getProbeName() {
@@ -20,6 +20,7 @@ function getProbeName() {
     if (path.startsWith('/status')) return 'status';
     if (path.startsWith('/url')) return 'url';
     if (path.startsWith('/path')) return 'path';
+    if (path.startsWith('/hostpath')) return 'hostpath';
     if (path.startsWith('/anything/echo')) return 'echo';
     return '';
 }
@@ -31,16 +32,25 @@ function handleStatus() {
     $done({ body });
 }
 
-// script-request-header：返回完整跨域 url（观察 QX 是否应用 / 半套用）
+// script-request-header：同时返回 url 与 path，验证「url 只负责换域名、path 负责换路径」能否组合出完整跨域改写
 function handleUrlRewrite() {
-    console.log(`[probe] url: return full url ${URL_TARGET}`);
-    $done({ url: URL_TARGET });
+    const target = new URL(URL_TARGET);
+    const targetPath = `${target.pathname}${target.search}`;
+    console.log(`[probe] url+path: return url ${URL_TARGET} path ${targetPath}`);
+    $done({ url: URL_TARGET, path: targetPath });
 }
 
 // script-request-header：返回 path（路径+query，官方支持的形态）
 function handlePathRewrite() {
     console.log(`[probe] path: return path ${PATH_TARGET}`);
     $done({ path: PATH_TARGET });
+}
+
+// script-request-header：只改域名不改变量路径，配合 path 观察「分别改 host 与 path」
+function handleHostPathRewrite() {
+    const targetPath = '/anything/hostpath?probe=host-path-applied';
+    console.log(`[probe] host+path: return url https://www.httpbin.org${targetPath} path ${targetPath}`);
+    $done({ url: `https://www.httpbin.org${targetPath}`, path: targetPath });
 }
 
 // 请求阶段：把 QX 真实交给脚本的内容记录下来
@@ -99,6 +109,10 @@ switch (probe) {
         break;
     case 'path':
         if (!isResponsePhase) handlePathRewrite();
+        else $done({});
+        break;
+    case 'hostpath':
+        if (!isResponsePhase) handleHostPathRewrite();
         else $done({});
         break;
     case 'echo':
