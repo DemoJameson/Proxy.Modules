@@ -8,6 +8,7 @@
  * - /status:   响应体重写为 JSON result=ok（验证 script-response-body）
  * - /url:      script-request-header 返回 { url, path }（验证同时给 host 与 path 是否能完成完整跨域改写）
  * - /path:     script-request-header 返回 { path }（验证 path 是否生效）
+ * - /postbody: script-request-body 探测（能拿到请求体；验证可返回哪些字段）
  * - /anything/echo: 请求阶段记录 $request，响应阶段合并输出 JSON（验证 $prefs 跨阶段共享）
  */
 
@@ -20,6 +21,7 @@ function getProbeName() {
     if (path.startsWith('/status')) return 'status';
     if (path.startsWith('/url')) return 'url';
     if (path.startsWith('/path')) return 'path';
+    if (path.startsWith('/postbody')) return 'postbody';
     if (path.startsWith('/hostpath')) return 'hostpath';
     if (path.startsWith('/anything/echo')) return 'echo';
     return '';
@@ -44,6 +46,24 @@ function handleUrlRewrite() {
 function handlePathRewrite() {
     console.log(`[probe] path: return path ${PATH_TARGET}`);
     $done({ path: PATH_TARGET });
+}
+
+// script-request-body：能拿到 $request.body；同时返回 body/headers/path/url，看 QX 各应用哪些字段
+function handlePostBodyProbe() {
+    const originalBody = String($request.body ?? '');
+    const nextBody = JSON.stringify({
+        probe: 'request-body-rewritten',
+        originalBody,
+        timestamp: Date.now(),
+    });
+    const targetPath = '/anything/postbody-applied?probe=body-path-applied';
+    console.log(`[probe] postbody: body=${originalBody} return body=${nextBody} path=${targetPath} url=https://www.httpbin.org${targetPath}`);
+    $done({
+        body: nextBody,
+        headers: { ...($request.headers ?? {}), 'X-Probe-Body-Header': 'yes' },
+        path: targetPath,
+        url: `https://www.httpbin.org${targetPath}`,
+    });
 }
 
 // script-request-header：只改域名不改变量路径，配合 path 观察「分别改 host 与 path」
@@ -109,6 +129,10 @@ switch (probe) {
         break;
     case 'path':
         if (!isResponsePhase) handlePathRewrite();
+        else $done({});
+        break;
+    case 'postbody':
+        if (!isResponsePhase) handlePostBodyProbe();
         else $done({});
         break;
     case 'hostpath':

@@ -13,6 +13,9 @@
 # [P3b] script-request-header 分别改 host 与 path（url 换域名 + path 换路径）
 ^https?:\/\/httpbin\.org\/hostpath(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
+# [P5] script-request-body：POST 请求体改写 + headers/path/url 组合返回能力
+^https?:\/\/httpbin\.org\/postbody(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
+
 # [P3] script-request-header 返回 { path }（生效时路径变为 /anything/echo）
 ^https?:\/\/httpbin\.org\/path(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
