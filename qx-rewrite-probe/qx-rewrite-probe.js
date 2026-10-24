@@ -1,28 +1,30 @@
 /**
- * QX 重写能力探测脚本
+ * QX 重写能力探测脚本（公网版）
  *
- * QX 重写脚本没有 $argument，因此按 $request.url 的路径分流：
+ * 目标域名改为 httpbin.org，避开 QX 默认 excluded_routes 对局域网 192.168.x.x 的排除：
+ * 局域网目标既不抓包也不重写，会导致探测完全失效且 QX 无记录。
+ *
+ * 按 $request.url 的路径分流：
  * - /status:   响应体重写为 JSON result=ok（验证 script-response-body）
  * - /url:      script-request-header 返回 { url }（验证跨域 url 是否被支持/半套用）
  * - /path:     script-request-header 返回 { path }（验证 path 是否生效）
- * - /echo:     请求阶段记录 $request，响应阶段合并输出 JSON（验证 $prefs 跨阶段共享）
+ * - /anything/echo: 请求阶段记录 $request，响应阶段合并输出 JSON（验证 $prefs 跨阶段共享）
  */
 
-const TARGET_HOST = '192.168.50.3:18765';
 const ECHO_KEY = 'qx_probe_url_echo';
-const URL_TARGET = 'https://httpbin.org/get?probe=url';
-const PATH_TARGET = '/echo?probe=path-applied';
+const URL_TARGET = 'https://httpbin.org/get?probe=url-applied';
+const PATH_TARGET = '/anything/echo?probe=path-applied';
 
 function getProbeName() {
     const path = String($request?.url ?? '').replace(/^https?:\/\/[^/]+/, '');
     if (path.startsWith('/status')) return 'status';
     if (path.startsWith('/url')) return 'url';
     if (path.startsWith('/path')) return 'path';
-    if (path.startsWith('/echo')) return 'echo';
+    if (path.startsWith('/anything/echo')) return 'echo';
     return '';
 }
 
-// script-response-body：把服务器 404 JSON 改写成 result=ok 的 JSON
+// script-response-body：把 httpbin 的 404 改写成 result=ok 的 JSON
 function handleStatus() {
     console.log('[probe] status: rewrite response body to JSON');
     const body = JSON.stringify({ result: 'ok', probe: 'response-body', mode: 'status', timestamp: Date.now() });
