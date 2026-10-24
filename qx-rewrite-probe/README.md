@@ -5,7 +5,7 @@
 ## 文件
 
 - `qx-rewrite-probe.js`：探测脚本，按 URL 参数 `mode` 分流。
-- `qx-rewrite-probe.snippet`：QX 可导入的远程片段（脚本走 `codex/qx-rewrite-probe` 分支 raw 链接）。
+- `qx-rewrite-probe.snippet`：QX 可导入的远程片段（脚本走 `codex/qx-rewrite-probe` 分支的 `refs/heads/...` raw 链接）。
 - `qx-rewrite-probe.conf`：手动粘贴版（与 snippet 内容一致）。
 - `qx-rewrite-probe-server.mjs`：本机探测服务器。
 
@@ -28,5 +28,5 @@
 
 ## 备注
 
-- 探测脚本与配置托管在 `Proxy.Modules` 的 `codex/qx-rewrite-probe` 分支（未合入 main），snippet 里的 raw 链接指向该分支；若分支被删，改用 conf 手动粘贴并把脚本存到 QX 本地脚本目录。
+- 探测脚本与配置托管在 `Proxy.Modules` 的 `codex/qx-rewrite-probe` 分支（未合入 main），snippet 里的 raw 链接指向该分支；raw 链接必须带 `refs/heads/` 前缀；若分支被删，改用 conf 手动粘贴并把脚本存到 QX 本地脚本目录。
 - P2 唯一会出网的用例：url 生效时会真的访问 `httpbin.org/get?probe=url`，不想出网可在 conf 里把 target 改成任意你可控的地址。
