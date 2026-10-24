@@ -13,7 +13,6 @@ import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
 
 const TRAKT_TAMPER_REDIRECT_URI = "trakt://auth";
-const TRAKT_TAMPER_AUTHORIZE_URL = "https://auth.trakt.tv/oauth/authorize";
 const TRAKT_TAMPER_CALLBACK_HOST = "auth.trakt.tv";
 const TRAKT_TAMPER_CALLBACK_PATH = "/api/auth/oauth2/authorize";
 const TRAKT_TAMPER_STATE_TTL_MS = 5 * 60 * 1000;
@@ -772,8 +771,9 @@ async function handleOAuthRequest() {
     }
 
     const pathname = commonUtils.normalizePathname(context.url.pathname);
-    // QX 的 script-request-body 只能返回 body，trakt-api-key 需要并行的 script-request-header 规则补写；
-    // 那次调用拿不到请求体，只回 url/headers，绝不回 body，避免把真实请求体覆盖成残缺内容
+    // QX 的 script-request-body 实测可同时返回 {body, headers, path}，
+    // 但 body 相关 rewrite 在请求体为空时不会执行（官方 sample.conf），
+    // 参数放在 query 里的 token 请求因此仍需并行的 script-request-header 兜底。
     if (context.env.request.body === undefined || context.env.request.body === null) {
         return handleOAuthHeaderOnlyRequest(pathname);
     }
@@ -804,7 +804,7 @@ function handleOAuthHeaderOnlyRequest(pathname) {
             return { type: "passThrough" };
         }
     }
-    // QX 的 script-request-body 会丢弃返回的 url，把参数放在 query 里的 App 只能在这次调用里改写
+    // 这里只返回改写后的 url/headers；QX 下由 main.mjs 统一转成 path（跨域 url 会被半套用）
     const url = rewriteUrlSearchParams(context.env.request.url, (searchParams) => {
         if (searchParams.has("client_id")) {
             searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
@@ -863,7 +863,11 @@ async function handleAuthorizeRequest() {
         codeChallenge: pkce.challenge,
     });
 
-    const targetUrl = new URL(TRAKT_TAMPER_AUTHORIZE_URL);
+    // 授权页改写始终保留原域名（trakt.tv 或 auth.trakt.tv），只替换 query。
+    // QX 实机实测：两种请求脚本的跨域 url 都会被半套用（Host 换掉、path/query 保持原样），Trakt 因此回 403；
+    // 同域改写则稳定生效。三平台统一同域后既不需要跨域能力，Loon/Surge/Stash 也少一次跨域跳转。
+    // 授权完成后 Trakt 会在同域返回 /api/auth/oauth2/authorize，回调改写规则已覆盖。
+    const targetUrl = new URL(originalUrl);
     targetUrl.searchParams.set("response_type", responseType);
     targetUrl.searchParams.set("client_id", TRAKT_TAMPER_CLIENT_ID);
     targetUrl.searchParams.set("redirect_uri", TRAKT_TAMPER_REDIRECT_URI);
@@ -1099,7 +1103,6 @@ export {
     handleOAuthRequest,
     handleOAuthResponse,
     TRAKT_TAMPER_ACCESS_TOKEN_TTL_MS,
-    TRAKT_TAMPER_AUTHORIZE_URL,
     TRAKT_TAMPER_CALLBACK_HOST,
     TRAKT_TAMPER_CALLBACK_PATH,
     TRAKT_TAMPER_CLIENT_ID,

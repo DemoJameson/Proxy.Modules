@@ -251,13 +251,79 @@ function expandOptionalHostCharacters(hostPattern) {
     return [normalizePatternHost(`${prefix}${optionalCharacter}${suffix}`), normalizePatternHost(`${prefix}${suffix}`)];
 }
 
+// 展开 host 段里的 `(?:a|b|c)` 分组与可选的 `(?:x)?` 分组，供 MITM host 校验使用
+function splitTopLevelAlternatives(text) {
+    const alternatives = [];
+    let depth = 0;
+    let current = "";
+    for (const char of String(text)) {
+        if (char === "(") {
+            depth += 1;
+        } else if (char === ")") {
+            depth -= 1;
+        }
+        if (char === "|" && depth === 0) {
+            alternatives.push(current);
+            current = "";
+            continue;
+        }
+        current += char;
+    }
+    alternatives.push(current);
+    return alternatives;
+}
+
+function findMatchingGroupEnd(text, groupStart) {
+    let depth = 0;
+    for (let index = groupStart; index < text.length; index += 1) {
+        const char = text[index];
+        if (char === "(") {
+            depth += 1;
+        } else if (char === ")") {
+            depth -= 1;
+            if (depth === 0) {
+                return index;
+            }
+        }
+    }
+    return -1;
+}
+
+function expandHostPattern(hostPattern) {
+    const text = String(hostPattern ?? "");
+    const groupStart = text.indexOf("(?:");
+    if (groupStart < 0) {
+        return expandOptionalHostCharacters(text);
+    }
+
+    const groupEnd = findMatchingGroupEnd(text, groupStart);
+    if (groupEnd < 0) {
+        return [text];
+    }
+
+    const inner = text.slice(groupStart + 3, groupEnd);
+    const isOptional = text[groupEnd + 1] === "?";
+    const prefix = text.slice(0, groupStart);
+    const suffix = text.slice(groupEnd + (isOptional ? 2 : 1));
+    const expansions = [];
+
+    splitTopLevelAlternatives(inner).forEach((alternative) => {
+        expansions.push(...expandHostPattern(`${prefix}${alternative}${suffix}`));
+    });
+    if (isOptional) {
+        expansions.push(...expandHostPattern(`${prefix}${suffix}`));
+    }
+
+    return expansions;
+}
+
 function extractHostsFromPattern(pattern) {
     const match = String(pattern).match(/^\^https:\\\/\\\/(.+?)\\\//);
     if (!match) {
         return [];
     }
 
-    return expandOptionalHostCharacters(match[1]).map(normalizePatternHost);
+    return Array.from(new Set(expandHostPattern(match[1]).map(normalizePatternHost)));
 }
 
 function assertManifestIsValid(manifest) {
@@ -474,4 +540,15 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
     });
 }
 
-export { buildTrakt, formatBuildDateTimeText, formatBuildVersion, renderBoxjs, renderGeneratedTargets, renderPlugin, renderScriptBanner, renderSgmodule, renderSnippet };
+export {
+    buildTrakt,
+    extractHostsFromPattern,
+    formatBuildDateTimeText,
+    formatBuildVersion,
+    renderBoxjs,
+    renderGeneratedTargets,
+    renderPlugin,
+    renderScriptBanner,
+    renderSgmodule,
+    renderSnippet,
+};

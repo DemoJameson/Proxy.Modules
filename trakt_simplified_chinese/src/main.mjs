@@ -11,11 +11,35 @@ function isRequestPhase(env) {
     return typeof env.response === "undefined";
 }
 
+// QX 两种请求脚本（request-header / request-body）的 url 改写都不能安全跨域：
+// 同域 url 生效，跨域 url 会被半套用（Host 换掉但 path/query 保持原样，Trakt 直接回 403）。
+// path 是两者都可靠支持的字段（路径+query，不能换域名），因此 QX 统一转换成 path；
+// 同域改写可无损表达，跨域改写保持 url 并告警，由调用方避免这种场景。
+function buildRequestRewritePayload(env, normalized) {
+    const targetUrl = String(normalized.url ?? "");
+    if (!env.isQuanX()) {
+        return { url: targetUrl };
+    }
+
+    try {
+        const target = new URL(targetUrl);
+        const current = new URL(env.request.url);
+        if (target.origin === current.origin) {
+            return { path: `${target.pathname}${target.search}${target.hash}` };
+        }
+    } catch (error) {
+        env.log(`Trakt request rewrite url parse failed: ${error}`);
+    }
+
+    env.log(`Trakt request rewrite keeps cross-origin url on QX: ${targetUrl}`);
+    return { url: targetUrl };
+}
+
 function applyResult(env, result) {
     const normalized = result && typeof result === "object" ? result : { type: "passThrough" };
 
     if (normalized.type === "rewriteRequest") {
-        const payload = { url: normalized.url };
+        const payload = buildRequestRewritePayload(env, normalized);
         if (Object.hasOwn(normalized, "headers")) {
             payload.headers = normalized.headers;
         }
