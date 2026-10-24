@@ -2,7 +2,7 @@
 #!desc=QX 重写能力探测（公网版）：验证 script-request-header 是否支持 url/path、script-response-body 改响应体、请求响应脚本共享数据。目标 httpbin.org，避免 QX 默认排除局域网导致不抓包不重写。
 #!homepage=https://github.com/DemoJameson/Proxy.Modules
 #!author=DemoJameson
-#!updatedTime=2026-10-24 20:20:00
+#!updatedTime=2026-10-24 22:10:00
 
 # [P1] script-response-body 是否支持改响应体（原始响应为 404）
 ^https?:\/\/httpbin\.org\/status(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
@@ -10,20 +10,14 @@
 # [P2] script-request-header 同时返回 { url, path }（跨域目标 www.httpbin.org；验证 host+path 组合改写）
 ^https?:\/\/httpbin\.org\/url(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
-# [P3b] script-request-header 分别改 host 与 path（url 换域名 + path 换路径）
-^https?:\/\/httpbin\.org\/hostpath(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
+# [P3] script-request-header 返回 { path }（生效时路径变为 /anything/echo）
+^https?:\/\/httpbin\.org\/path(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
 # [P5] script-request-body：POST 请求体改写 + headers/path/url 组合返回能力
 ^https?:\/\/httpbin\.org\/postbody(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
 
-# [P3] script-request-header 返回 { path }（生效时路径变为 /anything/echo）
-^https?:\/\/httpbin\.org\/path(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
-
-# [P4] 请求阶段记录 $request 真实内容
-^https?:\/\/httpbin\.org\/anything\/echo(?:\?.*)?$ url script-request-header https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
-
-# [P4] 响应阶段回读请求阶段记录并输出 JSON
-^https?:\/\/httpbin\.org\/anything\/echo(?:\?.*)?$ url script-response-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-rewrite-probe.js
+# [P6] 条件式 body 改写（空 body 不注入 body，只改 headers+path）
+^https?:\/\/httpbin\.org\/cond(?:\?.*)?$ url script-request-body https://raw.githubusercontent.com/DemoJameson/Proxy.Modules/refs/heads/codex/qx-rewrite-probe/qx-rewrite-probe/qx-cond-probe.js
 
 # [mitm]
 hostname = httpbin.org, www.httpbin.org
