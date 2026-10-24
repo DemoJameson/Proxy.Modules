@@ -2,7 +2,7 @@
 /**
  * QX Rewrite Probe 本地探测服务器
  *
- * 用法：node qx-rewrite-probe-server.mjs  （监听 127.0.0.1:18765）
+ * 用法：node qx-rewrite-probe-server.mjs  （监听 192.168.50.3:18765）
  *
  * 路由：
  *   /status  返回 404（供 P1 验证 response-header 改状态码，成功时 QX 会改成 233）
@@ -57,8 +57,8 @@ const server = http.createServer((req, res) => {
     });
 });
 
-server.listen(PORT, "127.0.0.1", () => {
-    console.log(`probe server listening on http://127.0.0.1:${PORT}`);
+server.listen(PORT, "192.168.50.3", () => {
+    console.log(`probe server listening on http://192.168.50.3:${PORT}`);
     console.log("P1 GET /status   -> expect 233 (rewritten by script-response-header)");
     console.log("P2 GET /url      -> expect redirect to httpbin (if {url} is supported)");
     console.log("P3 GET /path     -> expect /echo?probe=path (if {path} is supported)");

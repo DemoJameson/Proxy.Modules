@@ -1,6 +1,6 @@
 # QX 重写能力实机探测套件
 
-验证目标：QX `script-request-header` 是否支持 `{url}`（以及是否半套用）、`{path}` 是否生效、`script-response-header` 能否改状态码、请求/响应脚本能否通过 `$prefs` 共享数据。所有探测默认只打本机 `127.0.0.1:18765`。
+验证目标：QX `script-request-header` 是否支持 `{url}`（以及是否半套用）、`{path}` 是否生效、`script-response-header` 能否改状态码、请求/响应脚本能否通过 `$prefs` 共享数据。所有探测默认只打局域网 `192.168.50.3:18765`。
 
 ## 文件
 
@@ -12,7 +12,7 @@
 ## 步骤
 
 1. 本机启动探测服务器：`node qx-rewrite-probe-server.mjs`
-2. 让 iPhone 与 Mac 同网段，`snippet/conf` 里的 `127.0.0.1` 全部替换成 Mac 局域网 IP（例如 `192.168.50.23`）。
+2. 让 iPhone 与 Mac 同网段；Mac 当前局域网 IP 为 `192.168.50.3`。
 3. QX 里导入 snippet（或把 conf 内容贴进重写区域）（探测目标是 HTTP，无需 MitM）。
 4. Safari 逐条访问下列地址，对照判读：
 
