@@ -22,7 +22,7 @@ translation:movies:123:hk
 - 读取使用一次 `MGET`；写入使用一次 `MSET`。同一 locale 内允许 last-write-wins，不同 locale 不会互相覆盖。
 - 所有 key 去掉 `trakt:` 前缀，连字符改为冒号。
 - CDN 响应缓存：全部请求条目命中且状态均为 `FOUND` 时使用 `FOUND`，缓存 7 天；全部条目命中但含 `PARTIAL_FOUND` 时使用 `PARTIAL_FOUND`，缓存时长与 `NOT_FOUND` 相同；任意条目缺失或为 `NOT_FOUND` 时使用 `NOT_FOUND`。浏览器缓存分别为 300/120 秒，CDN 同时带 `stale-while-revalidate`。
-- `translation-overrides` 的 CDN 基础缓存为 5 分钟，并允许 5 分钟 `stale-while-revalidate`；管理端修改最坏约 10 分钟生效。
+- `translation-overrides` 的 CDN 基础缓存为 5 分钟，并允许 5 分钟 `stale-while-revalidate`；脚本端按 **24 小时**节流刷新（`TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS`），因此管理端修改在单个客户端上最坏约 24 小时生效；浏览器/CDN 那 10 分钟只决定客户端到点后拿到的是哪一版快照，不是生效上限。
 - 所有面向脚本的接口（`translations`、`images`、`credits`、`people-names`、`comment-translations`、`list-translations`、`translation-overrides`、`apikeys`）都由根目录 `middleware.js` 在 CDN 缓存前校验 `User-Agent` 需含 `TraktSimplifiedChinese/<数字版本>`，否则直接返回带 `Cache-Control: no-store` 的 `403`。合法请求不按 UA 分区，继续共享 CDN 缓存，避免每次构建版本更新产生新的缓存变体；接口函数内保留同规则作为兜底。管理后台仍只使用 `ADMIN_TOKEN` Bearer 鉴权，`/api/redirect` 保持公开。
 - 所有缓存响应条目都会返回 `expiresAt`（毫秒时间戳）：翻译和图片 `FOUND` 365 天、翻译 `PARTIAL_FOUND` 30 天、`NOT_FOUND` 1 天；图片 partial 30 天、not found 3 天；评论/片单 90 天；credits 30 天；人名按来源 90/30 天、TMDB 未命中 7 天。后端**不再发送 `EXPIRE`/`PTTL`**，读取时过滤已过期条目，脚本使用同一个 `expiresAt` 设置本地缓存有效期。
 

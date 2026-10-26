@@ -26,6 +26,7 @@ import {
     createUnifiedPersistentData,
     createWrappedMovieBody,
     parseTamperAuthorization,
+    parseUnifiedCache,
     readFixture,
     runRequestCase,
     runResponseCase,
@@ -1798,6 +1799,79 @@ test("handleMediaDetail 只含 tw/hk 的覆盖条目在刷新周期内仍生效"
         false,
         "刷新周期内应直接使用本地覆盖缓存",
     );
+});
+
+test("translationOverrides 本地缓存 24 小时内不刷新", async () => {
+    const { result, httpLogs } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMovieTranslationCache()),
+            translationOverrides: {
+                fetchedAt: Date.now() - 23 * 60 * 60 * 1000,
+                shows: {},
+                movies: {
+                    123: createTranslationOverrideEntry({ title: "本地 23 小时标题" }),
+                },
+                episodes: {},
+            },
+        }),
+        argument: {
+            backendBaseUrl: "https://backend.example",
+        },
+        httpGetMocks: {
+            "https://backend.example/api/trakt/translation-overrides": createBackendTranslationOverridesBody(
+                "movies",
+                "123",
+                createTranslationOverrideEntry({ title: "远端标题" }),
+            ),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "本地 23 小时标题");
+    assert.equal(
+        httpLogs.some((item) => item.method === "GET" && item.url === "https://backend.example/api/trakt/translation-overrides"),
+        false,
+        "24 小时节流内应直接使用本地覆盖缓存",
+    );
+});
+
+test("translationOverrides 本地缓存超过 24 小时后重新拉取远端", async () => {
+    const { result, httpLogs, persistentData } = await runResponseCase({
+        url: "https://api.trakt.tv/movies/123",
+        body: readFixture("movie-detail.json"),
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: JSON.parse(createMovieTranslationCache()),
+            translationOverrides: {
+                fetchedAt: Date.now() - 25 * 60 * 60 * 1000,
+                shows: {},
+                movies: {
+                    123: createTranslationOverrideEntry({ title: "本地 25 小时标题" }),
+                },
+                episodes: {},
+            },
+        }),
+        argument: {
+            backendBaseUrl: "https://backend.example",
+        },
+        httpGetMocks: {
+            "https://backend.example/api/trakt/translation-overrides": createBackendTranslationOverridesBody(
+                "movies",
+                "123",
+                createTranslationOverrideEntry({ title: "远端刷新标题" }),
+            ),
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    assert.equal(payload.title, "远端刷新标题");
+    assert.equal(
+        httpLogs.some((item) => item.method === "GET" && item.url === "https://backend.example/api/trakt/translation-overrides"),
+        true,
+        "超过刷新周期后应重新拉取",
+    );
+    assert.ok(parseUnifiedCache(persistentData).persistent.translationOverrides.fetchedAt > Date.now() - 60 * 1000, "刷新后应写回新的 fetchedAt");
 });
 
 test("debugMode=disableLocal 时禁用本地缓存，每次从远端获取 translationOverrides", async () => {

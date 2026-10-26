@@ -19,7 +19,8 @@ module.exports = async (req, res) => {
             return;
         }
 
-        // 修订表是全局单 URL，CDN 基础缓存 5 分钟，并允许 5 分钟 stale-while-revalidate；管理端修改最坏约 10 分钟生效。
+        // 修订表是全局单 URL，CDN 基础缓存 5 分钟，并允许 5 分钟 stale-while-revalidate；
+        // 脚本侧另有 24 小时刷新节流（TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS），管理端修改最坏约 24 小时生效。
         res.setHeader("Cache-Control", "public, max-age=60");
         res.setHeader("CDN-Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");
         res.setHeader("Vercel-CDN-Cache-Control", "public, s-maxage=300, stale-while-revalidate=300");

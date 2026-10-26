@@ -52,7 +52,8 @@ function resolvePreferredTranslationLanguage(locale = chineseLocale.resolveChine
 }
 const BACKEND_FETCH_MIN_REFS = 3;
 const BACKEND_WRITE_BATCH_SIZE = 50;
-const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+// 修订表是全局单份快照，客户端按 24 小时节流刷新，避免每次观看都打后端
+const TRANSLATION_OVERRIDES_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const TRANSLATION_NOT_FOUND_TTL_MS = 1 * 24 * 60 * 60 * 1000;
 const BULK_API_MAX_IDS_PER_CATEGORY = 100;
