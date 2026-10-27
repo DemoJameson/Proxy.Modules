@@ -2142,6 +2142,8 @@ test("response phase migrated conditions 逐条覆盖且互斥", () => {
         ["wrapperMedia.popularNext", "https://api.trakt.tv/media/popular/next"],
         ["users.hidden.section", "https://apiz.trakt.tv/users/hidden/dropped?extended=full,images&limit=15&page=1"],
         ["users.history.mediaTyped", "https://api.trakt.tv/users/me/history/shows?extended=full&limit=50&page=2"],
+        ["users.following.activities", "https://apiz.trakt.tv/users/me/following/activities?extended=full,images&limit=250&page=1"],
+        ["users.following.activities", "https://apiz.trakt.tv/v3/users/me/following/activities?extended=full,images&limit=250&page=1"],
         ["calendars.media", "https://apiz.trakt.tv/calendars/my/media/2026-09-13/9?extended=full"],
         ["calendars.media", "https://api.trakt.tv/calendars/all/movies/2026-01-01/7"],
         ["calendars.media", "https://api.trakt.tv/calendars/all/dvd/2026-01-01/7"],

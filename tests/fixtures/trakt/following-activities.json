@@ -1,0 +1,43 @@
+[
+    {
+        "type": "episode",
+        "show": {
+            "title": "Modern Family",
+            "overview": "The Pritchett-Dunphy-Tucker clan is a wonderfully large and blended family.",
+            "ids": {
+                "trakt": 1412
+            }
+        },
+        "episode": {
+            "season": 6,
+            "number": 16,
+            "title": "Connection Lost",
+            "overview": "Claire does some online snooping that causes drama with the rest of the family."
+        }
+    },
+    {
+        "type": "episode",
+        "show": {
+            "ids": {
+                "trakt": 30932
+            }
+        },
+        "episode": {
+            "season": 1,
+            "number": 35,
+            "title": "Episode 35",
+            "overview": null
+        }
+    },
+    {
+        "type": "movie",
+        "movie": {
+            "title": "Verity",
+            "overview": "Lowen Ashleigh, hired to ghostwrite for best-selling author Verity Crawford, uncovers Verity's autobiographical notes.",
+            "tagline": "There is no light where we're going.",
+            "ids": {
+                "trakt": 1043653
+            }
+        }
+    }
+]

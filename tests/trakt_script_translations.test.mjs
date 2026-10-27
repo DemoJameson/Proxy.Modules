@@ -982,6 +982,61 @@ test("后端批量翻译即使保存时被本地缓存限额裁剪，当前响�
     assert.equal(storedTranslationCache["translation:movies:101:cn"], undefined);
 });
 
+// 官方 App 的 following activities 走 apiz 的 /v3/ 带前缀路径，路由需要显式兼容该前缀，
+// 否则整段 passThrough、完全没有翻译。
+test("/v3 前缀的 following activities 会翻译 show/episode/movie 并写回翻译缓存", async () => {
+    const { result, persistentData, httpLogs } = await runResponseCase({
+        url: "https://apiz.trakt.tv/v3/users/me/following/activities?extended=full,images&limit=250&page=1",
+        body: readFixture("following-activities.json"),
+        argument: {
+            posterImageMode: "default",
+        },
+        persistentData: createUnifiedPersistentData({
+            traktTranslation: {
+                "translation:shows:1412:cn": createMediaTranslationEntry({
+                    translation: { title: "摩登家庭", overview: "摩登家庭简介", tagline: "摩登家庭标语" },
+                }),
+                "translation:episodes:1412:6:16:cn": createMediaTranslationEntry({
+                    translation: { title: "失去联络", overview: "克莱尔上网窥探" },
+                }),
+            },
+        }),
+        httpGetMocks: {
+            "https://apiz.trakt.tv/movies/1043653/translations/zh?extended=all": JSON.stringify([
+                {
+                    language: "zh",
+                    country: "cn",
+                    title: "真相",
+                    overview: "电影中文简介",
+                    tagline: "无光之处",
+                },
+            ]),
+            "https://apiz.trakt.tv/shows/30932/translations/zh?extended=all": "[]",
+            "https://apiz.trakt.tv/shows/30932/seasons/1/episodes/35/translations/zh?extended=all": "[]",
+        },
+    });
+
+    const payload = JSON.parse(result.body);
+    const episodeItem = payload.find((item) => item.episode?.season === 6 && item.episode?.number === 16);
+    assert.equal(episodeItem.show.title, "摩登家庭");
+    assert.equal(episodeItem.show.overview, "摩登家庭简介");
+    assert.equal(episodeItem.episode.title, "失去联络");
+    assert.equal(episodeItem.episode.overview, "克莱尔上网窥探");
+
+    // 无翻译的占位集名仍会本地化为「第 N 集」
+    const placeholderItem = payload.find((item) => item.episode?.number === 35);
+    assert.equal(placeholderItem.episode.title, "第35集");
+
+    const movieItem = payload.find((item) => item.type === "movie");
+    assert.equal(movieItem.movie.title, "真相");
+    assert.equal(movieItem.movie.overview, "电影中文简介");
+    assert.equal(movieItem.movie.tagline, "无光之处");
+
+    const translationCache = parseUnifiedCache(persistentData).trakt.translation;
+    assert.equal(translationCache["translation:movies:1043653:cn"].translation.title, "真相");
+    assert.ok(hasRequestedUrl(httpLogs, "https://apiz.trakt.tv/movies/1043653/translations/zh?extended=all"), "直查 Trakt 翻译应走 apiz 源站");
+});
+
 test("posterImageMode=default 时 movie/show 不请求也不替换中文图片", async () => {
     const original = createMovieWithPoster();
     const { result, persistentData, httpLogs } = await runResponseCase({

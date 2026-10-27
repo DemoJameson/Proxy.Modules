@@ -85,7 +85,7 @@ function createResponsePhaseRoutes() {
             id: "search.recentById",
             handler: mediaTranslationHandler.handleWrapperMediaList,
         }),
-        createRoute({ pattern: /^users\/[^/]+\/following\/activities$/i, id: "users.following.activities", handler: mediaTranslationHandler.handleWrapperMediaList }),
+        createRoute({ pattern: /^(?:v3\/)?users\/[^/]+\/following\/activities$/i, id: "users.following.activities", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({ pattern: /^users\/[^/]+\/lists\/\d+\/items$/i, id: "users.listItems.all", handler: mediaTranslationHandler.handleWrapperMediaList }),
         createRoute({
             pattern: /^users\/[^/]+\/lists\/\d+\/items\/(movie|show|season|episode)(,(movie|show|season|episode))*$/i,
