@@ -12,7 +12,8 @@ const TAMPER_AUTHORIZE_LANG_BY_LOCALE = {
 import * as commonUtils from "../utils/common.mjs";
 import * as pkceUtils from "../utils/pkce.mjs";
 
-const TRAKT_TAMPER_REDIRECT_URI = "trakt://auth";
+// Trakt 官方 App 已改用 Universal Link 回调；旧的自定义 scheme 仅作为兼容兜底保留
+const TRAKT_TAMPER_REDIRECT_URI = "https://app.trakt.tv/callback/app/trakt";
 const TRAKT_TAMPER_CALLBACK_HOST = "auth.trakt.tv";
 const TRAKT_TAMPER_CALLBACK_PATH = "/api/auth/oauth2/authorize";
 const TRAKT_TAMPER_STATE_TTL_MS = 5 * 60 * 1000;
@@ -626,6 +627,11 @@ function isAlreadyTamperedAuthorizeUrl(url) {
 function isTraktAuthCallbackLocation(location) {
     try {
         const url = new URL(location);
+        const appCallbackUrl = new URL(TRAKT_TAMPER_REDIRECT_URI);
+        if (url.origin === appCallbackUrl.origin && url.pathname === appCallbackUrl.pathname) {
+            return true;
+        }
+        // 兼容仍在使用旧版 trakt://auth 回调的授权流程
         return url.protocol === "trakt:" && String(url.hostname).toLowerCase() === "auth";
     } catch {
         return String(location ?? "").startsWith("trakt://auth");

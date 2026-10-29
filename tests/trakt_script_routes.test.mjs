@@ -2617,7 +2617,8 @@ test("篡改应用授权每次授权生成不同的 PKCE verifier，并保留多
     assert.equal(secondCallbackRun.result.headers.Location, "second://callback?code=second-code&state=second");
 });
 
-test("篡改应用授权会把 Trakt 回调还原为第三方 App 的 redirect_uri", async () => {
+test("篡改应用授权会把 Trakt 官方 App 的 Universal Link 回调还原为第三方 App 的 redirect_uri", async () => {
+    assert.equal(TRAKT_TAMPER_REDIRECT_URI, "https://app.trakt.tv/callback/app/trakt");
     const redirectUri = "thirdparty://oauth/callback";
     const authorizeRun = await runRequestCase({
         url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=old-client&redirect_uri=${encodeURIComponent(redirectUri)}&state=original-state`,
@@ -2631,7 +2632,7 @@ test("篡改应用授权会把 Trakt 回调还原为第三方 App 的 redirect_u
         url: createTamperCallbackUrl(targetUrl, "callback-code"),
         responseStatus: 302,
         responseHeaders: {
-            location: "trakt://auth?code=callback-code",
+            location: "https://app.trakt.tv/callback/app/trakt?code=callback-code",
         },
         persistentData: authorizeRun.persistentData,
         argument: {
