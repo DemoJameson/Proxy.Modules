@@ -1,42 +1,42 @@
 name: Dependabot auto-merge
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
+    pull_request:
+        types: [opened, reopened, synchronize]
 
 permissions:
-  contents: write
-  pull-requests: write
+    contents: write
+    pull-requests: write
 
 jobs:
-  auto-merge:
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    auto-merge:
+        if: github.event.pull_request.user.login == 'dependabot[bot]'
+        runs-on: ubuntu-latest
+        timeout-minutes: 5
 
-    steps:
-      - name: Fetch Dependabot metadata
-        id: metadata
-        uses: dependabot/fetch-metadata@v3
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+        steps:
+            - name: Fetch Dependabot metadata
+              id: metadata
+              uses: dependabot/fetch-metadata@v3
+              with:
+                  github-token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Enable auto-merge for public repositories
-        if: |
-          github.event.repository.private == false &&
-          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-           steps.metadata.outputs.update-type == 'version-update:semver-minor')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr merge --auto --squash "$PR_URL"
+            - name: Enable auto-merge for public repositories
+              if: |
+                  github.event.repository.private == false &&
+                  (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+                   steps.metadata.outputs.update-type == 'version-update:semver-minor')
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  PR_URL: ${{ github.event.pull_request.html_url }}
+              run: gh pr merge --auto --squash "$PR_URL"
 
-      - name: Mark private Dependabot PR for CI merge
-        if: |
-          github.event.repository.private == true &&
-          (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
-           steps.metadata.outputs.update-type == 'version-update:semver-minor')
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-        run: gh pr edit "$PR_URL" --add-label "dependabot-automerge"
+            - name: Mark private Dependabot PR for CI merge
+              if: |
+                  github.event.repository.private == true &&
+                  (steps.metadata.outputs.update-type == 'version-update:semver-patch' ||
+                   steps.metadata.outputs.update-type == 'version-update:semver-minor')
+              env:
+                  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  PR_URL: ${{ github.event.pull_request.html_url }}
+              run: gh pr edit "$PR_URL" --add-label "dependabot-automerge"

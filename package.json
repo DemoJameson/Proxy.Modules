@@ -14,7 +14,7 @@
         "test:trakt:all": "node scripts/run-all-trakt-tests.mjs"
     },
     "devDependencies": {
-        "@biomejs/biome": "^2.4.14",
+        "@biomejs/biome": "^2.6.3",
         "@nsnanocat/url": "^1.2.6",
         "esbuild": "^0.28.2",
         "ioredis": "^5.11.1",
