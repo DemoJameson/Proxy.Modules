@@ -434,7 +434,8 @@
                 border-bottom: 1px solid var(--line);
             }
 
-            label {
+            label,
+            .compare-label {
                 display: block;
                 margin: 0 0 6px;
                 color: var(--muted);
@@ -700,7 +701,7 @@
                                 title="打开 Trakt"
                                 hidden
                             >
-                                <img class="trakt-icon" src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/trakt.svg" alt="" />
+                                <img class="trakt-icon" src="https://cdn.jsdelivr.net/gh/homarr-labs/dashboard-icons/svg/trakt.svg" alt="Trakt" />
                             </a>
                         </span>
                     </div>
@@ -739,7 +740,7 @@
 
                             <div class="compare">
                                 <div>
-                                    <label>当前翻译</label>
+                                    <span class="compare-label">当前翻译</span>
                                     <pre id="effectiveView"></pre>
                                 </div>
                             </div>
