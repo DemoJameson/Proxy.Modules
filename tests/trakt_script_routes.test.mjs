@@ -2362,7 +2362,7 @@ test("篡改应用授权默认关闭时 OAuth 请求直接放行", async () => {
     assert.equal(Object.keys(authorizeRun.result).length, 0);
 });
 
-test("不计入授权数量限制的 Client（Infuse/Showly/Rippple）授权请求不会被篡改", async () => {
+test("不计入授权数量限制的 Client（Infuse/Showly/Rippple/EplayerX）授权请求不会被篡改", async () => {
     for (const clientId of TRAKT_TAMPER_EXEMPT_CLIENT_IDS) {
         const authorizeRun = await runRequestCase({
             url: `https://trakt.tv/oauth/authorize?response_type=code&client_id=${clientId}&redirect_uri=thirdparty%3A%2F%2Foauth%2Fcallback&state=original-state`,
