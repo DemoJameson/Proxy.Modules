@@ -1,21 +1,95 @@
-MIT License
+Proxy.Modules Source-Available License 1.0
 
-Copyright (c) 2026 DemoJameson
+Copyright (c) 2026 DemoJameson. All rights reserved.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+This License applies to versions of the Software first distributed with this
+License on or after October 30, 2026. Versions distributed before that date
+remain governed by the license under which they were originally distributed,
+including the MIT License. This License does not revoke any rights already
+granted for an earlier version.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+1. Definitions
+
+"Software" means the source code, scripts, configuration files, generated
+artifacts, documentation, and other materials in this repository, excluding
+third-party components.
+
+"Configuration" includes .plugin, .sgmodule, .snippet, boxjs.json, module
+manifests, metadata, headers, generated equivalents, and any similar files.
+
+"Original Author" means DemoJameson.
+
+"Original Author Name" means the name "DemoJameson" and any associated
+copyright notice.
+
+"EplayerX" means the player product, application, service, or distribution
+marketed or distributed under the name "EplayerX", including its author or
+authors, maintainers, owners, operators, affiliates, employees, contractors,
+agents, and anyone acting on their behalf.
+
+"EplayerX User" means any person or entity that installs, accesses, uses,
+subscribes to, or receives EplayerX, directly or indirectly.
+
+2. Limited License
+
+Subject to this License, the Original Author grants you a worldwide,
+royalty-free, non-exclusive license to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, provided that:
+
+  a. you are not an EplayerX author, maintainer, owner, operator, affiliate,
+     employee, contractor, agent, or anyone acting on their behalf;
+
+  b. you are not an EplayerX User;
+
+  c. you comply with the attribution requirements in Section 3; and
+
+  d. every copy or substantial portion of the Software that you distribute
+     includes this License and imposes these restrictions on its recipients.
+
+No license or permission is granted to any EplayerX author, maintainer, owner,
+operator, affiliate, employee, contractor, agent, or anyone acting on their
+behalf to use, copy, modify, merge, publish, distribute, sublicense, sell, or
+incorporate the source code or any substantial portion of the Software.
+
+No license or permission is granted to any EplayerX User to download, install,
+configure, run, or use the scripts or Software.
+
+3. Attribution and Configuration Notices
+
+You must not remove, obscure, replace, or alter the Original Author Name or
+the copyright notice in any Configuration, source file, generated artifact,
+documentation, or distribution.
+
+You may add your own name or the names of other contributors, provided that
+the Original Author Name remains present and identifiable. If a Configuration
+format supports only one author field, you must either include the Original
+Author Name in that field together with any added name, or add the Original
+Author Name in an adjacent comment or metadata field. You must not replace the
+Original Author Name with another name.
+
+4. Conditions and Termination
+
+This License terminates automatically if you breach any of its terms. Upon
+termination, you must stop using and distributing the Software. Termination
+does not affect the Original Author's right to enforce this License or to seek
+other remedies for a breach.
+
+All rights not expressly granted by this License are reserved by the Original
+Author. The Original Author may grant a separate written exception to any
+person or entity, including an EplayerX author or EplayerX User.
+
+5. Third-Party Components
+
+Third-party components included in or used by the Software remain subject to
+their own licenses. This License does not grant any rights to those components
+beyond the rights granted by their respective licenses.
+
+6. Disclaimer of Warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+FITNESS FOR A PARTICULAR PURPOSE, AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
