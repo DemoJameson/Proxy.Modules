@@ -21,6 +21,6 @@
         "opencc-js": "^1.4.2"
     },
     "dependencies": {
-        "@vercel/functions": "^3.10.4"
+        "@vercel/functions": "^3.10.5"
     }
 }
