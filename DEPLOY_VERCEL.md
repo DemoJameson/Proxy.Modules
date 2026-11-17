@@ -230,7 +230,7 @@ https://your-project.vercel.app/admin
 
 也兼容直接访问 `https://your-project.vercel.app/admin.html`。
 
-页面标题为 `Trakt 翻译管理后台`。进入页面时需要输入 `ADMIN_TOKEN`；如果未配置或输入错误，管理接口会拒绝访问。
+页面标题为 `Trakt 翻译管理后台`。进入页面时需要输入 `ADMIN_TOKEN`；如果未配置或输入错误，管理接口会拒绝访问。令牌只保留在当前页面内存中，刷新或重新打开页面后需要重新输入，不会写入 `localStorage`。
 
 管理页面支持：
 
